@@ -101,6 +101,7 @@
                 All other accounts are unaffected — launch them manually whenever you like.
               </p>
               <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
+              <div id="dropCountdown" class="drop-countdown" style="display:none;"></div>
             </div>
           </div>
 
@@ -209,7 +210,26 @@
           <div class="actions" style="margin-top:8px;">
             <button id="clearStatusBtn" class="btn btn-dark" style="flex:none; font-size:11px;">Clear live status</button>
           </div>
+          <div class="actions" style="margin-top:8px;">
+            <button id="exportConfigBtn" class="btn btn-dark" style="font-size:11px;">⬇ Export config</button>
+            <label class="btn btn-dark" style="font-size:11px; text-align:center; cursor:pointer; flex:1;" title="Import a previously exported config JSON">
+              ⬆ Import config
+              <input type="file" id="importFileInput" accept=".json" style="display:none;">
+            </label>
+          </div>
           <div id="statusMsg" class="status-msg"></div>
+        </section>
+
+        <!-- Drop History -->
+        <section class="card" id="historyCard">
+          <div class="card-head">
+            <h2>DROP HISTORY</h2>
+            <span class="card-tag">RECENT RUNS</span>
+          </div>
+          <div id="historyList"></div>
+          <div class="actions" style="margin-top:10px;">
+            <button id="clearHistoryBtn" class="btn btn-dark" style="flex:none; font-size:11px;">Clear history</button>
+          </div>
         </section>
 
         <!-- Profile Vault -->

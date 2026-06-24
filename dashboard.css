@@ -272,6 +272,38 @@ select.inp { cursor: pointer; }
   flex-shrink: 0; white-space: nowrap;
 }
 
+/* ── Drop countdown ── */
+.drop-countdown {
+  text-align: center;
+  font-family: 'Barlow Condensed', monospace;
+  font-size: 26px; font-weight: 900; letter-spacing: 4px;
+  color: var(--orange); margin-top: 12px; padding: 8px 0;
+}
+.drop-countdown.passed {
+  font-size: 13px; letter-spacing: 1px; color: var(--grey2);
+}
+
+/* ── Drop history ── */
+.history-entry {
+  padding: 10px 0; border-bottom: 1px solid #1e1e1e;
+}
+.history-entry:last-child { border-bottom: none; }
+.history-date {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px; color: var(--grey2); margin-bottom: 3px;
+}
+.history-url {
+  font-size: 12px; color: var(--grey);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-bottom: 5px;
+}
+.history-results { display: flex; flex-wrap: wrap; gap: 5px; }
+.history-chip {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px; font-weight: 700; letter-spacing: .5px;
+  padding: 2px 8px; border-radius: 10px; border: 1px solid currentColor;
+}
+
 /* ── Profile Vault card ── */
 .vault-row {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;

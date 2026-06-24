@@ -19,6 +19,7 @@ const NATIVE_HOST = "com.snkrs.launcher";
 const DASH_KEY    = "snkrsDashboard";
 const VAULT_KEY   = "snkrsVault";
 const STATUS_KEY  = "snkrsStatus";
+const HISTORY_KEY = "snkrsHistory";
 
 const FOOTWEAR_SIZES = ["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","12.5","13","13.5","14"];
 const APPAREL_SIZES  = ["XS","S","M","L","XL","XXL"];
@@ -33,6 +34,8 @@ const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
+let currentRunId  = null;      // ID of the most recently launched history entry
+let countdownTimer = null;
 
 // ── Random helpers ────────────────────────────────────────────
 function shuffle(arr) {
@@ -177,6 +180,7 @@ const STATUS_META = {
   pending: { text: "⏳ PENDING", color: "#fa8c00" },
   polling: { text: "🔄 POLLING", color: "#888888" },
   closed:  { text: "⛔ CLOSED",  color: "#666666" },
+  limit:   { text: "⚠ LIMIT",   color: "#fa5400" },
 };
 
 function updateStatusBadge(profileDir) {
@@ -202,17 +206,28 @@ function refreshAllBadges() {
   accounts.forEach(a => { if (a.profileDir) updateStatusBadge(a.profileDir); });
 }
 
-// ── Storage change listener (live status + vault sync) ─────────
+// ── Storage change listener (live status + vault + history sync) ─
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes[STATUS_KEY]) {
-    liveStatuses = changes[STATUS_KEY].newValue || {};
+    const newStatuses = changes[STATUS_KEY].newValue || {};
+    // Propagate newly resolved statuses into the current history run
+    Object.entries(newStatuses).forEach(([profileDir, info]) => {
+      if (info && ["win", "loss", "entered", "limit"].includes(info.code)) {
+        const old = liveStatuses[profileDir];
+        if (!old || old.code !== info.code) updateHistoryResult(profileDir, info.code);
+      }
+    });
+    liveStatuses = newStatuses;
     refreshAllBadges();
   }
   if (changes[VAULT_KEY]) {
     savedVault = changes[VAULT_KEY].newValue || [];
     renderVault();
     refreshVaultSelects();
+  }
+  if (changes[HISTORY_KEY]) {
+    renderHistory(changes[HISTORY_KEY].newValue || []);
   }
 });
 
@@ -309,6 +324,169 @@ function renderVault() {
     return;
   }
   savedVault.forEach(vp => list.appendChild(buildVaultRow(vp)));
+}
+
+// ── Drop countdown timer ──────────────────────────────────────
+function startCountdown() {
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  function tick() {
+    const el = $("dropCountdown");
+    if (!el) return;
+    if (!scheduleIsEnabled()) { el.style.display = "none"; return; }
+    const v = $("dropTime") && $("dropTime").value;
+    if (!v) { el.style.display = "none"; return; }
+    const target = new Date(v).getTime();
+    if (isNaN(target)) { el.style.display = "none"; return; }
+    el.style.display = "";
+    const diff = target - Date.now();
+    if (diff <= 0) {
+      el.className = "drop-countdown passed";
+      el.textContent = "DROP TIME HAS PASSED";
+      return;
+    }
+    el.className = "drop-countdown";
+    const s = Math.floor(diff / 1000);
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sc = s % 60;
+    const p = n => String(n).padStart(2, "0");
+    el.textContent = d > 0 ? `${d}d ${p(h)}:${p(m)}:${p(sc)}` : `${p(h)}:${p(m)}:${p(sc)}`;
+  }
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
+// ── Config export / import ────────────────────────────────────
+function exportConfig() {
+  const json = JSON.stringify(buildConfig(), null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `snkrs-config-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importConfig(file) {
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const config = JSON.parse(e.target.result);
+      applyConfigToUI(config);
+      renderAccounts();
+      renderVault();
+      renderDropUI();
+      startCountdown();
+      await saveAll(false);
+      flashTemp($("statusMsg"), "✓ Config imported and saved.", "#1db954");
+    } catch (err) {
+      flashTemp($("statusMsg"), "Import failed: " + err.message, "#e03131", 5000);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ── Drop history log ──────────────────────────────────────────
+async function appendHistory(config) {
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  const history = Array.isArray(data[HISTORY_KEY]) ? data[HISTORY_KEY] : [];
+  const launched = (config.accounts || []).filter(a => a.profileDir && a.size);
+  const entry = {
+    id: uid(),
+    date: Date.now(),
+    multiProduct: !!config.multiProduct,
+    url: config.drop?.url || "",
+    keyword: config.drop?.keyword || "",
+    products: (config.products || []).map(p => ({ url: p.url, keyword: p.keyword })),
+    accounts: launched.map(a => ({
+      label: a.label || a.profileDir,
+      profileDir: a.profileDir,
+      size: a.size,
+      url: a.url || "",
+    })),
+    results: {},
+  };
+  currentRunId = entry.id;
+  history.unshift(entry);
+  if (history.length > 20) history.length = 20;
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
+  renderHistory(history);
+}
+
+async function updateHistoryResult(profileDir, code) {
+  if (!currentRunId) return;
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  const history = Array.isArray(data[HISTORY_KEY]) ? data[HISTORY_KEY] : [];
+  const entry = history.find(e => e.id === currentRunId);
+  if (!entry) return;
+  entry.results[profileDir] = code;
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
+}
+
+async function loadHistory() {
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  renderHistory(Array.isArray(data[HISTORY_KEY]) ? data[HISTORY_KEY] : []);
+}
+
+function renderHistory(history) {
+  const list = $("historyList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!history || !history.length) {
+    list.appendChild(el("p", { className: "hint" }, "No drops launched yet. History appears here after each run."));
+    return;
+  }
+  history.forEach(entry => list.appendChild(buildHistoryEntry(entry)));
+}
+
+function buildHistoryEntry(entry) {
+  const div = document.createElement("div");
+  div.className = "history-entry";
+
+  const date = new Date(entry.date);
+  const pad = n => String(n).padStart(2, "0");
+  const dateStr = date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                + " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
+
+  const dateEl = document.createElement("div");
+  dateEl.className = "history-date";
+  dateEl.textContent = dateStr;
+
+  const urlEl = document.createElement("div");
+  urlEl.className = "history-url";
+  if (entry.multiProduct && entry.products?.length) {
+    urlEl.textContent = `${entry.products.length} products · ${entry.accounts.length} accounts`;
+  } else {
+    urlEl.textContent = (entry.keyword ? entry.keyword + " · " : "") + (shortUrl(entry.url) || "—");
+    urlEl.title = entry.url || "";
+  }
+
+  const resultsDiv = document.createElement("div");
+  resultsDiv.className = "history-results";
+  const r = entry.results || {};
+  const total   = entry.accounts?.length || 0;
+  const wins    = Object.values(r).filter(v => v === "win").length;
+  const losses  = Object.values(r).filter(v => v === "loss").length;
+  const entered = Object.values(r).filter(v => v === "entered").length;
+  const limits  = Object.values(r).filter(v => v === "limit").length;
+
+  const chip = (text, color) => {
+    const s = document.createElement("span");
+    s.className = "history-chip";
+    s.style.color = color;
+    s.textContent = text;
+    resultsDiv.appendChild(s);
+  };
+  chip(`${total} accounts`, "#888");
+  if (wins)    chip(`🏆 ${wins} won`, "#1db954");
+  if (losses)  chip(`😔 ${losses} lost`, "#e03131");
+  if (entered) chip(`✓ ${entered} entered`, "#4a90e2");
+  if (limits)  chip(`⚠ ${limits} limit`, "#fa5400");
+
+  div.append(dateEl, urlEl, resultsDiv);
+  return div;
 }
 
 // ── Native host helper (extension pages can call this directly) ─
@@ -740,7 +918,8 @@ async function launchAll() {
       : "No accounts ready (need Drop URL, a profile + size).", "#fa5400");
     return;
   }
-  await saveAll(true);
+  const config = await saveAll(true);
+  await appendHistory(config);
   flash($("statusMsg"), `Launching ${ready.length} accounts…`, "#888");
   let okCount = 0, lastErr = "";
   for (const acct of ready) {
@@ -849,8 +1028,9 @@ function applyConfigToUI(cfg) {
 document.addEventListener("DOMContentLoaded", async () => {
   attachCardFormatters($("cardNumber"), $("cardExpiry"), $("cardCvv"));
 
-  // 1) Load saved vault profiles and live status snapshots immediately.
+  // 1) Load saved vault profiles, live status snapshots, and history.
   await loadVault();
+  await loadHistory();
   const storedStatus = await chrome.storage.local.get(STATUS_KEY);
   liveStatuses = storedStatus[STATUS_KEY] || {};
 
@@ -873,6 +1053,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   renderAccounts();
   renderVault();
   renderDropUI();
+  startCountdown();
 
   // ── Buttons ──
   $("addAccountBtn").addEventListener("click", () => {
@@ -882,11 +1063,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("scheduleEnabled").addEventListener("change", () => {
     const on = $("scheduleEnabled").checked;
     $("schedulePanel").style.display = on ? "" : "none";
-    // Disarming immediately when toggled off so the old alarm doesn't linger
-    if (!on) {
+    if (on) {
+      startCountdown();
+    } else {
+      // Hide countdown and disarm alarm immediately
+      const el = $("dropCountdown"); if (el) el.style.display = "none";
       chrome.runtime.sendMessage({ type: "arm_drop_launch", config: buildConfig() }, updateScheduleStatus);
     }
   });
+  $("dropTime").addEventListener("input", startCountdown);
   $("multiProductToggle").addEventListener("change", () => {
     multiProduct = $("multiProductToggle").checked;
     applyMultiUI();
@@ -916,4 +1101,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     flashTemp($("statusMsg"), "Live status cleared.", "#888");
   });
   $("setupLink").addEventListener("click", (e) => { e.preventDefault(); $("setupHelp").style.display = "block"; $("setupHelp").scrollIntoView({ behavior: "smooth" }); });
+
+  $("exportConfigBtn").addEventListener("click", exportConfig);
+  $("importFileInput").addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) importConfig(file);
+    e.target.value = ""; // reset so the same file can be re-imported
+  });
+  $("clearHistoryBtn").addEventListener("click", async () => {
+    currentRunId = null;
+    await chrome.storage.local.remove(HISTORY_KEY);
+    renderHistory([]);
+    flashTemp($("statusMsg"), "History cleared.", "#888");
+  });
 });

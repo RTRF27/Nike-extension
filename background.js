@@ -262,6 +262,8 @@ function parseStatusFromLog(message) {
     return "polling";
   if (m.includes("draw ended") || m.includes("draw closed") || m.includes("sold out"))
     return "closed";
+  if (m.includes("entry_limit_exceeded") || (m.includes("limit") && m.includes("exceeded")))
+    return "limit";
   return null;
 }
 
