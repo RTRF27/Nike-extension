@@ -1,0 +1,9 @@
+{
+  "name": "com.snkrs.launcher",
+  "description": "Nike SNKRS Bot profile launcher / shared-config host",
+  "path": "REPLACED_BY_INSTALLER",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://kopeofjmoelfkdcmfcenkedojhoaolfb/"
+  ]
+}

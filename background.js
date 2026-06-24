@@ -125,6 +125,63 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onStartup.addListener(() => { scheduleDropAlarm(); });
 chrome.runtime.onInstalled.addListener(() => { scheduleDropAlarm(); });
 
+// ── Native messaging host bridge ──────────────────────────────
+// The native host ("com.snkrs.launcher") is the only thing that can open
+// OTHER Chrome profiles and read/write the shared config file. The
+// dashboard talks to it directly; content scripts can't use native
+// messaging, so the boot bootstrap routes through us here.
+const NATIVE_HOST = "com.snkrs.launcher";
+
+function nativeSend(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST, message, (resp) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message, hostMissing: true });
+          return;
+        }
+        resolve(resp || { ok: false, error: "Empty response from native host." });
+      });
+    } catch (e) {
+      resolve({ ok: false, error: String(e && e.message || e), hostMissing: true });
+    }
+  });
+}
+
+// Build the per-profile settings object that the existing content scripts
+// already understand, from the central shared config + this account's row.
+function buildSettingsForProfile(config, profileDir) {
+  if (!config) return null;
+  const drop = config.drop || {};
+  const opts = config.options || {};
+  const central = config.card || {};
+  const accounts = Array.isArray(config.accounts) ? config.accounts : [];
+  const account = accounts.find(a => a && a.profileDir === profileDir);
+  if (!account) return null;
+
+  // Per-account card overrides the central card only when it has a number.
+  const acctCard = account.card || {};
+  const card = (acctCard.cardNumber && acctCard.cardNumber.trim()) ? acctCard : central;
+
+  return {
+    enabled:             opts.enabled ?? true,
+    testMode:            opts.testMode ?? false,
+    preferredSize:       account.size || "",
+    preferredSizeType:   account.sizeType || "footwear",
+    productKeyword:      drop.keyword || "",
+    profileLabel:        account.label || profileDir,
+    logWebhook:          account.logWebhook || opts.logWebhook || "",
+    alertWebhook:        account.alertWebhook || opts.alertWebhook || "",
+    cardName:            card.cardName   || "",
+    cardNumber:          card.cardNumber || "",
+    cardExpiry:          card.cardExpiry || "",
+    cardCvv:             card.cardCvv    || "",
+    statusPollerEnabled: opts.statusPollerEnabled ?? true,
+    pollerIntervalMin:   opts.pollerIntervalMin ?? 3,
+    multiEnabled:        false,
+  };
+}
+
 // ── Per-tab card fill cache ───────────────────────────────────
 // Stores the last card_fill_done result per tabId so gs-content-script
 // can retrieve it even if it arms the listener after the signal was sent.
@@ -132,6 +189,31 @@ const cardFillCache = {};
 
 // ── Message handler ──────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // Boot bootstrap (content script) asks us to fetch this profile's central
+  // config from the native host and hand back ready-to-store settings.
+  if (msg.type === "boot_fetch_settings") {
+    nativeSend({ cmd: "getConfig" }).then((resp) => {
+      if (!resp || !resp.ok) {
+        sendResponse({ ok: false, error: resp && resp.error || "host error" });
+        return;
+      }
+      const settings = buildSettingsForProfile(resp.config, msg.profileDir);
+      if (!settings) {
+        sendResponse({ ok: false, error: "No matching account in shared config." });
+        return;
+      }
+      sendResponse({ ok: true, settings });
+    });
+    return true;
+  }
+
+  // Generic relay so extension pages (the dashboard) could also reach the
+  // host through us if they prefer. {cmd} is forwarded verbatim.
+  if (msg.type === "native") {
+    nativeSend(msg.payload || {}).then(sendResponse);
+    return true;
+  }
+
   // gs-content-script polls this to check if card was already filled
   if (msg.type === "get_card_fill_cache") {
     const tabId = sender?.tab?.id;

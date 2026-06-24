@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SNKRS Bot · Drop Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+  <div class="page">
+
+    <!-- Header -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="nike-swoosh">
+          <svg viewBox="0 0 24 9" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-label">SNKRS</span>
+          <span class="brand-sub">DROP DASHBOARD · MULTI-ACCOUNT</span>
+        </div>
+      </div>
+      <div class="host-pill" id="hostPill" title="Native launcher status">
+        <span class="host-dot" id="hostDot"></span>
+        <span id="hostText">CHECKING LAUNCHER…</span>
+      </div>
+    </header>
+
+    <!-- Launcher-missing banner -->
+    <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
+      <strong>Launcher not connected.</strong>
+      The dashboard can still edit central config, but the
+      <em>Launch</em> buttons need the one-time native host install.
+      <a href="#" id="setupLink">How to install →</a>
+    </div>
+
+    <div class="grid">
+
+      <!-- ░░ LEFT COLUMN ░░ -->
+      <div class="col">
+
+        <!-- Central Drop -->
+        <section class="card">
+          <div class="card-head">
+            <h2>DROP DETAILS</h2>
+            <span class="card-tag">EVERYONE COPS THE SAME DROP</span>
+          </div>
+          <p class="hint">Set the product once here. Every launched account opens this exact URL at drop time.</p>
+
+          <label class="lbl" for="dropUrl">Product URL</label>
+          <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
+
+          <label class="lbl" for="dropKeyword" style="margin-top:10px;">Product keyword / SKU <span class="muted">(optional — only for collection pages)</span></label>
+          <input type="text" id="dropKeyword" class="inp" placeholder="e.g. Anthem Jacket  or  IM3219-100">
+
+          <div class="row" style="margin-top:10px;">
+            <div class="grow">
+              <label class="lbl" for="dropTime">Auto-open time <span class="muted">(optional)</span></label>
+              <input type="datetime-local" id="dropTime" class="inp">
+            </div>
+          </div>
+          <p class="hint" style="margin-top:8px;">Leave the time blank to launch manually with the buttons below. If set, accounts that you’ve marked “auto” open themselves at that time (requires the launcher running).</p>
+        </section>
+
+        <!-- Central Card -->
+        <section class="card">
+          <div class="card-head">
+            <h2>PAYMENT CARD <span class="lock">🔒</span></h2>
+            <span class="card-tag">APPLIED TO ALL ACCOUNTS</span>
+          </div>
+          <p class="hint">This is the shared “generic” card every account autofills at checkout — unless an account sets its own below. Stored locally in <code>~/.snkrs-bot/config.json</code>.</p>
+
+          <label class="lbl" for="cardName">Name on Card</label>
+          <input type="text" id="cardName" class="inp" placeholder="REAGAN TANG" autocomplete="off">
+
+          <label class="lbl" for="cardNumber" style="margin-top:10px;">Card Number</label>
+          <input type="text" id="cardNumber" class="inp mono" placeholder="1234 5678 9012 3456" maxlength="19" autocomplete="off" inputmode="numeric">
+
+          <div class="row" style="margin-top:10px;">
+            <div class="grow">
+              <label class="lbl" for="cardExpiry">Expiry</label>
+              <input type="text" id="cardExpiry" class="inp" placeholder="MM/YY" maxlength="5" autocomplete="off" inputmode="numeric">
+            </div>
+            <div class="grow">
+              <label class="lbl" for="cardCvv">CVV</label>
+              <input type="password" id="cardCvv" class="inp" placeholder="•••" maxlength="4" autocomplete="off" inputmode="numeric">
+            </div>
+          </div>
+          <p class="warn">⚠ Card data is stored unencrypted on this computer. Don’t use on shared machines.</p>
+        </section>
+
+        <!-- Global options -->
+        <section class="card">
+          <div class="card-head"><h2>GLOBAL OPTIONS</h2></div>
+
+          <div class="toggle">
+            <div>
+              <div class="t-label">Bot Enabled</div>
+              <div class="t-hint">Auto-select size and submit on every launched account</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="optEnabled" checked><span class="track"></span></label>
+          </div>
+          <div class="toggle">
+            <div>
+              <div class="t-label">Test Mode</div>
+              <div class="t-hint">Selects size + fills card but never submits (for every account)</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="optTestMode"><span class="track"></span></label>
+          </div>
+          <div class="toggle">
+            <div>
+              <div class="t-label">Status Poller</div>
+              <div class="t-hint">Refresh for the result and alert on win</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="optPoller" checked><span class="track"></span></label>
+          </div>
+          <div class="row" style="margin-top:10px; align-items:center;">
+            <label class="lbl" style="margin:0;">Refresh every</label>
+            <input type="number" id="optPollerMin" class="inp" style="width:64px; text-align:center;" min="1" max="60" value="3">
+            <span class="lbl" style="margin:0;">min</span>
+          </div>
+
+          <label class="lbl" for="logWebhook" style="margin-top:12px;">Discord Log Webhook <span class="muted">(shared)</span></label>
+          <input type="text" id="logWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+          <label class="lbl" for="alertWebhook" style="margin-top:10px;">Discord Alert Webhook <span class="badge">@here</span></label>
+          <input type="text" id="alertWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+        </section>
+
+      </div>
+
+      <!-- ░░ RIGHT COLUMN ░░ -->
+      <div class="col">
+
+        <section class="card">
+          <div class="card-head">
+            <h2>ACCOUNTS</h2>
+            <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
+          </div>
+          <p class="hint">
+            Each account maps to a Chrome profile. Pick the profile, set the size that account wants,
+            then hit <em>Launch</em> to open that profile straight onto the drop — no manual opening.
+            <span id="profileSourceNote"></span>
+          </p>
+
+          <div id="accountsList"></div>
+
+          <button id="addAccountBtn" class="btn btn-ghost" style="margin-top:12px;">+ ADD ACCOUNT</button>
+        </section>
+
+        <section class="card sticky-actions">
+          <div class="actions">
+            <button id="saveBtn" class="btn btn-light">SAVE CENTRAL CONFIG</button>
+            <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL ACCOUNTS</button>
+          </div>
+          <div class="actions" style="margin-top:8px;">
+            <button id="testHostBtn" class="btn btn-dark">Test launcher connection</button>
+            <button id="refreshProfilesBtn" class="btn btn-dark">Reload Chrome profiles</button>
+          </div>
+          <div id="statusMsg" class="status-msg"></div>
+        </section>
+
+      </div>
+    </div>
+
+    <!-- Setup help (toggled) -->
+    <section class="card help" id="setupHelp" style="display:none;">
+      <div class="card-head"><h2>ONE-TIME LAUNCHER SETUP</h2></div>
+      <ol class="steps">
+        <li>Make sure <strong>Node.js</strong> is installed (<code>node --version</code> in a terminal).</li>
+        <li>In the <code>native-host/</code> folder of this extension, run the installer:
+          <ul>
+            <li><strong>Windows:</strong> double-click <code>install-windows.bat</code></li>
+            <li><strong>macOS / Linux:</strong> <code>./install-unix.sh</code> in a terminal</li>
+          </ul>
+        </li>
+        <li>Install/reload this extension in <code>chrome://extensions</code> (Developer mode → Load unpacked). Its ID is fixed to <code>kopeofjmoelfkdcmfcenkedojhoaolfb</code>.</li>
+        <li>Come back here and click <em>Test launcher connection</em>. It should turn green.</li>
+      </ol>
+      <p class="hint">Why a helper? Chrome extensions are sandboxed and cannot open other Chrome profiles by themselves. This tiny local helper is what actually runs <code>chrome --profile-directory=…</code> for each account.</p>
+    </section>
+
+  </div>
+
+  <!-- Account row template -->
+  <template id="accountRowTpl">
+    <div class="acct">
+      <div class="acct-grid">
+        <div class="acct-field grow">
+          <label class="lbl">Label</label>
+          <input type="text" class="inp f-label" placeholder="e.g. Reagan">
+        </div>
+        <div class="acct-field grow">
+          <label class="lbl">Chrome Profile</label>
+          <select class="inp f-profile"></select>
+          <input type="text" class="inp f-profile-manual" placeholder="Profile directory e.g. Profile 1" style="display:none; margin-top:6px;">
+        </div>
+        <div class="acct-field">
+          <label class="lbl">Size</label>
+          <select class="inp f-size"></select>
+        </div>
+      </div>
+
+      <div class="acct-foot">
+        <label class="chk">
+          <input type="checkbox" class="f-owncard"> own card
+        </label>
+        <div class="acct-actions">
+          <button class="btn btn-mini btn-dark f-copycmd" title="Copy the terminal command to open this profile">⌘ copy cmd</button>
+          <button class="btn btn-mini btn-accent f-launch">🚀 launch</button>
+          <button class="btn btn-mini btn-danger f-remove" title="Remove account">✕</button>
+        </div>
+      </div>
+
+      <div class="owncard-panel" style="display:none;">
+        <div class="row">
+          <div class="grow">
+            <label class="lbl">Name on Card</label>
+            <input type="text" class="inp oc-name" autocomplete="off">
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <div class="grow">
+            <label class="lbl">Card Number</label>
+            <input type="text" class="inp mono oc-number" maxlength="19" autocomplete="off" inputmode="numeric">
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <div class="grow">
+            <label class="lbl">Expiry</label>
+            <input type="text" class="inp oc-expiry" placeholder="MM/YY" maxlength="5" autocomplete="off" inputmode="numeric">
+          </div>
+          <div class="grow">
+            <label class="lbl">CVV</label>
+            <input type="password" class="inp oc-cvv" maxlength="4" autocomplete="off" inputmode="numeric">
+          </div>
+        </div>
+      </div>
+
+      <div class="acct-msg"></div>
+    </div>
+  </template>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>

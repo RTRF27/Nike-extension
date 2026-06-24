@@ -1,6 +1,21 @@
 document.addEventListener("DOMContentLoaded", async () => {
   const KEY = "snkrsBotSettings";
 
+  // ── Open the multi-account drop dashboard in its own tab ──────
+  const openDashboardBtn = document.getElementById("openDashboardBtn");
+  if (openDashboardBtn) {
+    openDashboardBtn.addEventListener("click", () => {
+      const url = chrome.runtime.getURL("dashboard.html");
+      chrome.tabs.query({ url }, (tabs) => {
+        if (tabs && tabs.length) {
+          chrome.tabs.update(tabs[0].id, { active: true });
+        } else {
+          chrome.tabs.create({ url });
+        }
+      });
+    });
+  }
+
   // ── Preview helper ────────────────────────────────────────────
   // Sends a preview request to the active Nike launch tab, which highlights
   // the exact product card + size button the bot would target. Shows the
