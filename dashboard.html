@@ -83,8 +83,10 @@
             <div class="grow">
               <label class="lbl" for="dropTime">Auto-open time <span class="muted">(optional)</span></label>
               <input type="datetime-local" id="dropTime" class="inp">
+              <p class="hint" style="margin-top:6px; margin-bottom:0;">Accounts with ⏰ <strong>auto</strong> toggled on will open automatically at this time. Leave blank to launch manually.</p>
             </div>
           </div>
+          <div id="scheduleStatus" class="schedule-status" style="display:none;"></div>
 
           <button id="randomAssignBtn" class="btn btn-light" style="margin-top:14px; width:100%;">🎲 RANDOMLY ASSIGN TO ACCOUNTS</button>
           <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
@@ -254,9 +256,14 @@
       </div>
 
       <div class="acct-foot">
-        <label class="chk">
-          <input type="checkbox" class="f-owncard"> own card
-        </label>
+        <div class="acct-toggles">
+          <label class="chk">
+            <input type="checkbox" class="f-owncard"> own card
+          </label>
+          <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
+            <input type="checkbox" class="f-autolaunch"> ⏰ auto
+          </label>
+        </div>
         <div class="acct-actions">
           <button class="btn btn-mini btn-dark f-copycmd" title="Copy the terminal command to open this profile">⌘ copy cmd</button>
           <button class="btn btn-mini btn-dark f-save-vault" title="Save this account to Profile Vault as a reusable template">💾 vault</button>

@@ -119,11 +119,61 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === DROP_ALARM_NAME) {
     openDropTabs("scheduled alarm");
   }
+  if (alarm.name === "snkrsDashLaunchAlarm") {
+    autoDashLaunch();
+  }
 });
 
 // Re-arm the alarm when the service worker starts (e.g. browser restart).
-chrome.runtime.onStartup.addListener(() => { scheduleDropAlarm(); });
-chrome.runtime.onInstalled.addListener(() => { scheduleDropAlarm(); });
+chrome.runtime.onStartup.addListener(() => {
+  scheduleDropAlarm();
+  rescheduleDashLaunch();
+});
+chrome.runtime.onInstalled.addListener(() => {
+  scheduleDropAlarm();
+});
+
+// ── Dashboard auto-launch (per-account scheduled open) ────────
+const DASH_LAUNCH_ALARM  = "snkrsDashLaunchAlarm";
+const DASH_LAUNCH_STORE  = "snkrsDashLaunchConfig";
+
+function buildBootUrlFromConfig(cfg, acct) {
+  let url = (cfg.multiProduct && acct.url) ? acct.url : ((cfg.drop && cfg.drop.url) || "");
+  if (!url) return null;
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  const sep = url.includes("#") ? "&" : "#";
+  return `${url}${sep}snkrsBoot=${encodeURIComponent(acct.profileDir)}`;
+}
+
+async function autoDashLaunch() {
+  const data = await chrome.storage.local.get(DASH_LAUNCH_STORE);
+  const cfg = data[DASH_LAUNCH_STORE];
+  if (!cfg) return;
+  const autoAccts = (cfg.accounts || []).filter(a => a.autoLaunch && a.profileDir && a.size);
+  if (!autoAccts.length) return;
+  // One-shot — clear so it doesn't refire on restart
+  await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+  sendLog(`⏰ Auto-launch time reached — opening ${autoAccts.length} account(s).`);
+  for (const acct of autoAccts) {
+    const url = buildBootUrlFromConfig(cfg, acct);
+    if (!url) continue;
+    await nativeSend({ cmd: "launch", profileDir: acct.profileDir, url });
+    await new Promise(r => setTimeout(r, 500));
+  }
+}
+
+async function rescheduleDashLaunch() {
+  const data = await chrome.storage.local.get(DASH_LAUNCH_STORE);
+  const cfg = data[DASH_LAUNCH_STORE];
+  if (!cfg) return;
+  const when = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
+  if (isNaN(when) || when <= Date.now()) {
+    // Time already passed while browser was closed — launch immediately
+    autoDashLaunch();
+    return;
+  }
+  chrome.alarms.create(DASH_LAUNCH_ALARM, { when });
+}
 
 // ── Native messaging host bridge ──────────────────────────────
 // The native host ("com.snkrs.launcher") is the only thing that can open
@@ -275,6 +325,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Manual trigger: open the slot tabs right now (for testing).
   if (msg.type === "open_drop_now") {
     openDropTabs("manual trigger").then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  // Dashboard arms (or cancels) the auto-launch alarm for per-account scheduled opens.
+  if (msg.type === "arm_drop_launch") {
+    const cfg = msg.config;
+    chrome.alarms.clear(DASH_LAUNCH_ALARM, async () => {
+      const autoAccts = (cfg?.accounts || []).filter(a => a.autoLaunch && a.profileDir && a.size);
+      const timeISO   = cfg?.drop?.dropTimeISO;
+      if (!timeISO || !autoAccts.length) {
+        await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+        sendResponse({ ok: true, armed: false });
+        return;
+      }
+      const when = Date.parse(timeISO);
+      if (isNaN(when)) {
+        sendResponse({ ok: true, armed: false, reason: "invalid date" });
+        return;
+      }
+      if (when <= Date.now()) {
+        // Time already passed — launch immediately
+        await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
+        autoDashLaunch();
+        sendResponse({ ok: true, armed: false, reason: "time already passed — launching now" });
+        return;
+      }
+      await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
+      chrome.alarms.create(DASH_LAUNCH_ALARM, { when });
+      sendResponse({ ok: true, armed: true, when, count: autoAccts.length });
+    });
     return true;
   }
 

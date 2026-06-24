@@ -190,6 +190,19 @@ select.inp { cursor: pointer; }
 .steps { margin: 0 0 4px 18px; line-height: 1.9; font-size: 13px; }
 .steps ul { margin: 4px 0 4px 18px; }
 
+/* ── Schedule status banner ── */
+.schedule-status {
+  margin-top: 10px; padding: 10px 14px; border-radius: 8px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px; font-weight: 700; letter-spacing: .5px;
+  line-height: 1.5;
+}
+.schedule-status.armed   { background: #0f2a1a; border: 1px solid #1f5a32; color: #7fd99a; }
+.schedule-status.disarmed{ background: #1a1a1a; border: 1px solid #2a2a2a; color: #888; }
+
+/* ── Account foot: two toggle groups ── */
+.acct-toggles { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+
 /* ── Size pool (chip multi-select) ── */
 .size-pool {
   display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;

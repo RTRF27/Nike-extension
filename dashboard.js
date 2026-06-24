@@ -418,25 +418,27 @@ function buildAccountRow(acct) {
   const tpl = $("accountRowTpl").content.cloneNode(true);
   const row = tpl.querySelector(".acct");
 
-  const labelEl    = row.querySelector(".f-label");
-  const profileEl  = row.querySelector(".f-profile");
-  const manualEl   = row.querySelector(".f-profile-manual");
-  const sizeEl     = row.querySelector(".f-size");
-  const ownCardEl  = row.querySelector(".f-owncard");
-  const panel      = row.querySelector(".owncard-panel");
-  const ocName     = row.querySelector(".oc-name");
-  const ocNumber   = row.querySelector(".oc-number");
-  const ocExpiry   = row.querySelector(".oc-expiry");
-  const ocCvv      = row.querySelector(".oc-cvv");
-  const msgEl      = row.querySelector(".acct-msg");
-  const vaultSel   = row.querySelector(".f-vault-select");
-  const assignedEl = row.querySelector(".f-assigned");
-  const statusRow  = row.querySelector(".f-status-row");
-  const statusBadge= row.querySelector(".f-status-badge");
-  const statusText = row.querySelector(".f-status-text");
-  const statusTime = row.querySelector(".f-status-time");
+  const labelEl     = row.querySelector(".f-label");
+  const profileEl   = row.querySelector(".f-profile");
+  const manualEl    = row.querySelector(".f-profile-manual");
+  const sizeEl      = row.querySelector(".f-size");
+  const ownCardEl   = row.querySelector(".f-owncard");
+  const autoEl      = row.querySelector(".f-autolaunch");
+  const panel       = row.querySelector(".owncard-panel");
+  const ocName      = row.querySelector(".oc-name");
+  const ocNumber    = row.querySelector(".oc-number");
+  const ocExpiry    = row.querySelector(".oc-expiry");
+  const ocCvv       = row.querySelector(".oc-cvv");
+  const msgEl       = row.querySelector(".acct-msg");
+  const vaultSel    = row.querySelector(".f-vault-select");
+  const assignedEl  = row.querySelector(".f-assigned");
+  const statusRow   = row.querySelector(".f-status-row");
+  const statusBadge = row.querySelector(".f-status-badge");
+  const statusText  = row.querySelector(".f-status-text");
+  const statusTime  = row.querySelector(".f-status-time");
 
   labelEl.value = acct.label || "";
+  autoEl.checked = !!acct.autoLaunch;
   fillSizeSelect(sizeEl, acct.size, acct.sizeType);
   fillProfileSelect(profileEl, manualEl, acct.profileDir);
   fillVaultSelect(vaultSel);
@@ -492,6 +494,7 @@ function buildAccountRow(acct) {
     acct.ownCard = ownCardEl.checked;
     panel.style.display = acct.ownCard ? "block" : "none";
   });
+  autoEl.addEventListener("change", () => { acct.autoLaunch = autoEl.checked; });
   const syncOwnCard = () => {
     acct.card = {
       cardName: ocName.value.trim(),
@@ -625,6 +628,7 @@ function buildConfig() {
       sizeType: a.sizeType || "footwear",
       url: a.url || "",
       keyword: a.keyword || "",
+      autoLaunch: !!a.autoLaunch,
       card: a.ownCard ? (a.card || {}) : null,
     })),
   };
@@ -634,6 +638,10 @@ function buildConfig() {
 async function saveAll(silent) {
   const config = buildConfig();
   await chrome.storage.local.set({ [DASH_KEY]: config });
+
+  // Arm (or disarm) the background auto-launch alarm
+  const armResp = await new Promise(res => chrome.runtime.sendMessage({ type: "arm_drop_launch", config }, res));
+  updateScheduleStatus(armResp);
 
   const resp = await hostSend({ cmd: "setConfig", config });
   if (!silent) {
@@ -646,6 +654,30 @@ async function saveAll(silent) {
     }
   }
   return config;
+}
+
+function updateScheduleStatus(armResp) {
+  const el = $("scheduleStatus");
+  if (!el) return;
+  if (!armResp) { el.style.display = "none"; return; }
+  if (armResp.armed) {
+    const d = new Date(armResp.when);
+    const hm = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+    el.className = "schedule-status armed";
+    el.style.display = "";
+    el.textContent = `⏰ Scheduled — ${armResp.count} account(s) will auto-open on ${date} at ${hm}`;
+  } else if (armResp.reason === "time already passed — launching now") {
+    el.className = "schedule-status armed";
+    el.style.display = "";
+    el.textContent = "⏰ Time already passed — launching now…";
+  } else {
+    el.className = "schedule-status disarmed";
+    el.style.display = "";
+    el.textContent = armResp.reason
+      ? `Not scheduled (${armResp.reason})`
+      : "Not scheduled — set a time and toggle ⏰ auto on at least one account to arm.";
+  }
 }
 
 // ── Launch a single account into its Chrome profile ───────────
@@ -801,6 +833,7 @@ function applyConfigToUI(cfg) {
     sizeType: a.sizeType || "footwear",
     url: a.url || "",
     keyword: a.keyword || "",
+    autoLaunch: !!a.autoLaunch,
     ownCard: !!a.card,
     card: a.card || null,
   }));
