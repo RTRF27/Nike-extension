@@ -190,6 +190,46 @@ select.inp { cursor: pointer; }
 .steps { margin: 0 0 4px 18px; line-height: 1.9; font-size: 13px; }
 .steps ul { margin: 4px 0 4px 18px; }
 
+/* ── Size pool (chip multi-select) ── */
+.size-pool {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px;
+}
+.size-pool-grouplbl {
+  width: 100%;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  color: var(--grey2); margin: 6px 0 2px;
+}
+.size-chip {
+  padding: 5px 9px; border: 1px solid var(--line); border-radius: 6px;
+  font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
+  background: var(--panel2); color: var(--grey); transition: all .12s;
+}
+.size-chip:hover { border-color: var(--grey2); color: var(--white); }
+.size-chip.on { background: var(--orange); color: #fff; border-color: var(--orange); }
+
+/* ── Product rows (multi-product) ── */
+.product {
+  background: var(--panel2); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px; margin-bottom: 10px;
+}
+.product-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.product-idx {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px; font-weight: 900; letter-spacing: 2px; color: var(--orange);
+}
+
+/* ── Assigned-product note (account row) ── */
+.acct-assigned {
+  margin-top: 10px; padding: 6px 10px;
+  background: #101a10; border: 1px solid #1f3a1f; border-radius: 6px;
+  font-size: 11px; color: #7fd99a;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
 /* ── Vault import bar (top of each account row) ── */
 .acct-vault-bar { margin-bottom: 10px; }
 .acct-vault-bar .inp { font-size: 12px; color: var(--grey); }

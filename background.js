@@ -163,12 +163,16 @@ function buildSettingsForProfile(config, profileDir) {
   const acctCard = account.card || {};
   const card = (acctCard.cardNumber && acctCard.cardNumber.trim()) ? acctCard : central;
 
+  // In multi-product mode each account carries its own SKU/keyword; otherwise
+  // they all share the central one.
+  const keyword = (config.multiProduct && account.keyword) ? account.keyword : (drop.keyword || "");
+
   return {
     enabled:             opts.enabled ?? true,
     testMode:            opts.testMode ?? false,
     preferredSize:       account.size || "",
     preferredSizeType:   account.sizeType || "footwear",
-    productKeyword:      drop.keyword || "",
+    productKeyword:      keyword,
     profileLabel:        account.label || profileDir,
     logWebhook:          account.logWebhook || opts.logWebhook || "",
     alertWebhook:        account.alertWebhook || opts.alertWebhook || "",

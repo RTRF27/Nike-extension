@@ -30,6 +30,145 @@ let savedVault = [];           // [{id,label,profileDir,size,sizeType,card}]
 let liveStatuses = {};         // {profileDir: {code,message,time}}
 const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl}
 
+let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
+let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
+let multiProduct = false;
+
+// ── Random helpers ────────────────────────────────────────────
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+// Deal n picks from a pool, evenly + randomly (each size used about equally).
+function dealFromPool(pool, n) {
+  if (!pool.length || n <= 0) return [];
+  const bag = [];
+  while (bag.length < n) bag.push(...shuffle(pool));
+  return shuffle(bag).slice(0, n);
+}
+function newProduct() { return { id: uid(), url: "", keyword: "", sizePool: [] }; }
+
+// ── Size-pool chip multi-select ───────────────────────────────
+function buildSizePool(container, selected, onChange) {
+  container.innerHTML = "";
+  const sel = new Set(selected || []);
+  const addGroup = (label, sizes, type, fmt) => {
+    container.appendChild(el("div", { className: "size-pool-grouplbl" }, label));
+    sizes.forEach(s => {
+      const val = `${type}:${s}`;
+      const chip = el("div", { className: "size-chip" + (sel.has(val) ? " on" : "") }, fmt(s));
+      chip.addEventListener("click", () => {
+        if (sel.has(val)) { sel.delete(val); chip.classList.remove("on"); }
+        else { sel.add(val); chip.classList.add("on"); }
+        onChange(Array.from(sel));
+      });
+      container.appendChild(chip);
+    });
+  };
+  addGroup("Footwear (US M)", FOOTWEAR_SIZES, "footwear", s => "US " + s);
+  addGroup("Apparel", APPAREL_SIZES, "apparel", s => s);
+}
+
+// ── Multi-product UI ──────────────────────────────────────────
+function applyMultiUI() {
+  $("singleProductPanel").style.display = multiProduct ? "none" : "";
+  $("multiProductPanel").style.display  = multiProduct ? "" : "none";
+  $("dropModeTag").textContent = multiProduct ? "ACCOUNTS SPLIT ACROSS PRODUCTS" : "EVERYONE COPS THE SAME DROP";
+  if (multiProduct && !products.length) { products.push(newProduct()); }
+  renderProducts();
+}
+
+function renderProducts() {
+  const list = $("productsList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!products.length) {
+    list.appendChild(el("p", { className: "hint" }, "No products yet — add one."));
+    return;
+  }
+  products.forEach((p, i) => list.appendChild(buildProductRow(p, i)));
+}
+
+function buildProductRow(p, idx) {
+  const row = $("productRowTpl").content.cloneNode(true).querySelector(".product");
+  row.querySelector(".product-idx").textContent = "PRODUCT " + (idx + 1);
+  const urlEl  = row.querySelector(".p-url");
+  const kwEl   = row.querySelector(".p-keyword");
+  const poolEl = row.querySelector(".p-sizepool");
+  urlEl.value = p.url || "";
+  kwEl.value  = p.keyword || "";
+  buildSizePool(poolEl, p.sizePool || [], (s) => { p.sizePool = s; });
+  urlEl.addEventListener("input", () => { p.url = urlEl.value.trim(); });
+  kwEl.addEventListener("input",  () => { p.keyword = kwEl.value.trim(); });
+  row.querySelector(".p-remove").addEventListener("click", () => {
+    products = products.filter(x => x.id !== p.id);
+    renderProducts();
+  });
+  return row;
+}
+
+function renderDropUI() {
+  buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
+  $("multiProductToggle").checked = multiProduct;
+  applyMultiUI();
+}
+
+// ── Random assignment of sizes / products to accounts ─────────
+function shortUrl(u) {
+  if (!u) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(u) ? u : "https://" + u);
+    const last = url.pathname.split("/").filter(Boolean).pop();
+    return last || url.hostname;
+  } catch { return u.slice(0, 40); }
+}
+
+async function randomAssign() {
+  const msg = $("assignMsg");
+  if (!accounts.length) { flashTemp(msg, "Add at least one account first.", "#fa5400"); return; }
+
+  if (multiProduct) {
+    const prods = products.filter(p => (p.url || "").trim());
+    if (!prods.length) { flashTemp(msg, "Add at least one product with a URL.", "#fa5400"); return; }
+    if (prods.some(p => !(p.sizePool || []).length)) {
+      flashTemp(msg, "Every product needs at least one size in its range.", "#fa5400"); return;
+    }
+    // Spread accounts evenly across products, in random order.
+    const order = shuffle(accounts.map((_, i) => i));
+    const groups = prods.map(() => []);
+    order.forEach((acctIdx, k) => groups[k % prods.length].push(acctIdx));
+    groups.forEach((acctIdxs, pIdx) => {
+      const p = prods[pIdx];
+      const sizes = dealFromPool(p.sizePool, acctIdxs.length);
+      acctIdxs.forEach((ai, k) => {
+        const acct = accounts[ai];
+        acct.url = (p.url || "").trim();
+        acct.keyword = (p.keyword || "").trim();
+        const { size, sizeType } = parseSizeValue(sizes[k]);
+        acct.size = size; acct.sizeType = sizeType;
+      });
+    });
+    renderAccounts();
+    await saveAll(true);
+    flashTemp(msg, `🎲 Assigned ${accounts.length} accounts across ${prods.length} products.`, "#1db954", 4000);
+  } else {
+    if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above.", "#fa5400"); return; }
+    const sizes = dealFromPool(singleSizePool, accounts.length);
+    accounts.forEach((acct, i) => {
+      acct.url = ""; acct.keyword = "";
+      const { size, sizeType } = parseSizeValue(sizes[i]);
+      acct.size = size; acct.sizeType = sizeType;
+    });
+    renderAccounts();
+    await saveAll(true);
+    flashTemp(msg, `🎲 Dealt sizes to ${accounts.length} accounts from a pool of ${singleSizePool.length}.`, "#1db954", 4000);
+  }
+}
+
 // ── Status badge metadata ─────────────────────────────────────
 const STATUS_META = {
   win:     { text: "🏆 WON",     color: "#1db954" },
@@ -291,6 +430,7 @@ function buildAccountRow(acct) {
   const ocCvv      = row.querySelector(".oc-cvv");
   const msgEl      = row.querySelector(".acct-msg");
   const vaultSel   = row.querySelector(".f-vault-select");
+  const assignedEl = row.querySelector(".f-assigned");
   const statusRow  = row.querySelector(".f-status-row");
   const statusBadge= row.querySelector(".f-status-badge");
   const statusText = row.querySelector(".f-status-text");
@@ -309,6 +449,14 @@ function buildAccountRow(acct) {
   ocExpiry.value = c.cardExpiry || "";
   ocCvv.value = c.cardCvv || "";
   attachCardFormatters(ocNumber, ocExpiry, ocCvv);
+
+  // Show which product this account is assigned to (multi-product mode)
+  if (multiProduct && acct.url) {
+    assignedEl.style.display = "";
+    assignedEl.textContent = `→ ${acct.keyword ? acct.keyword + " · " : ""}${shortUrl(acct.url)}`;
+  } else {
+    assignedEl.style.display = "none";
+  }
 
   // Register for live status updates
   statusRow.classList.add("hidden");
@@ -446,7 +594,15 @@ function buildConfig() {
       url: $("dropUrl").value.trim(),
       keyword: $("dropKeyword").value.trim(),
       dropTimeISO: dropTimeISO(),
+      sizePool: singleSizePool.slice(),
     },
+    multiProduct,
+    products: products.map(p => ({
+      id: p.id,
+      url: (p.url || "").trim(),
+      keyword: (p.keyword || "").trim(),
+      sizePool: (p.sizePool || []).slice(),
+    })),
     card: {
       cardName: $("cardName").value.trim(),
       cardNumber: $("cardNumber").value.trim(),
@@ -467,6 +623,8 @@ function buildConfig() {
       profileDir: a.profileDir || "",
       size: a.size || "",
       sizeType: a.sizeType || "footwear",
+      url: a.url || "",
+      keyword: a.keyword || "",
       card: a.ownCard ? (a.card || {}) : null,
     })),
   };
@@ -491,17 +649,25 @@ async function saveAll(silent) {
 }
 
 // ── Launch a single account into its Chrome profile ───────────
-function bootUrlFor(profileDir) {
-  let url = $("dropUrl").value.trim();
+// In multi-product mode each account carries its own assigned URL; in
+// single-product mode they all share the central Drop URL.
+function resolvedUrl(acct) {
+  return (multiProduct && acct.url) ? acct.url.trim() : $("dropUrl").value.trim();
+}
+
+function bootUrlFor(acct) {
+  let url = resolvedUrl(acct);
   if (!url) return null;
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   const sep = url.includes("#") ? "&" : "#";
-  return `${url}${sep}snkrsBoot=${encodeURIComponent(profileDir)}`;
+  return `${url}${sep}snkrsBoot=${encodeURIComponent(acct.profileDir)}`;
 }
 
 function validateForLaunch(acct, msgEl) {
-  if (!$("dropUrl").value.trim()) {
-    flashTemp(msgEl, "Set the Drop URL first (left panel).", "#fa5400");
+  if (!resolvedUrl(acct)) {
+    flashTemp(msgEl, multiProduct
+      ? "This account has no product URL — run 🎲 assign, or set one."
+      : "Set the Drop URL first (left panel).", "#fa5400");
     return false;
   }
   if (!acct.profileDir) {
@@ -518,7 +684,7 @@ function validateForLaunch(acct, msgEl) {
 async function launchAccount(acct, msgEl) {
   if (!validateForLaunch(acct, msgEl)) return;
   await saveAll(true); // make sure the shared file is current before boot
-  const url = bootUrlFor(acct.profileDir);
+  const url = bootUrlFor(acct);
   flash(msgEl, "Opening profile…", "#888");
   const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
   if (resp.ok) {
@@ -531,20 +697,18 @@ async function launchAccount(acct, msgEl) {
 }
 
 async function launchAll() {
-  const ready = accounts.filter(a => a.profileDir && a.size);
-  if (!$("dropUrl").value.trim()) {
-    flashTemp($("statusMsg"), "Set the Drop URL first.", "#fa5400");
-    return;
-  }
+  const ready = accounts.filter(a => a.profileDir && a.size && resolvedUrl(a));
   if (!ready.length) {
-    flashTemp($("statusMsg"), "No accounts are ready (need a profile + size).", "#fa5400");
+    flashTemp($("statusMsg"), multiProduct
+      ? "No accounts ready — run 🎲 assign so each gets a product + size."
+      : "No accounts ready (need Drop URL, a profile + size).", "#fa5400");
     return;
   }
   await saveAll(true);
   flash($("statusMsg"), `Launching ${ready.length} accounts…`, "#888");
   let okCount = 0, lastErr = "";
   for (const acct of ready) {
-    const url = bootUrlFor(acct.profileDir);
+    const url = bootUrlFor(acct);
     const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
     if (resp.ok) okCount++;
     else lastErr = resp.error || "unknown";
@@ -562,7 +726,7 @@ async function launchAll() {
 // Fallback when the host isn't installed: copy a paste-ready command.
 function copyLaunchCommand(acct, msgEl) {
   if (!acct.profileDir) { flashTemp(msgEl, "Pick a profile first.", "#fa5400"); return; }
-  const url = bootUrlFor(acct.profileDir) || "https://www.nike.com/sg/launch/";
+  const url = bootUrlFor(acct) || "https://www.nike.com/sg/launch/";
   const cmd = `chrome --profile-directory="${acct.profileDir}" "${url}"`;
   navigator.clipboard.writeText(cmd).then(
     () => flashTemp(msgEl, "📋 Command copied — paste into a terminal.", "#1db954"),
@@ -620,12 +784,23 @@ function applyConfigToUI(cfg) {
   $("logWebhook").value = opts.logWebhook || "";
   $("alertWebhook").value = opts.alertWebhook || "";
 
+  singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
+  multiProduct = !!cfg.multiProduct;
+  products = Array.isArray(cfg.products) ? cfg.products.map(p => ({
+    id: p.id || uid(),
+    url: p.url || "",
+    keyword: p.keyword || "",
+    sizePool: Array.isArray(p.sizePool) ? p.sizePool.slice() : [],
+  })) : [];
+
   accounts = (Array.isArray(cfg.accounts) ? cfg.accounts : []).map(a => ({
     id: a.id || uid(),
     label: a.label || "",
     profileDir: a.profileDir || "",
     size: a.size || "",
     sizeType: a.sizeType || "footwear",
+    url: a.url || "",
+    keyword: a.keyword || "",
     ownCard: !!a.card,
     card: a.card || null,
   }));
@@ -657,12 +832,23 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (!accounts.length) accounts = [{ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", ownCard: false, card: null }];
   renderAccounts();
   renderVault();
+  renderDropUI();
 
   // ── Buttons ──
   $("addAccountBtn").addEventListener("click", () => {
     accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", ownCard: false, card: null });
     renderAccounts();
   });
+  $("multiProductToggle").addEventListener("change", () => {
+    multiProduct = $("multiProductToggle").checked;
+    applyMultiUI();
+    renderAccounts(); // refresh assigned-product notes
+  });
+  $("addProductBtn").addEventListener("click", () => {
+    products.push(newProduct());
+    renderProducts();
+  });
+  $("randomAssignBtn").addEventListener("click", randomAssign);
   $("saveBtn").addEventListener("click", () => saveAll(false));
   $("launchAllBtn").addEventListener("click", launchAll);
   $("testHostBtn").addEventListener("click", async () => {

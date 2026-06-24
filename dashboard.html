@@ -47,23 +47,47 @@
         <section class="card">
           <div class="card-head">
             <h2>DROP DETAILS</h2>
-            <span class="card-tag">EVERYONE COPS THE SAME DROP</span>
+            <span class="card-tag" id="dropModeTag">EVERYONE COPS THE SAME DROP</span>
           </div>
-          <p class="hint">Set the product once here. Every launched account opens this exact URL at drop time.</p>
 
-          <label class="lbl" for="dropUrl">Product URL</label>
-          <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
+          <div class="toggle">
+            <div>
+              <div class="t-label">Multi-product drop</div>
+              <div class="t-hint">Cop several products at once — accounts get split across them</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="multiProductToggle"><span class="track"></span></label>
+          </div>
 
-          <label class="lbl" for="dropKeyword" style="margin-top:10px;">Product keyword / SKU <span class="muted">(optional — only for collection pages)</span></label>
-          <input type="text" id="dropKeyword" class="inp" placeholder="e.g. Anthem Jacket  or  IM3219-100">
+          <!-- SINGLE-PRODUCT panel -->
+          <div id="singleProductPanel" style="margin-top:12px;">
+            <p class="hint">Set the product once here. Every launched account opens this exact URL at drop time.</p>
 
-          <div class="row" style="margin-top:10px;">
+            <label class="lbl" for="dropUrl">Product URL</label>
+            <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
+
+            <label class="lbl" for="dropKeyword" style="margin-top:10px;">Product keyword / SKU <span class="muted">(optional — only for collection pages)</span></label>
+            <input type="text" id="dropKeyword" class="inp" placeholder="e.g. Anthem Jacket  or  IM3219-100">
+
+            <label class="lbl" style="margin-top:12px;">Size pool <span class="muted">(sizes you’ll take — randomly assigned to accounts)</span></label>
+            <div class="size-pool" id="singleSizePool"></div>
+          </div>
+
+          <!-- MULTI-PRODUCT panel -->
+          <div id="multiProductPanel" style="margin-top:12px; display:none;">
+            <p class="hint">Add each product with its URL, SKU/keyword and the size range you’d take. Hit <strong>🎲 assign</strong> below and your accounts get spread evenly (and randomly) across the products and sizes.</p>
+            <div id="productsList"></div>
+            <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
+          </div>
+
+          <div class="row" style="margin-top:14px;">
             <div class="grow">
               <label class="lbl" for="dropTime">Auto-open time <span class="muted">(optional)</span></label>
               <input type="datetime-local" id="dropTime" class="inp">
             </div>
           </div>
-          <p class="hint" style="margin-top:8px;">Leave the time blank to launch manually with the buttons below. If set, accounts that you’ve marked “auto” open themselves at that time (requires the launcher running).</p>
+
+          <button id="randomAssignBtn" class="btn btn-light" style="margin-top:14px; width:100%;">🎲 RANDOMLY ASSIGN TO ACCOUNTS</button>
+          <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
         </section>
 
         <!-- Central Card -->
@@ -266,6 +290,9 @@
         </div>
       </div>
 
+      <!-- Assigned product note (multi-product mode) -->
+      <div class="acct-assigned f-assigned" style="display:none;"></div>
+
       <!-- Live status badge -->
       <div class="acct-status-row f-status-row">
         <span class="acct-status-badge f-status-badge"></span>
@@ -274,6 +301,22 @@
       </div>
 
       <div class="acct-msg"></div>
+    </div>
+  </template>
+
+  <!-- Product row template (multi-product mode) -->
+  <template id="productRowTpl">
+    <div class="product">
+      <div class="product-head">
+        <span class="product-idx">PRODUCT</span>
+        <button class="btn btn-mini btn-danger p-remove" title="Remove product">✕</button>
+      </div>
+      <label class="lbl">Product URL</label>
+      <input type="text" class="inp p-url" placeholder="https://www.nike.com/sg/launch/t/...">
+      <label class="lbl" style="margin-top:8px;">SKU / keyword <span class="muted">(optional)</span></label>
+      <input type="text" class="inp p-keyword" placeholder="e.g. IM3219-100">
+      <label class="lbl" style="margin-top:8px;">Size range</label>
+      <div class="size-pool p-sizepool"></div>
     </div>
   </template>
 
