@@ -584,8 +584,11 @@ function updateProfileSourceNote() {
 }
 
 // ── Build config object from the UI ───────────────────────────
+function scheduleIsEnabled() { return !!($("scheduleEnabled") && $("scheduleEnabled").checked); }
+
 function dropTimeISO() {
-  const v = $("dropTime").value;
+  if (!scheduleIsEnabled()) return "";
+  const v = $("dropTime") && $("dropTime").value;
   if (!v) return "";
   const d = new Date(v);
   return isNaN(d.getTime()) ? "" : d.toISOString();
@@ -597,6 +600,7 @@ function buildConfig() {
       url: $("dropUrl").value.trim(),
       keyword: $("dropKeyword").value.trim(),
       dropTimeISO: dropTimeISO(),
+      scheduleEnabled: scheduleIsEnabled(),
       sizePool: singleSizePool.slice(),
     },
     multiProduct,
@@ -659,7 +663,7 @@ async function saveAll(silent) {
 function updateScheduleStatus(armResp) {
   const el = $("scheduleStatus");
   if (!el) return;
-  if (!armResp) { el.style.display = "none"; return; }
+  if (!armResp || !scheduleIsEnabled()) { el.style.display = "none"; return; }
   if (armResp.armed) {
     const d = new Date(armResp.when);
     const hm = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
@@ -797,6 +801,9 @@ function applyConfigToUI(cfg) {
   const drop = cfg.drop || {}, card = cfg.card || {}, opts = cfg.options || {};
   $("dropUrl").value = drop.url || "";
   $("dropKeyword").value = drop.keyword || "";
+  const schedOn = !!drop.scheduleEnabled;
+  $("scheduleEnabled").checked = schedOn;
+  $("schedulePanel").style.display = schedOn ? "" : "none";
   if (drop.dropTimeISO) {
     const d = new Date(drop.dropTimeISO);
     if (!isNaN(d.getTime())) {
@@ -871,6 +878,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("addAccountBtn").addEventListener("click", () => {
     accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", ownCard: false, card: null });
     renderAccounts();
+  });
+  $("scheduleEnabled").addEventListener("change", () => {
+    const on = $("scheduleEnabled").checked;
+    $("schedulePanel").style.display = on ? "" : "none";
+    // Disarming immediately when toggled off so the old alarm doesn't linger
+    if (!on) {
+      chrome.runtime.sendMessage({ type: "arm_drop_launch", config: buildConfig() }, updateScheduleStatus);
+    }
   });
   $("multiProductToggle").addEventListener("change", () => {
     multiProduct = $("multiProductToggle").checked;

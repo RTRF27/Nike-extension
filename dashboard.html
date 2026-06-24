@@ -79,16 +79,32 @@
             <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
           </div>
 
-          <div class="row" style="margin-top:14px;">
-            <div class="grow">
-              <label class="lbl" for="dropTime">Auto-open time <span class="muted">(optional)</span></label>
+          <!-- Scheduled auto-launch (opt-in block) -->
+          <div style="margin-top:16px; padding-top:14px; border-top:1px solid #2a2a2a;">
+            <div class="toggle" style="padding:0; border:none;">
+              <div>
+                <div class="t-label">⏰ Scheduled auto-launch <span style="font-weight:400; font-size:12px; color:#666;">— optional</span></div>
+                <div class="t-hint">
+                  Enable to have tabs open automatically at a set time.<br>
+                  <strong>Leave off</strong> if you plan to open tabs manually beforehand
+                  (e.g. to pre-warm Kasada before the drop).
+                </div>
+              </div>
+              <label class="switch"><input type="checkbox" id="scheduleEnabled"><span class="track"></span></label>
+            </div>
+
+            <div id="schedulePanel" style="display:none; margin-top:12px;">
+              <label class="lbl" for="dropTime">Open tabs at this time</label>
               <input type="datetime-local" id="dropTime" class="inp">
-              <p class="hint" style="margin-top:6px; margin-bottom:0;">Accounts with ⏰ <strong>auto</strong> toggled on will open automatically at this time. Leave blank to launch manually.</p>
+              <p class="hint" style="margin-top:6px; margin-bottom:0;">
+                Only accounts with <strong>⏰ auto</strong> checked in their row will open here.
+                All other accounts are unaffected — launch them manually whenever you like.
+              </p>
+              <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
             </div>
           </div>
-          <div id="scheduleStatus" class="schedule-status" style="display:none;"></div>
 
-          <button id="randomAssignBtn" class="btn btn-light" style="margin-top:14px; width:100%;">🎲 RANDOMLY ASSIGN TO ACCOUNTS</button>
+          <button id="randomAssignBtn" class="btn btn-light" style="margin-top:16px; width:100%;">🎲 RANDOMLY ASSIGN TO ACCOUNTS</button>
           <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
         </section>
 
@@ -180,9 +196,13 @@
         <section class="card sticky-actions">
           <div class="actions">
             <button id="saveBtn" class="btn btn-light">SAVE CENTRAL CONFIG</button>
-            <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL ACCOUNTS</button>
+            <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL NOW</button>
           </div>
-          <div class="actions" style="margin-top:8px;">
+          <p class="hint" style="margin-top:8px; margin-bottom:8px;">
+            <strong>Launch all now</strong> opens every account immediately — use this to pre-warm Kasada before the drop.
+            If you've set a scheduled time, only accounts with ⏰ auto will also open automatically at drop time.
+          </p>
+          <div class="actions">
             <button id="testHostBtn" class="btn btn-dark">Test launcher connection</button>
             <button id="refreshProfilesBtn" class="btn btn-dark">Reload Chrome profiles</button>
           </div>
