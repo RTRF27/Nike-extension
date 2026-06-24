@@ -160,7 +160,24 @@
             <button id="testHostBtn" class="btn btn-dark">Test launcher connection</button>
             <button id="refreshProfilesBtn" class="btn btn-dark">Reload Chrome profiles</button>
           </div>
+          <div class="actions" style="margin-top:8px;">
+            <button id="clearStatusBtn" class="btn btn-dark" style="flex:none; font-size:11px;">Clear live status</button>
+          </div>
           <div id="statusMsg" class="status-msg"></div>
+        </section>
+
+        <!-- Profile Vault -->
+        <section class="card" id="vaultCard">
+          <div class="card-head">
+            <h2>PROFILE VAULT</h2>
+            <span class="card-tag">SAVED TEMPLATES</span>
+          </div>
+          <p class="hint">
+            Save profile templates (label, Chrome profile, size, card) here for quick reuse.
+            Click <strong>💾 vault</strong> on any account row to save it, or <strong>USE →</strong> below to add a row from a template.
+          </p>
+          <div id="vaultList"></div>
+          <div id="vaultMsg" class="status-msg" style="font-size:11px; text-align:left; min-height:14px;"></div>
         </section>
 
       </div>
@@ -188,6 +205,14 @@
   <!-- Account row template -->
   <template id="accountRowTpl">
     <div class="acct">
+
+      <!-- Vault import bar -->
+      <div class="acct-vault-bar">
+        <select class="inp f-vault-select" title="Import all settings from a saved vault profile">
+          <option value="">— import from vault —</option>
+        </select>
+      </div>
+
       <div class="acct-grid">
         <div class="acct-field grow">
           <label class="lbl">Label</label>
@@ -210,6 +235,7 @@
         </label>
         <div class="acct-actions">
           <button class="btn btn-mini btn-dark f-copycmd" title="Copy the terminal command to open this profile">⌘ copy cmd</button>
+          <button class="btn btn-mini btn-dark f-save-vault" title="Save this account to Profile Vault as a reusable template">💾 vault</button>
           <button class="btn btn-mini btn-accent f-launch">🚀 launch</button>
           <button class="btn btn-mini btn-danger f-remove" title="Remove account">✕</button>
         </div>
@@ -238,6 +264,13 @@
             <input type="password" class="inp oc-cvv" maxlength="4" autocomplete="off" inputmode="numeric">
           </div>
         </div>
+      </div>
+
+      <!-- Live status badge -->
+      <div class="acct-status-row f-status-row">
+        <span class="acct-status-badge f-status-badge"></span>
+        <span class="acct-status-text f-status-text"></span>
+        <span class="acct-status-time f-status-time"></span>
       </div>
 
       <div class="acct-msg"></div>

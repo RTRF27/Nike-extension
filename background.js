@@ -187,6 +187,30 @@ function buildSettingsForProfile(config, profileDir) {
 // can retrieve it even if it arms the listener after the signal was sent.
 const cardFillCache = {};
 
+// ── Live status board support ─────────────────────────────────
+// Maps tabId → profileDir so log messages from a launched Nike tab
+// can be attributed to the correct dashboard account row.
+const tabProfileMap = {};
+chrome.tabs.onRemoved.addListener((tabId) => { delete tabProfileMap[tabId]; });
+
+function parseStatusFromLog(message) {
+  if (!message) return null;
+  const m = message.toLowerCase();
+  if (m.includes("got 'em") || m.includes("got em") || m.includes("you won the draw"))
+    return "win";
+  if (m.includes("better luck next time") || m.includes("not selected") || m.includes("unsuccessful") && m.includes("result"))
+    return "loss";
+  if (m.includes("entry confirmed") || (m.includes("📋") && m.includes("draw entered")))
+    return "entered";
+  if (m.includes("entry is pending") || m.includes("you're in line") || m.includes("pending / you"))
+    return "pending";
+  if (m.includes("polling every") || m.includes("still pending") || m.includes("check #"))
+    return "polling";
+  if (m.includes("draw ended") || m.includes("draw closed") || m.includes("sold out"))
+    return "closed";
+  return null;
+}
+
 // ── Message handler ──────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Boot bootstrap (content script) asks us to fetch this profile's central
@@ -202,6 +226,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "No matching account in shared config." });
         return;
       }
+      if (sender?.tab?.id) tabProfileMap[sender.tab.id] = msg.profileDir;
       sendResponse({ ok: true, settings });
     });
     return true;
@@ -251,6 +276,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === "log") {
     sendLog(msg.message);
+    // Live status board: parse and store per-profile status for the dashboard
+    const tabId = sender?.tab?.id;
+    const profileDir = tabId ? tabProfileMap[tabId] : null;
+    if (profileDir) {
+      const code = parseStatusFromLog(msg.message);
+      if (code) {
+        chrome.storage.local.get("snkrsStatus", (data) => {
+          const s = data.snkrsStatus || {};
+          s[profileDir] = { code, message: msg.message, time: Date.now() };
+          chrome.storage.local.set({ snkrsStatus: s });
+        });
+      }
+    }
     return false;
   }
 

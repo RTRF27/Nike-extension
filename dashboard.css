@@ -189,3 +189,54 @@ select.inp { cursor: pointer; }
 .help { margin-top: 20px; }
 .steps { margin: 0 0 4px 18px; line-height: 1.9; font-size: 13px; }
 .steps ul { margin: 4px 0 4px 18px; }
+
+/* ── Vault import bar (top of each account row) ── */
+.acct-vault-bar { margin-bottom: 10px; }
+.acct-vault-bar .inp { font-size: 12px; color: var(--grey); }
+.acct-vault-bar .inp:focus { color: var(--white); }
+
+/* ── Live status badge (bottom of each account row) ── */
+.acct-status-row {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px; padding-top: 8px;
+  border-top: 1px solid #1e1e1e;
+  min-height: 0; overflow: hidden;
+}
+.acct-status-row.hidden { display: none; }
+.acct-status-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px; font-weight: 900; letter-spacing: 1px;
+  padding: 3px 9px; border-radius: 12px;
+  border: 1px solid currentColor;
+  white-space: nowrap; flex-shrink: 0;
+}
+.acct-status-text {
+  font-size: 11px; color: var(--grey);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.acct-status-time {
+  font-size: 10px; color: var(--grey2);
+  flex-shrink: 0; white-space: nowrap;
+}
+
+/* ── Profile Vault card ── */
+.vault-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid #1e1e1e;
+}
+.vault-row:last-child { border-bottom: none; }
+.vault-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.vault-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 700; letter-spacing: .5px;
+}
+.vault-sub {
+  font-size: 11px; color: var(--grey);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vault-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.vault-card-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--orange); margin-left: 4px; vertical-align: middle;
+  title-attr: "Own card stored";
+}
