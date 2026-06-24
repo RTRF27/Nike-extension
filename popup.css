@@ -1,0 +1,296 @@
+/* ── Reset & base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --black:   #111111;
+  --white:   #ffffff;
+  --grey1:   #f5f5f5;
+  --grey2:   #e5e5e5;
+  --grey3:   #8d8d8d;
+  --orange:  #fa5400;
+  --green:   #1db954;
+  --red:     #e03131;
+  --radius:  4px;
+}
+
+body {
+  font-family: 'Barlow', sans-serif;
+  background: var(--black);
+  color: var(--white);
+  width: 340px;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Header ── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px 12px;
+}
+
+.nike-swoosh svg { width: 32px; height: 12px; flex-shrink: 0; }
+
+.header-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.header-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--white);
+  text-transform: uppercase;
+}
+
+.header-sub {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: var(--grey3);
+  margin-top: 1px;
+}
+
+.status-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border-radius: 20px;
+  border: 1px solid #333;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--grey3);
+}
+
+.status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #444;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+.status-dot.on  { background: var(--green); box-shadow: 0 0 0 3px rgba(29,185,84,.25); }
+.status-dot.off { background: #444; }
+
+.divider { height: 1px; background: #222; }
+
+/* ── Sections ── */
+.section {
+  padding: 14px 16px;
+  border-bottom: 1px solid #1e1e1e;
+}
+
+.section-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  color: var(--grey3);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.lock-icon { font-size: 11px; }
+
+.section-hint {
+  font-size: 11px;
+  color: var(--grey3);
+  margin-bottom: 10px;
+  line-height: 1.5;
+}
+
+/* ── Fields ── */
+.field-group { display: flex; flex-direction: column; gap: 5px; }
+
+.field-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: var(--grey3);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.badge {
+  background: var(--orange);
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.field-input {
+  background: #1a1a1a;
+  border: 1px solid #2e2e2e;
+  border-radius: var(--radius);
+  color: var(--white);
+  font-family: 'Barlow', sans-serif;
+  font-size: 12px;
+  padding: 8px 10px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.field-input::placeholder { color: #444; }
+.field-input:focus { border-color: var(--orange); }
+
+/* Card number formatted font */
+.card-number-input {
+  font-family: 'Courier New', monospace;
+  font-size: 13px;
+  letter-spacing: 2px;
+}
+
+/* Card row: expiry + cvv side by side */
+.card-row {
+  display: flex;
+  gap: 8px;
+}
+
+.card-warning {
+  font-size: 10px;
+  color: #555;
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* ── Size grid ── */
+.size-subhead {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--grey3);
+  margin-bottom: 6px;
+}
+
+.size-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+}
+
+.size-btn {
+  background: #1a1a1a;
+  border: 1px solid #2e2e2e;
+  border-radius: var(--radius);
+  color: var(--grey3);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 4px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s;
+}
+.size-btn:hover { border-color: #555; color: var(--white); }
+.size-btn.selected { background: var(--white); border-color: var(--white); color: var(--black); }
+
+/* ── Toggles ── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+}
+.toggle-row + .toggle-row {
+  margin-top: 4px;
+  border-top: 1px solid #1e1e1e;
+  padding-top: 10px;
+}
+
+.toggle-label {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--white);
+}
+.toggle-hint { font-size: 11px; color: var(--grey3); margin-top: 2px; line-height: 1.4; }
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 22px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.toggle-switch input { display: none; }
+.toggle-track {
+  position: absolute;
+  inset: 0;
+  background: #2e2e2e;
+  border-radius: 11px;
+  transition: background 0.2s;
+}
+.toggle-track::after {
+  content: '';
+  position: absolute;
+  left: 3px; top: 3px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #555;
+  transition: transform 0.2s, background 0.2s;
+}
+.toggle-switch input:checked + .toggle-track { background: var(--orange); }
+.toggle-switch input:checked + .toggle-track::after { background: var(--white); transform: translateX(16px); }
+
+/* ── Save ── */
+.save-area {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.save-btn {
+  width: 100%;
+  padding: 11px 0;
+  background: var(--white);
+  color: var(--black);
+  border: none;
+  border-radius: var(--radius);
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.save-btn:hover  { background: #e0e0e0; }
+.save-btn:active { transform: scale(0.98); }
+
+.save-msg {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-align: center;
+  min-height: 16px;
+  color: var(--green);
+}

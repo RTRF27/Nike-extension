@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SNKRS Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="shell">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="nike-swoosh">
+        <svg viewBox="0 0 24 9" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/>
+        </svg>
+      </div>
+      <div class="header-text">
+        <span class="header-label">SNKRS</span>
+        <span class="header-sub">AUTO-ENTRY BOT · SG</span>
+      </div>
+      <div class="status-pill" id="statusPill">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">OFF</span>
+      </div>
+    </header>
+
+    <div class="divider"></div>
+
+    <!-- Profile -->
+    <section class="section">
+      <div class="section-label">PROFILE</div>
+      <div class="field-group">
+        <label class="field-label" for="profileLabel">Account Label</label>
+        <input type="text" id="profileLabel" class="field-input" placeholder="e.g. Reagan / Account 1">
+      </div>
+    </section>
+
+    <!-- Size -->
+    <section class="section">
+      <div class="section-label">TARGET SIZE</div>
+      <p class="section-hint">Pick ONE size — footwear or apparel. The bot clicks this on the SNKRS grid at drop time.</p>
+      <div class="size-subhead">Footwear (US Men's)</div>
+      <div class="size-grid" id="sizeGrid"></div>
+      <div class="size-subhead" style="margin-top:12px;">Apparel</div>
+      <div class="size-grid" id="apparelGrid"></div>
+    </section>
+
+    <!-- Product targeting (for collection pages with multiple products) -->
+    <section class="section">
+      <div class="section-label">TARGET PRODUCT <span style="font-weight:400; opacity:0.6;">(optional)</span></div>
+      <p class="section-hint">Only needed on collection pages with several products. Type part of the product name or its SKU, and the bot will pick the size from that product only. Leave blank for single-product drops.</p>
+      <input type="text" id="productKeyword" class="field-input" placeholder="e.g. Anthem Jacket  or  IM3219-100" autocomplete="off">
+      <button id="previewMainBtn" class="save-btn" style="margin-top:8px; background:#1db954;">🔍 PREVIEW TARGET ON PAGE</button>
+      <div id="previewMainMsg" class="save-msg"></div>
+    </section>
+
+    <!-- Multi-product simultaneous drop -->
+    <section class="section">
+      <div class="section-label">MULTI-PRODUCT DROP <span style="font-weight:400; opacity:0.6;">(optional)</span></div>
+      <p class="section-hint">Cop TWO products at once, each with its own size. Configure both products below, then open each one's tagged URL in a tab before the drop (use the COPY or OPEN TAB buttons). Each tab enters its own product at drop time — no clock needed.</p>
+
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Enable Two-Product Drop</div>
+          <div class="toggle-hint">Turn on to configure both products</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="multiEnabled">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+
+      <div id="multiPanel" style="margin-top:10px;">
+        <div id="slotsContainer" style="margin-top:10px;"></div>
+
+        <!-- Optional clock / auto-open -->
+        <div style="margin-top:14px; padding:10px; background:#141414; border:1px solid #2e2e2e; border-radius:8px;">
+          <div class="toggle-row" style="margin-bottom:0;">
+            <div>
+              <div class="toggle-label">Auto-open at a set time (clock)</div>
+              <div class="toggle-hint">Optional — only if you DON'T open tabs manually</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="useScheduler">
+              <span class="toggle-track"></span>
+            </label>
+          </div>
+          <div id="schedulerPanel" style="margin-top:10px; display:none;">
+            <label class="field-label" for="dropTime">Drop time (your local time)</label>
+            <input type="datetime-local" id="dropTime" class="field-input">
+            <button id="openNowBtn" class="save-btn" style="margin-top:10px; background:#222;">OPEN BOTH TABS NOW (TEST)</button>
+          </div>
+        </div>
+
+        <div id="dropStatusMsg" class="save-msg"></div>
+      </div>
+    </section>
+
+    <!-- Card Details -->
+    <section class="section">
+      <div class="section-label">
+        PAYMENT CARD
+        <span class="lock-icon" title="Stored locally in this browser only">🔒</span>
+      </div>
+      <p class="section-hint">Bot will autofill these into the eShopWorld payment form on checkout.</p>
+
+      <div class="field-group">
+        <label class="field-label" for="cardName">Name on Card</label>
+        <input type="text" id="cardName" class="field-input" placeholder="REAGAN TANG" autocomplete="off">
+      </div>
+
+      <div class="field-group" style="margin-top:8px">
+        <label class="field-label" for="cardNumber">Card Number</label>
+        <input type="text" id="cardNumber" class="field-input card-number-input" placeholder="1234 5678 9012 3456" maxlength="19" autocomplete="off" inputmode="numeric">
+      </div>
+
+      <div class="card-row" style="margin-top:8px">
+        <div class="field-group" style="flex:1">
+          <label class="field-label" for="cardExpiry">Expiry</label>
+          <input type="text" id="cardExpiry" class="field-input" placeholder="MM/YY" maxlength="5" autocomplete="off" inputmode="numeric">
+        </div>
+        <div class="field-group" style="flex:1">
+          <label class="field-label" for="cardCvv">CVV</label>
+          <input type="password" id="cardCvv" class="field-input" placeholder="•••" maxlength="4" autocomplete="off" inputmode="numeric">
+        </div>
+      </div>
+
+      <p class="card-warning">⚠ Stored in chrome.storage.sync — do not use on shared computers.</p>
+    </section>
+
+    <!-- Status Poller -->
+    <section class="section">
+      <div class="section-label">STATUS POLLER</div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Auto-Refresh for Result</div>
+          <div class="toggle-hint">Refreshes SNKRS page every few minutes and alerts when status changes to "Purchased"</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="statusPollerEnabled">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+      <div class="field-row" style="margin-top:8px; align-items:center; display:flex; gap:8px;">
+        <label class="field-label" style="white-space:nowrap; margin:0">Refresh every</label>
+        <input type="number" id="pollerIntervalMin" class="field-input" style="width:60px; text-align:center" min="1" max="60" value="3">
+        <span class="field-label" style="margin:0">min</span>
+      </div>
+    </section>
+
+    <!-- Controls -->
+    <section class="section">
+      <div class="section-label">CONTROLS</div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Bot Enabled</div>
+          <div class="toggle-hint">Auto-select size and submit on SNKRS drops</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="enabled">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Test Mode</div>
+          <div class="toggle-hint">Selects size + fills card but won't submit</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="testMode">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </section>
+
+    <!-- Webhooks -->
+    <section class="section">
+      <div class="section-label">DISCORD WEBHOOKS</div>
+      <div class="field-group">
+        <label class="field-label" for="logWebhook">Log Webhook</label>
+        <input type="text" id="logWebhook" class="field-input" placeholder="https://discord.com/api/webhooks/...">
+      </div>
+      <div class="field-group" style="margin-top:8px">
+        <label class="field-label" for="alertWebhook">Alert Webhook <span class="badge">@here</span></label>
+        <input type="text" id="alertWebhook" class="field-input" placeholder="https://discord.com/api/webhooks/...">
+      </div>
+    </section>
+
+    <!-- Save -->
+    <div class="save-area">
+      <button id="saveBtn" class="save-btn">SAVE SETTINGS</button>
+      <div id="saveMsg" class="save-msg"></div>
+    </div>
+
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

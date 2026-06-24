@@ -1,0 +1,1048 @@
+// ============================================================
+// Nike SNKRS Bot – Product Page Content Script
+// URL: nike.com/sg/launch/t/<slug>
+//
+// Confirmed from screenshots:
+//   - Size buttons show "US 7", "US 7.5", "US 11" (no M/W prefix)
+//   - Selected size has black background
+//   - CTA button says "Join Draw S$289.00" (draw) or "Buy S$xxx" (instant)
+//   - After entry: "Your entry is in" modal appears
+//   - Countdown timer bar at top: "Time Left to Enter  00:14:51"
+// ============================================================
+
+const SETTINGS_KEY = "snkrsBotSettings";
+let settings = null;
+let hasRun = false;
+// Track if we've successfully entered — prevents double-entry on re-runs
+let entryAttempted = false;
+
+function log(...args) { console.log("[SNKRSBot]", ...args); }
+function logBG(msg) {
+  try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
+  catch (e) { console.warn("[SNKRSBot] logBG:", e); }
+}
+function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+// ── Profile tag ──────────────────────────────────────────────
+function profileTag() {
+  let base = "";
+  const label = settings?.profileLabel?.trim();
+  if (label) base = ` **[${label}]**`;
+  else {
+    const navName = document.querySelector("[data-testid='user-name'], .nds-text[class*='name']");
+    if (navName?.innerText?.trim()) base = ` **[${navName.innerText.trim()}]**`;
+  }
+  // Add slot/product marker when running as part of a multi-product drop.
+  if (settings?._activeSlot) {
+    const kw = (settings.productKeyword || "").trim();
+    const which = kw ? `Slot ${settings._activeSlot}: ${kw}` : `Slot ${settings._activeSlot}`;
+    base += ` (${which})`;
+  }
+  return base;
+}
+
+// ── Settings ─────────────────────────────────────────────────
+// Reads the #snkrsSlot=N marker (added by the background worker when it
+// opens multi-product drop tabs). Returns the slot index (1-based) or null.
+function getSlotIndexFromUrl() {
+  const hash = location.hash || "";
+  const search = location.search || "";
+  const m = (hash + "&" + search).match(/snkrsSlot=(\d+)/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+async function loadSettings() {
+  const saved = await chrome.storage.sync.get(SETTINGS_KEY);
+  settings = { ...(saved[SETTINGS_KEY] || {}) };
+
+  // If this tab was opened for a specific product slot, overlay that slot's
+  // product/size onto the active settings so this tab targets only it.
+  const slotIdx = getSlotIndexFromUrl();
+  if (slotIdx && Array.isArray(settings.slots) && settings.slots[slotIdx - 1]) {
+    const slot = settings.slots[slotIdx - 1];
+    if (slot.size)     settings.preferredSize     = slot.size;
+    if (slot.sizeType) settings.preferredSizeType = slot.sizeType;
+    // Keyword may be empty for a direct-URL slot — that's fine.
+    settings.productKeyword = slot.keyword || "";
+    settings._activeSlot = slotIdx;
+    log(`Tab assigned to slot ${slotIdx}:`, slot);
+  }
+
+  log("Settings:", settings);
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes[SETTINGS_KEY]) {
+    const next = { ...(changes[SETTINGS_KEY].newValue || {}) };
+    // Preserve this tab's slot assignment across live settings updates.
+    const slotIdx = getSlotIndexFromUrl();
+    if (slotIdx && Array.isArray(next.slots) && next.slots[slotIdx - 1]) {
+      const slot = next.slots[slotIdx - 1];
+      if (slot.size)     next.preferredSize     = slot.size;
+      if (slot.sizeType) next.preferredSizeType = slot.sizeType;
+      next.productKeyword = slot.keyword || "";
+      next._activeSlot = slotIdx;
+    }
+    settings = next;
+  }
+});
+
+// ── Banners ──────────────────────────────────────────────────
+function showBanner(text, bg = "#fa5400", color = "#fff") {
+  const existing = document.getElementById("snkrs-bot-banner");
+  if (existing) existing.remove();
+  const div = document.createElement("div");
+  div.id = "snkrs-bot-banner";
+  div.style.cssText = `position:fixed;top:0;left:0;width:100%;padding:10px 16px;background:${bg};color:${color};z-index:999999;font-weight:700;text-align:center;font-size:13px;letter-spacing:1px;font-family:sans-serif;`;
+  div.textContent = text;
+  document.body.appendChild(div);
+}
+
+// ── Page checks ───────────────────────────────────────────────
+function isLaunchPage() {
+  return location.hostname.includes("nike.com") && location.pathname.includes("/launch/");
+}
+
+// ── Status detection ─────────────────────────────────────────
+const STATUS = {
+  PURCHASED: "purchased",
+  NOT_WON:   "not_won",
+  ENTRY_IN:  "entry_in",
+  PENDING:     "pending",
+  ENTER:     "enter",
+  CLOSED:    "closed",
+  SOLD_OUT:  "sold_out",
+  COMING_SOON: "coming_soon",
+  UNKNOWN:   "unknown",
+};
+
+function detectPageStatus() {
+  // FIX: Check URL for ENTRY_LIMIT_EXCEEDED — means already entered, stop everything
+  if (location.search.includes("ENTRY_LIMIT_EXCEEDED")) {
+    log("ENTRY_LIMIT_EXCEEDED in URL — already entered, stopping.");
+    return STATUS.PENDING;
+  }
+
+  // Check modal text first — "Got 'em" or "Your entry is in"
+  const modal = document.querySelector(".modal, [role='dialog'], [class*='Modal'], [class*='modal']");
+  if (modal) {
+    const t = (modal.innerText || "").toLowerCase();
+    if (t.includes("got 'em") || t.includes("got em") || t.includes("is yours"))
+      return STATUS.PURCHASED;
+    if (t.includes("your entry is in") || t.includes("entry received"))
+      return STATUS.ENTRY_IN;
+  }
+
+  const bodyText = (document.body.innerText || "").toUpperCase();
+
+  if (
+    bodyText.includes("GOT 'EM") || bodyText.includes("GOT EM") ||
+    bodyText.includes("IS YOURS") ||
+    bodyText.includes("PURCHASED") || bodyText.includes("YOU WON") ||
+    bodyText.includes("CONGRATULATIONS")
+  ) return STATUS.PURCHASED;
+
+  if (
+    bodyText.includes("BETTER LUCK NEXT TIME") ||
+    bodyText.includes("NOT SELECTED") ||
+    bodyText.includes("UNSUCCESSFUL")
+  ) return STATUS.NOT_WON;
+
+  if (
+    bodyText.includes("YOUR ENTRY IS IN") ||
+    bodyText.includes("ENTRY RECEIVED") ||
+    bodyText.includes("WE'LL EMAIL YOU")
+  ) return STATUS.ENTRY_IN;
+
+  // FIX: "Pending" / "You're in line" — entry submitted, Nike is processing
+  // This appears when the draw button is greyed out as "Pending" after clicking
+  if (
+    bodyText.includes("YOU'RE IN LINE") ||
+    bodyText.includes("YOURE IN LINE") ||
+    bodyText.includes("WE WILL NOTIFY YOU") ||
+    bodyText.includes("NOTIFY YOU IN A MOMENT")
+  ) return STATUS.PENDING;
+
+  // FIX: "Entry is invalid. Please try again." — duplicate/invalid entry attempt
+  if (
+    bodyText.includes("ENTRY IS INVALID") ||
+    bodyText.includes("PLEASE TRY AGAIN") ||
+    bodyText.includes("ENTRY_LIMIT_EXCEEDED") ||
+    bodyText.includes("INVALID ENTRY")
+  ) return STATUS.PENDING;
+
+  // FIX: Also catch the greyed "Pending" button state on the page
+  const pendingBtn = document.querySelector("button[disabled], button[aria-disabled='true']");
+  if (pendingBtn) {
+    const btnText = (pendingBtn.innerText || "").trim().toUpperCase();
+    if (btnText === "PENDING") return STATUS.PENDING;
+  }
+
+  if (bodyText.includes("ENTRY CLOSED") || bodyText.includes("DRAW CLOSED"))
+    return STATUS.CLOSED;
+
+  if (bodyText.includes("SOLD OUT"))
+    return STATUS.SOLD_OUT;
+
+  // FIX: Detect "Coming Soon" state — drop hasn't gone live yet
+  if (
+    bodyText.includes("COMING SOON") ||
+    bodyText.includes("NOTIFY ME")
+  ) return STATUS.COMING_SOON;
+
+  if (
+    bodyText.includes("JOIN DRAW") ||
+    /BUY S\$/.test(bodyText) ||
+    bodyText.includes("TIME LEFT TO ENTER")
+  ) return STATUS.ENTER;
+
+  return STATUS.UNKNOWN;
+}
+
+// ── Confetti celebration ──────────────────────────────────────
+function launchConfetti() {
+  const script = document.createElement("script");
+  script.src = "https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js";
+  script.onload = () => {
+    const duration = 6000;
+    const end = Date.now() + duration;
+    const colors = ["#fa5400", "#ffffff", "#111111", "#1db954", "#ffd700"];
+
+    (function frame() {
+      window.confetti({ particleCount: 6, angle: 60, spread: 65, origin: { x: 0 }, colors });
+      window.confetti({ particleCount: 6, angle: 120, spread: 65, origin: { x: 1 }, colors });
+      if (Date.now() < end) requestAnimationFrame(frame);
+    })();
+  };
+  document.head.appendChild(script);
+}
+
+// ── Status Poller ────────────────────────────────────────────
+const POLLER_ACTIVE_KEY  = "snkrsBotPollerActive";
+const POLLER_COUNT_KEY   = "snkrsBotPollCount";
+const POLLER_PRODUCT_KEY = "snkrsBotProduct";
+
+function startStatusPoller() {
+  if (!settings?.statusPollerEnabled) {
+    log("Poller disabled in settings.");
+    return;
+  }
+
+  const intervalMin = Math.max(1, settings?.pollerIntervalMin || 3);
+  const tag = profileTag();
+
+  const count = parseInt(sessionStorage.getItem(POLLER_COUNT_KEY) || "0");
+  sessionStorage.setItem(POLLER_ACTIVE_KEY, "1");
+  sessionStorage.setItem(POLLER_COUNT_KEY, String(count + 1));
+
+  if (count === 0) {
+    const product = sessionStorage.getItem(POLLER_PRODUCT_KEY) || location.href;
+    logBG(`🔄${tag} Entry submitted — polling every ${intervalMin} min for result: ${product}`);
+  } else {
+    log(`Poller: scheduling reload #${count + 1} in ${intervalMin} min`);
+  }
+
+  setTimeout(() => location.reload(), intervalMin * 60 * 1000);
+}
+
+function checkStatusAfterReload() {
+  if (sessionStorage.getItem(POLLER_ACTIVE_KEY) !== "1") return false;
+
+  const tag = profileTag();
+  const count = sessionStorage.getItem(POLLER_COUNT_KEY) || "?";
+  const status = detectPageStatus();
+
+  log(`Poller check #${count}: ${status}`);
+
+  switch (status) {
+    case STATUS.PURCHASED:
+      sessionStorage.removeItem(POLLER_ACTIVE_KEY);
+      sessionStorage.removeItem(POLLER_COUNT_KEY);
+      logBG(`@here 🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
+      showBanner("🎉🔥 GOT 'EM — YOU WON!!! CHECK YOUR EMAIL! 🔥🎉", "#1db954");
+      launchConfetti();
+      return true;
+
+    case STATUS.NOT_WON:
+      sessionStorage.removeItem(POLLER_ACTIVE_KEY);
+      sessionStorage.removeItem(POLLER_COUNT_KEY);
+      logBG(`😔${tag} Result: **Better Luck Next Time** (check #${count})`);
+      return true;
+
+    case STATUS.PENDING:
+      sessionStorage.removeItem(POLLER_ACTIVE_KEY);
+      sessionStorage.removeItem(POLLER_COUNT_KEY);
+      logBG(`⏳${tag} Entry is PENDING / You\'re in line — stopping bot. Nike is processing.`);
+      showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+      return true;
+
+    case STATUS.ENTRY_IN:
+    case STATUS.UNKNOWN:
+      logBG(`⏳${tag} Check #${count}: Still pending — next check in ${settings?.pollerIntervalMin || 3} min`);
+      startStatusPoller();
+      return true;
+
+    case STATUS.CLOSED:
+    case STATUS.SOLD_OUT:
+      sessionStorage.removeItem(POLLER_ACTIVE_KEY);
+      sessionStorage.removeItem(POLLER_COUNT_KEY);
+      logBG(`ℹ️${tag} Draw ended with status: ${status} — stopping poller.`);
+      return true;
+
+    default:
+      logBG(`❓${tag} Check #${count}: Unknown state — retrying.`);
+      startStatusPoller();
+      return true;
+  }
+}
+
+// ── Size button finder ────────────────────────────────────────
+// Apparel sizes Nike uses on launch pages. Order matters for matching
+// (check longest tokens first so "XXL" isn't shadowed by "XL"/"L").
+const APPAREL_SIZES = ["XXXL", "XXL", "XL", "L", "M", "S", "XS", "XXS"];
+
+// A button is an apparel-size button if its FULL trimmed text is exactly
+// one of the apparel tokens (case-insensitive). The exact-match requirement
+// is critical — a loose includes() would match "S$135.00", "Maps", "Men's", etc.
+function isApparelSizeText(text) {
+  const t = (text || "").trim().toUpperCase();
+  return APPAREL_SIZES.includes(t);
+}
+
+// Detects whether the current product is apparel (letter sizes) vs footwear
+// (numeric US sizes). Used so the bot knows which matcher to apply.
+function detectSizeType() {
+  const buttons = Array.from(document.querySelectorAll("button"));
+  let numeric = 0, apparel = 0;
+  for (const b of buttons) {
+    const t = (b.innerText || "").trim();
+    if (/^US\s+(M\s+)?[\d]/.test(t)) numeric++;
+    else if (isApparelSizeText(t)) apparel++;
+  }
+  if (apparel > 0 && apparel >= numeric) return "apparel";
+  if (numeric > 0) return "footwear";
+  return "unknown";
+}
+
+// Tells whether a button anywhere under `el` is a size button.
+function elementHasSizeButton(el) {
+  if (!el) return false;
+  const btns = el.querySelectorAll("button");
+  for (const b of btns) {
+    const t = (b.innerText || "").trim();
+    if (/^US\s+(M\s+)?[\d]/.test(t) || isApparelSizeText(t)) return true;
+  }
+  return false;
+}
+
+// ── Product-aware scoping ─────────────────────────────────────
+// On a collection page with multiple products, we limit the size search to
+// the ONE product the user wants. `keyword` can be a product-name fragment
+// or a SKU like "IM3198-052".
+//
+// Robustness notes (learned from a mis-buy on the England x Palace page):
+//  - We match against BOTH textContent (catches visually-hidden text) and any
+//    descendant link hrefs (Nike product URLs often embed the SKU/slug).
+//  - We pick the SMALLEST container that holds size buttons, so we never grab
+//    a wrapper that spans multiple products.
+//  - If nothing matches, we return null and the caller REFUSES to buy.
+function nodeMatchesKeyword(node, kw) {
+  // 1) Visible/hidden text of this node
+  const txt = ((node.textContent || "")).toLowerCase();
+  if (txt.includes(kw)) return true;
+  // 2) Any link href inside this node (URLs contain slug or SKU)
+  const links = node.querySelectorAll ? node.querySelectorAll("a[href]") : [];
+  for (const a of links) {
+    if ((a.getAttribute("href") || "").toLowerCase().includes(kw)) return true;
+  }
+  // 3) Common attributes that may carry the SKU/product id
+  if (node.getAttribute) {
+    for (const attr of ["data-product-id", "data-testid", "id", "aria-label"]) {
+      const v = (node.getAttribute(attr) || "").toLowerCase();
+      if (v && v.includes(kw)) return true;
+    }
+  }
+  return false;
+}
+
+function textOf(el) {
+  return (el?.innerText || el?.textContent || "").trim();
+}
+
+function countMatches(text, re) {
+  const m = String(text || "").match(re);
+  return m ? m.length : 0;
+}
+
+function hasProductCta(el) {
+  if (!el) return false;
+  const text = textOf(el).toUpperCase();
+  if (/(COMING SOON|NOTIFY ME|JOIN DRAW|BUY\s+S\$|BUY\b)/.test(text)) return true;
+
+  const buttons = Array.from(el.querySelectorAll ? el.querySelectorAll("button") : []);
+  return buttons.some(b => /(COMING SOON|NOTIFY ME|JOIN DRAW|BUY\s+S\$|BUY\b)/i.test(textOf(b)));
+}
+
+function hasSkuText(el) {
+  const text = textOf(el);
+  return /SKU\s*:/i.test(text) || /\b[A-Z0-9]{2,}-[A-Z0-9]{2,}\b/i.test(text);
+}
+
+function hasPriceText(el) {
+  return /\bS\$\s*\d/i.test(textOf(el));
+}
+
+function isTooBroadProductScope(el) {
+  if (!el || el === document.body || el === document.documentElement) return true;
+  const text = textOf(el);
+
+  // A real product tile/detail block should normally contain one SKU label.
+  // Multiple SKU labels means we probably grabbed a collection wrapper that
+  // spans several products, which is unsafe for auto-entry.
+  if (countMatches(text, /SKU\s*:/gi) > 1) return true;
+
+  // If it has too many size buttons, it is almost certainly more than one item.
+  if (getAllSizeButtons(el).length > 30) return true;
+
+  // Very large blocks are usually page/collection wrappers. Keep this generous
+  // so long descriptions still pass, but body-level wrappers do not.
+  if (text.length > 3500 && getAllSizeButtons(el).length === 0) return true;
+
+  return false;
+}
+
+function looksLikeProductScope(el, kw) {
+  if (!el || !nodeMatchesKeyword(el, kw) || isTooBroadProductScope(el)) return false;
+
+  // Live product: size buttons are available. This is the original safest path.
+  if (elementHasSizeButton(el)) return true;
+
+  // Pre-live product: there are no size buttons yet. On Nike launch collection
+  // pages, the product card still contains the SKU/title/price plus a disabled
+  // "Coming Soon" / "Notify Me" CTA. Treat that as a valid product scope so
+  // Preview and the watcher can lock onto the correct product BEFORE it goes live.
+  const sku = hasSkuText(el);
+  const price = hasPriceText(el);
+  const cta = hasProductCta(el);
+
+  return (cta && (sku || price)) || (sku && price);
+}
+
+function scoreProductScope(el) {
+  const text = textOf(el);
+  const sizeCount = getAllSizeButtons(el).length;
+  const buttonCount = el.querySelectorAll ? el.querySelectorAll("button").length : 0;
+
+  let score = 0;
+  if (sizeCount > 0) score -= 1000;     // prefer live, size-containing scope
+  if (hasProductCta(el)) score -= 250;  // prefer card/detail block with CTA
+  if (hasSkuText(el)) score -= 120;
+  if (hasPriceText(el)) score -= 60;
+
+  score += countMatches(text, /SKU\s*:/gi) * 200;
+  score += Math.min(text.length, 3500) / 20;
+  score += buttonCount * 15;
+  return score;
+}
+
+function findProductScope(keyword) {
+  if (!keyword) return null;
+  const kw = keyword.trim().toLowerCase();
+  if (!kw) return null;
+
+  const candidates = [];
+
+  // Scan a broad set of element types for the keyword. We deliberately use
+  // textContent (via nodeMatchesKeyword) so hidden/below-the-fold product text
+  // and link hrefs still match.
+  const nodes = Array.from(
+    document.querySelectorAll("h1, h2, h3, h4, h5, p, span, div, li, a, section, article")
+  );
+
+  for (const node of nodes) {
+    if (!nodeMatchesKeyword(node, kw)) continue;
+
+    // Walk up and collect BOTH states:
+    //  1) live product scopes that already contain size buttons;
+    //  2) pre-live product scopes that contain SKU/title/price + Coming Soon.
+    let el = node;
+    let hops = 0;
+    while (el && hops < 18) {
+      if (looksLikeProductScope(el, kw)) candidates.push(el);
+      el = el.parentElement;
+      hops++;
+    }
+  }
+
+  const unique = [...new Set(candidates)].filter(el => !isTooBroadProductScope(el));
+  if (!unique.length) return null;
+
+  unique.sort((a, b) => scoreProductScope(a) - scoreProductScope(b));
+  const best = unique[0];
+
+  const sizeBtnCount = getAllSizeButtons(best).length;
+  if (sizeBtnCount > 30) {
+    log(`Scope for "${keyword}" looks too broad (${sizeBtnCount} size buttons) — treating as not found.`);
+    return null;
+  }
+
+  log(`Product scope for "${keyword}" found (${sizeBtnCount || 0} size buttons visible yet).`);
+  return best;
+}
+
+// Collects size buttons. If `scope` is provided, only looks inside it.
+function getAllSizeButtons(scope) {
+  const root = scope || document;
+  const all = Array.from(root.querySelectorAll("button"));
+
+  // Footwear: "US 9.5" or "US M 9.5 / W 11"
+  const footwearButtons = all.filter(b => {
+    const t = (b.innerText || "").trim();
+    return /^US\s+(M\s+)?[\d]/.test(t);
+  });
+
+  // Apparel: exact "S" / "M" / "L" / "XL" etc.
+  const apparelButtons = all.filter(b => isApparelSizeText(b.innerText));
+
+  const combined = [...footwearButtons, ...apparelButtons];
+  if (combined.length) return [...new Set(combined)];
+
+  // Fallback: scope to size-related containers only, so we don't grab
+  // random page buttons. Then still filter to plausible size labels.
+  const scoped = [
+    ...root.querySelectorAll("[data-testid*='size'] button"),
+    ...root.querySelectorAll("[data-testid*='Size'] button"),
+    ...root.querySelectorAll("[class*='size'] button"),
+    ...root.querySelectorAll("[class*='Size'] button"),
+  ];
+  const scopedFiltered = [...new Set(scoped)].filter(b => {
+    const t = (b.innerText || "").trim();
+    return /^US\s+(M\s+)?[\d]/.test(t) || isApparelSizeText(t);
+  });
+  return scopedFiltered;
+}
+
+// Formats the configured size for display/logging.
+// Apparel → "L"; footwear → "US 9.5".
+function sizeLabel(preferred) {
+  const norm = String(preferred || "").trim().toUpperCase();
+  if (APPAREL_SIZES.includes(norm)) return norm;
+  return "US " + preferred;
+}
+
+function isButtonAvailable(btn) {
+  if (btn.disabled) return false;
+  if (btn.getAttribute("aria-disabled") === "true") return false;
+  const style = window.getComputedStyle(btn);
+  if (parseFloat(style.opacity) < 0.4) return false;
+  if (btn.className.includes("disabled") || btn.className.includes("soldOut")) return false;
+  return true;
+}
+
+function findPreferredSizeButton() {
+  const preferred = settings?.preferredSize;
+  if (!preferred) return null;
+
+  const preferredNorm = String(preferred).trim().toUpperCase();
+  const isApparelTarget = APPAREL_SIZES.includes(preferredNorm);
+
+  // If a product keyword is set, scope the search to that product's card.
+  const keyword = settings?.productKeyword;
+  let scope = null;
+  if (keyword && keyword.trim()) {
+    scope = findProductScope(keyword);
+    if (!scope) {
+      // CRITICAL: keyword set but product card not located.
+      // In multi-product/slot mode (or any time a keyword is explicitly set),
+      // we must NOT fall back to a whole-page search — doing so previously
+      // caused the bot to buy a DIFFERENT product that merely had the size
+      // available. Refuse to select anything instead.
+      log(`Product "${keyword}" NOT located — refusing to select any size (no whole-page fallback).`);
+      return null;
+    } else {
+      log(`Scoped to product card matching "${keyword}".`);
+    }
+  }
+
+  const buttons = getAllSizeButtons(scope);
+  log(`Found ${buttons.length} size buttons. Looking for ${isApparelTarget ? preferredNorm : "US " + preferred}`);
+
+  return buttons.find(b => {
+    if (!isButtonAvailable(b)) return false;
+    const t = (b.innerText || "").trim();
+
+    if (isApparelTarget) {
+      // Apparel: require EXACT match on the whole button label.
+      // This prevents "M" from matching "Men's", "S" from "S$135", etc.
+      return t.toUpperCase() === preferredNorm;
+    }
+
+    // Footwear Format 1: "US 9.5"
+    const old = t.match(/^US\s+([\d.]+)$/i);
+    if (old && old[1] === preferred) return true;
+
+    // Footwear Format 2: "US M 9.5 / W 11"
+    const newFmt = t.match(/^US\s+M\s+([\d.]+)/i);
+    if (newFmt && newFmt[1] === preferred) return true;
+
+    return false;
+  }) || null;
+}
+
+// ── CTA button finder ─────────────────────────────────────────
+// When a product keyword is set, prefer the CTA inside that product's card
+// so we enter the right product's draw. `scope` is optional.
+function findCTAButtonInScope(scope) {
+  const root = scope || document;
+  const buttons = Array.from(root.querySelectorAll("button"));
+
+  return buttons.find(b => {
+    if (b.disabled) return false;
+    if (b.getAttribute("aria-disabled") === "true") return false;
+
+    const t = (b.innerText || "").trim();
+
+    if (/^join draw/i.test(t)) return true;
+    if (/^buy\s+S\$/i.test(t)) return true;
+    if (/^buy\b/i.test(t)) return true;
+
+    return false;
+  }) || null;
+}
+
+// ── CTA button finder ─────────────────────────────────────────
+function findCTAButton() {
+  // If a product keyword is set, the CTA MUST come from that product's card.
+  // Never fall back to a page-wide CTA search when a keyword is set — that
+  // could submit a different product. Return null so the caller waits/retries
+  // rather than entering the wrong draw.
+  const keyword = settings?.productKeyword;
+  if (keyword && keyword.trim()) {
+    const scope = findProductScope(keyword);
+    if (!scope) return null;
+    return findCTAButtonInScope(scope); // may be null if not ready yet
+  }
+  // No keyword (single-product page): page-wide search is correct.
+  return findCTAButtonInScope(null);
+}
+
+// ── Human-like click ─────────────────────────────────────────
+function humanClick(el, label) {
+  if (!el) { log(`humanClick: null for ${label}`); return; }
+  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  const rect = el.getBoundingClientRect();
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+    el.dispatchEvent(new MouseEvent(type, {
+      bubbles: true, cancelable: true, composed: true,
+      clientX: x, clientY: y, view: window,
+    }));
+  }
+  log(`Clicked: ${label}`);
+}
+
+async function waitFor(fn, timeoutMs = 20000, intervalMs = 200) {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    const r = fn();
+    if (r) return r;
+    await wait(intervalMs);
+  }
+  return null;
+}
+
+// ── Drop countdown watcher ────────────────────────────────────
+// FIX: Watch for the drop to go live when we load early (Coming Soon state).
+// Uses a MutationObserver on the whole body so we catch Nike's React
+// re-renders that swap out the "Coming Soon" button for real size buttons.
+// When sizes appear and the drop is live, we fire the entry flow immediately.
+let dropWatcherActive = false;
+
+function startDropWatcher(tag, preferred) {
+  if (dropWatcherActive) return;
+  dropWatcherActive = true;
+
+  showBanner("⏳ BOT READY — WATCHING FOR DROP TO GO LIVE…", "#111");
+  logBG(`⏳${tag} Drop not live yet. Bot is watching and will auto-enter when sizes appear.`);
+
+  const observer = new MutationObserver(async () => {
+    if (entryAttempted) {
+      observer.disconnect();
+      return;
+    }
+
+    const status = detectPageStatus();
+
+    // Drop has gone live — sizes are now clickable
+    if (status === STATUS.ENTER) {
+      // Extra check: make sure our size button is actually there
+      const sizeBtn = findPreferredSizeButton();
+      if (sizeBtn) {
+        observer.disconnect();
+        logBG(`🚀${tag} DROP IS LIVE! size ${sizeLabel(preferred)} found — entering now!`);
+        showBanner("🚀 DROP LIVE — ENTERING NOW!", "#fa5400");
+        await executeEntry(tag, preferred);
+      }
+      return;
+    }
+
+    // Already entered or pending — stop watching
+    if (status === STATUS.ENTRY_IN || status === STATUS.PURCHASED || status === STATUS.PENDING) {
+      observer.disconnect();
+      if (status === STATUS.PENDING) {
+        showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+        logBG(`⏳${tag} Pending detected — bot stopped watching.`);
+      }
+    }
+  });
+
+  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+  // Safety net: also poll every 500ms in case MutationObserver misses a re-render
+  const pollId = setInterval(async () => {
+    if (entryAttempted) { clearInterval(pollId); return; }
+
+    const status = detectPageStatus();
+    if (status === STATUS.ENTER) {
+      const sizeBtn = findPreferredSizeButton();
+      if (sizeBtn) {
+        clearInterval(pollId);
+        observer.disconnect();
+        if (entryAttempted) return; // double-check before firing
+        logBG(`🚀${tag} DROP IS LIVE (poll)! size ${sizeLabel(preferred)} found — entering now!`);
+        showBanner("🚀 DROP LIVE — ENTERING NOW!", "#fa5400");
+        await executeEntry(tag, preferred);
+      }
+    }
+
+    if (status === STATUS.ENTRY_IN || status === STATUS.PURCHASED || status === STATUS.CLOSED || status === STATUS.PENDING) {
+      clearInterval(pollId);
+      observer.disconnect();
+      if (status === STATUS.PENDING) {
+        showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+        logBG(`⏳${tag} Pending detected in poll — bot stopped.`);
+      }
+    }
+  }, 500);
+}
+
+// ── Core entry logic (extracted for reuse) ────────────────────
+async function executeEntry(tag, preferred) {
+  if (entryAttempted) return; // prevent double-fire
+  entryAttempted = true;
+
+  // Wait for size button to be fully ready (brief grace period)
+  await wait(randInt(200, 500));
+
+  const sizeBtn = findPreferredSizeButton();
+  if (!sizeBtn) {
+    entryAttempted = false; // allow retry
+    logBG(`❌${tag} Size ${sizeLabel(preferred)} disappeared before we could click it — retrying watch.`);
+    startDropWatcher(tag, preferred);
+    return;
+  }
+
+  logBG(`✅${tag} Clicking size ${sizeLabel(preferred)}…`);
+  humanClick(sizeBtn, `Size ${sizeLabel(preferred)}`);
+
+  await wait(randInt(500, 900));
+
+  const ctaBtn = await waitFor(findCTAButton, 8000);
+
+  if (!ctaBtn) {
+    logBG(`❌${tag} CTA button (Join Draw / Buy) did not activate after selecting size.`);
+    entryAttempted = false;
+    return;
+  }
+
+  const ctaText = (ctaBtn.innerText || "").trim();
+  log(`CTA button found: "${ctaText}"`);
+
+  if (settings?.testMode) {
+    logBG(`🧪${tag} TEST MODE — size selected (${sizeLabel(preferred)}), NOT clicking "${ctaText}".`);
+    showBanner(`TEST MODE — size ${sizeLabel(preferred)} selected, not entering`);
+    return;
+  }
+
+  const productTitle = document.title || location.href;
+  sessionStorage.setItem(POLLER_PRODUCT_KEY, productTitle);
+
+  logBG(`🛒${tag} Clicking "${ctaText}" — entering draw…`);
+  humanClick(ctaBtn, ctaText);
+
+  await wait(2500);
+
+  if (location.hostname.includes("nike.com") && !location.hostname.includes("gs.nike.com")) {
+    const postStatus = detectPageStatus();
+    log(`Post-click status: ${postStatus}`);
+
+    if (postStatus === STATUS.ENTRY_IN) {
+      logBG(`📋${tag} Entry confirmed! Draw entered for ${sizeLabel(preferred)}. Starting status poller…`);
+      showBanner("✓ ENTRY SUBMITTED — monitoring for result", "#111");
+      startStatusPoller();
+    } else if (postStatus === STATUS.ENTER) {
+      logBG(`⚠️${tag} CTA click may not have registered — retrying once…`);
+      await wait(500);
+      const retryBtn = findCTAButton();
+      if (retryBtn) humanClick(retryBtn, "CTA retry");
+      await wait(2000);
+      if (detectPageStatus() === STATUS.ENTRY_IN) {
+        logBG(`📋${tag} Entry confirmed on retry! Starting poller…`);
+        startStatusPoller();
+      }
+    } else {
+      logBG(`⚠️${tag} Unexpected post-click status: ${postStatus} — check the page manually.`);
+    }
+  }
+}
+
+// ── Main SNKRS flow ───────────────────────────────────────────
+async function runSNKRSFlow() {
+  const tag = profileTag();
+  const preferred = settings?.preferredSize;
+
+  // ── Check if this is a poller reload ────────────────────────
+  if (sessionStorage.getItem(POLLER_ACTIVE_KEY) === "1") {
+    await wait(2500);
+    checkStatusAfterReload();
+    return;
+  }
+
+  if (!preferred) {
+    log("No size configured. Open the SNKRS Bot popup.");
+    return;
+  }
+
+  // Let the page render fully
+  await wait(2000);
+  const currentStatus = detectPageStatus();
+  log(`Initial page status: ${currentStatus}`);
+
+  if (currentStatus === STATUS.ENTRY_IN) {
+    logBG(`ℹ️${tag} Already entered this draw — starting status poller.`);
+    startStatusPoller();
+    return;
+  }
+  if (currentStatus === STATUS.PENDING) {
+    logBG(`⏳${tag} Entry is PENDING / You\'re in line — bot stopped. Nike is processing.`);
+    showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+    return;
+  }
+  if (currentStatus === STATUS.PURCHASED) {
+    logBG(`@here 🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
+    showBanner("🎉🔥 GOT 'EM — YOU WON!!! CHECK YOUR EMAIL! 🔥🎉", "#1db954");
+    launchConfetti();
+    return;
+  }
+  if ([STATUS.NOT_WON, STATUS.CLOSED, STATUS.SOLD_OUT].includes(currentStatus)) {
+    logBG(`ℹ️${tag} Draw not available (${currentStatus}) — nothing to do.`);
+    return;
+  }
+
+  // FIX: If drop isn't live yet (Coming Soon) or status is Unknown,
+  // start the drop watcher instead of just waiting with waitFor() once.
+  if (currentStatus === STATUS.COMING_SOON || currentStatus === STATUS.UNKNOWN) {
+    // Could be loading early — activate the persistent watcher
+    startDropWatcher(tag, preferred);
+    return;
+  }
+
+  // Drop is already live — enter immediately
+  if (currentStatus === STATUS.ENTER) {
+    logBG(`👟${tag} Drop is live on page load. Entering for ${sizeLabel(preferred)}…`);
+    showBanner(`🟠 BOT ACTIVE — targeting ${sizeLabel(preferred)}`, "#fa5400");
+
+    // FIX: Wait for size buttons to be stable (Nike loads them but they may
+    // briefly show as disabled right as the drop opens)
+    const sizeBtn = await waitFor(findPreferredSizeButton, 30000, 300);
+
+    if (!sizeBtn) {
+      const kw = settings?.productKeyword;
+      const hasKeyword = !!(kw && kw.trim());
+      const scope = hasKeyword ? findProductScope(kw) : null;
+
+      // CASE A: a product keyword/SKU was set but we never located that product.
+      // This is the dangerous case that previously caused a wrong-product buy.
+      // Alert loudly and DO NOT enter anything.
+      if (hasKeyword && !scope) {
+        logBG(`@here ❌${tag} Product "${kw}" was NOT found on this page — bot did NOT buy anything (correct). Check the SKU/keyword or the URL.`);
+        showBanner(`❌ PRODUCT "${kw}" NOT FOUND — nothing bought. Check SKU/URL.`, "#e03131");
+        // Keep watching in case the product card is still lazy-loading, but the
+        // scope guard means we still won't buy a different product.
+        startDropWatcher(tag, preferred);
+        return;
+      }
+
+      // CASE B: product found (or no keyword) but the chosen size isn't there.
+      const available = getAllSizeButtons(scope)
+        .filter(isButtonAvailable)
+        .map(b => (b.innerText || "").trim())
+        .join(", ");
+      const where = scope ? ` for "${kw}"` : "";
+      logBG(`❌${tag} Size ${sizeLabel(preferred)} not found or sold out${where}. Available: ${available || "none visible yet"}`);
+
+      // Don't just give up — start the watcher in case sizes are still loading
+      logBG(`⏳${tag} Starting drop watcher as fallback…`);
+      startDropWatcher(tag, preferred);
+      return;
+    }
+
+    await executeEntry(tag, preferred);
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────
+(async function init() {
+  if (hasRun) return;
+  hasRun = true;
+
+  await loadSettings();
+  if (!settings?.enabled) { log("Bot disabled."); return; }
+  if (settings?.testMode) showBanner("SNKRS BOT — TEST MODE (will not submit)");
+  if (!isLaunchPage()) { log("Not a SNKRS launch page."); return; }
+
+  runSNKRSFlow().catch(err => {
+    logBG(`❌ SNKRS flow error: ${err}`);
+    console.error("[SNKRSBot]", err);
+  });
+})();
+
+// ── Preview / highlight target product ────────────────────────
+// Lets the user verify, BEFORE the drop, exactly which product the bot will
+// target for a given keyword/SKU and size. Draws an outline around the matched
+// product card, scrolls it into view, and highlights the size button it would
+// click. Returns a summary so the popup can show pass/fail.
+let _previewEls = [];
+function clearPreviewHighlight() {
+  for (const el of _previewEls) {
+    try { el.remove(); } catch (e) {}
+  }
+  _previewEls = [];
+  // Remove any inline outline we added to matched elements
+  document.querySelectorAll("[data-snkrs-preview-outline]").forEach(el => {
+    el.style.outline = "";
+    el.style.outlineOffset = "";
+    el.removeAttribute("data-snkrs-preview-outline");
+  });
+}
+
+function makeOverlayLabel(text, color) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  div.style.cssText = `position:fixed;z-index:2147483647;top:0;left:0;background:${color};color:#fff;font:700 13px/1.3 sans-serif;padding:8px 14px;border-radius:0 0 8px 0;box-shadow:0 2px 8px rgba(0,0,0,.3);max-width:90vw;`;
+  return div;
+}
+
+function previewProductTarget(keyword, size, sizeType) {
+  clearPreviewHighlight();
+
+  const kw = (keyword || "").trim();
+  const preferred = (size || "").trim();
+  const preferredNorm = preferred.toUpperCase();
+  const isApparelTarget = APPAREL_SIZES.includes(preferredNorm);
+
+  // Build a temporary settings overlay so findPreferredSizeButton uses these.
+  const savedSize = settings.preferredSize;
+  const savedType = settings.preferredSizeType;
+  const savedKw = settings.productKeyword;
+  settings.preferredSize = preferred;
+  settings.preferredSizeType = sizeType || (isApparelTarget ? "apparel" : "footwear");
+  settings.productKeyword = kw;
+
+  let result = { ok: false, message: "", productText: "", sizeFound: false, sizeText: "" };
+
+  try {
+    // 1) Locate the product scope (or whole page if no keyword)
+    let scope = null;
+    if (kw) {
+      scope = findProductScope(kw);
+      if (!scope) {
+        result.message = `❌ Product "${kw}" NOT found on this page. The bot would REFUSE to buy (safe). Check the SKU/keyword.`;
+        const banner = makeOverlayLabel(`❌ "${kw}" not found — bot would buy nothing`, "#e03131");
+        document.body.appendChild(banner);
+        _previewEls.push(banner);
+        setTimeout(clearPreviewHighlight, 8000);
+        return result;
+      }
+    }
+
+    // 2) Outline the product card (or note whole-page mode)
+    if (scope) {
+      scope.style.outline = "4px solid #1db954";
+      scope.style.outlineOffset = "3px";
+      scope.setAttribute("data-snkrs-preview-outline", "1");
+      scope.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      const title = (scope.querySelector("h1, h2, h3, h4") || {}).innerText
+                 || (scope.innerText || "").slice(0, 60);
+      result.productText = (title || "").trim().split("\n")[0];
+    }
+
+    // 3) Find the exact size button the bot would click
+    const sizeBtn = findPreferredSizeButton();
+    if (sizeBtn) {
+      sizeBtn.style.outline = "4px solid #fa5400";
+      sizeBtn.style.outlineOffset = "2px";
+      sizeBtn.setAttribute("data-snkrs-preview-outline", "1");
+      result.sizeFound = true;
+      result.sizeText = (sizeBtn.innerText || "").trim();
+      result.ok = true;
+
+      const label = kw
+        ? `✅ TARGET: "${result.productText}" — size ${result.sizeText}`
+        : `✅ TARGET (whole page) — size ${result.sizeText}`;
+      result.message = label;
+
+      const banner = makeOverlayLabel(label, "#1db954");
+      document.body.appendChild(banner);
+      _previewEls.push(banner);
+    } else {
+      // Product found but size not available/visible. This is expected before
+      // the drop goes live: Nike shows the product + Coming Soon CTA, but no
+      // clickable size grid yet.
+      const avail = getAllSizeButtons(scope)
+        .filter(isButtonAvailable)
+        .map(b => (b.innerText || "").trim())
+        .join(", ");
+      const preLive = scope && hasProductCta(scope) && !avail;
+      result.ok = !!preLive;
+      result.message = preLive
+        ? `✅ Product found, but drop is not live yet. Size ${sizeLabel(preferred)} is not visible yet — bot will keep watching this product.`
+        : (scope
+          ? `⚠️ Found the product, but size ${sizeLabel(preferred)} isn't available. Available: ${avail || "none yet"}`
+          : `⚠️ Size ${sizeLabel(preferred)} not found on page. Available: ${avail || "none yet"}`);
+      const banner = makeOverlayLabel(result.message, preLive ? "#1db954" : "#f08c00");
+      document.body.appendChild(banner);
+      _previewEls.push(banner);
+    }
+
+    // Auto-clear after 10s so it doesn't linger till drop time
+    setTimeout(clearPreviewHighlight, 10000);
+    return result;
+  } finally {
+    // Restore real settings — preview must not change what the bot uses live.
+    settings.preferredSize = savedSize;
+    settings.preferredSizeType = savedType;
+    settings.productKeyword = savedKw;
+  }
+}
+
+// Listen for preview requests from the popup.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === "preview_target") {
+    try {
+      const r = previewProductTarget(msg.keyword, msg.size, msg.sizeType);
+      sendResponse({ ok: true, result: r });
+    } catch (e) {
+      sendResponse({ ok: false, error: String(e) });
+    }
+    return true;
+  }
+  if (msg && msg.type === "clear_preview") {
+    clearPreviewHighlight();
+    sendResponse({ ok: true });
+    return true;
+  }
+});

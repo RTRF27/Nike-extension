@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Nike SNKRS Bot SG",
+  "version": "1.0",
+  "description": "Auto-selects size and submits SNKRS raffle entries on nike.com/sg.",
+
+  "permissions": [
+    "tabs",
+    "storage",
+    "scripting",
+    "activeTab",
+    "alarms"
+  ],
+
+  "host_permissions": [
+    "*://*.nike.com/*",
+    "*://gs.nike.com/*",
+    "*://gs-payments.nike.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "SNKRS Bot"
+  },
+
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.nike.com/sg/launch/*",
+        "https://nike.com/sg/launch/*"
+      ],
+      "js": ["snkrs-content-script.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gs.nike.com/*"
+      ],
+      "js": ["gs-content-script.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gs-payments.nike.com/*"
+      ],
+      "js": ["gs-payments-content-script.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

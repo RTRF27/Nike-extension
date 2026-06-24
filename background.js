@@ -1,0 +1,207 @@
+// ============================================================
+// Nike SNKRS Bot – Background Service Worker
+// ============================================================
+
+const SETTINGS_KEY = "snkrsBotSettings";
+const DROP_ALARM_NAME = "snkrsDropAlarm";
+
+const defaultSettings = {
+  enabled: true,
+  testMode: false,
+  preferredSize: "",
+  profileLabel: "",
+  logWebhook: "",
+  alertWebhook: "",
+  // Multi-product drop scheduling
+  multiEnabled: false,     // when true, the drop scheduler opens slot tabs
+  dropTimeISO: "",         // ISO datetime string for when to open tabs
+  slots: [],               // [{ url, keyword, size, sizeType }, ...] up to 2
+};
+
+async function getSettings() {
+  const saved = await chrome.storage.sync.get(SETTINGS_KEY);
+  return { ...defaultSettings, ...(saved[SETTINGS_KEY] || {}) };
+}
+
+async function saveSettings(settings) {
+  await chrome.storage.sync.set({ [SETTINGS_KEY]: settings });
+}
+
+async function sendLog(message) {
+  const settings = await getSettings();
+  const isAlert = typeof message === "string" && message.includes("@here");
+
+  if (isAlert) {
+    if (!settings.alertWebhook) return;
+    fetch(settings.alertWebhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: message }),
+    }).catch(console.warn);
+    return;
+  }
+
+  if (!settings.logWebhook) return;
+  fetch(settings.logWebhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: message }),
+  }).catch(console.warn);
+}
+
+// ── Multi-product drop scheduler ──────────────────────────────
+// Opens each configured slot in its own tab, tagging the URL with
+// #snkrsSlot=N so the content script knows which product/size to use.
+function buildSlotUrl(slot, index) {
+  // Slot must have a URL to open. (Keyword-only slots still need a page to
+  // land on — the popup enforces a URL when scheduling auto-open.)
+  let url = (slot.url || "").trim();
+  if (!url) return null;
+  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+
+  // Append our slot marker in the hash so it doesn't disturb Nike's routing.
+  const sep = url.includes("#") ? "&" : "#";
+  return `${url}${sep}snkrsSlot=${index + 1}`;
+}
+
+async function openDropTabs(reason) {
+  const settings = await getSettings();
+  const slots = Array.isArray(settings.slots) ? settings.slots : [];
+  const active = slots.filter(s => s && (s.url || "").trim());
+
+  if (!active.length) {
+    sendLog("⚠️ Drop scheduler fired but no product slots have URLs — nothing opened.");
+    return;
+  }
+
+  sendLog(`⏰ Drop time reached (${reason}) — opening ${active.length} product tab(s) now.`);
+
+  for (let i = 0; i < active.length; i++) {
+    const url = buildSlotUrl(active[i], i);
+    if (!url) continue;
+    chrome.tabs.create({ url, active: i === 0 }, (tab) => {
+      if (chrome.runtime.lastError) {
+        console.warn("[SNKRSBot BG] tab open error:", chrome.runtime.lastError.message);
+      }
+    });
+  }
+
+  // One-shot: clear the schedule so it doesn't refire on next browser start.
+  const cleared = { ...settings, multiEnabled: false, dropTimeISO: "" };
+  await saveSettings(cleared);
+}
+
+async function scheduleDropAlarm() {
+  const settings = await getSettings();
+  await chrome.alarms.clear(DROP_ALARM_NAME);
+
+  if (!settings.multiEnabled || !settings.dropTimeISO) return;
+
+  const when = Date.parse(settings.dropTimeISO);
+  if (isNaN(when)) {
+    sendLog("⚠️ Drop time is not a valid date — scheduler not armed.");
+    return;
+  }
+
+  if (when <= Date.now()) {
+    // Time already passed — open immediately rather than waiting.
+    sendLog("⏰ Configured drop time is in the past — opening tabs now.");
+    openDropTabs("time already passed");
+    return;
+  }
+
+  chrome.alarms.create(DROP_ALARM_NAME, { when });
+  const mins = Math.round((when - Date.now()) / 60000);
+  sendLog(`✅ Drop scheduled — opening ${(settings.slots || []).filter(s => s && s.url).length} tab(s) in ~${mins} min.`);
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === DROP_ALARM_NAME) {
+    openDropTabs("scheduled alarm");
+  }
+});
+
+// Re-arm the alarm when the service worker starts (e.g. browser restart).
+chrome.runtime.onStartup.addListener(() => { scheduleDropAlarm(); });
+chrome.runtime.onInstalled.addListener(() => { scheduleDropAlarm(); });
+
+// ── Per-tab card fill cache ───────────────────────────────────
+// Stores the last card_fill_done result per tabId so gs-content-script
+// can retrieve it even if it arms the listener after the signal was sent.
+const cardFillCache = {};
+
+// ── Message handler ──────────────────────────────────────────
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  // gs-content-script polls this to check if card was already filled
+  if (msg.type === "get_card_fill_cache") {
+    const tabId = sender?.tab?.id;
+    const cached = tabId ? cardFillCache[tabId] : null;
+    sendResponse({ cached });
+    return true;
+  }
+  if (msg.type === "get_settings") {
+    getSettings().then(s => sendResponse({ settings: s }));
+    return true;
+  }
+
+  if (msg.type === "save_settings") {
+    saveSettings(msg.settings).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  // Popup asks us to (re)arm or cancel the drop schedule after saving.
+  if (msg.type === "schedule_drop") {
+    scheduleDropAlarm().then(() => sendResponse({ ok: true }));
+    return true;
+  }
+  if (msg.type === "cancel_drop") {
+    chrome.alarms.clear(DROP_ALARM_NAME).then(() => {
+      sendLog("🛑 Drop schedule cancelled.");
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+  // Manual trigger: open the slot tabs right now (for testing).
+  if (msg.type === "open_drop_now") {
+    openDropTabs("manual trigger").then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (msg.type === "log") {
+    sendLog(msg.message);
+    return false;
+  }
+
+  if (msg.type === "card_fill_done") {
+    // The payments iframe and gs-content-script are in the SAME tab.
+    // sender.tab.id is the tab the iframe message came from —
+    // send back to that tab's top frame (frameId: 0) where gs-content-script lives.
+    const tabId = sender?.tab?.id;
+    // Cache the result so gs-content-script can retrieve it if it arms late
+    if (tabId) cardFillCache[tabId] = { filled: msg.filled, ts: Date.now() };
+    if (tabId) {
+      chrome.tabs.sendMessage(
+        tabId,
+        { type: "card_fill_done", filled: msg.filled },
+        { frameId: 0 }, // top frame = gs-content-script.js
+        () => {
+          if (chrome.runtime.lastError) {
+            console.warn("[SNKRSBot BG] card_fill_done relay error (non-fatal):",
+              chrome.runtime.lastError.message);
+          }
+        }
+      );
+    } else {
+      // Fallback: broadcast to all gs.nike.com tabs
+      chrome.tabs.query({ url: "https://gs.nike.com/*" }, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, { type: "card_fill_done", filled: msg.filled },
+            { frameId: 0 }, () => { chrome.runtime.lastError; });
+        });
+      });
+    }
+    return false;
+  }
+
+  return false;
+});
