@@ -177,9 +177,18 @@ select.inp { cursor: pointer; }
 .chk { font-size: 12px; color: var(--grey); display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .chk input { width: 15px; height: 15px; accent-color: var(--orange); }
 
-.owncard-panel {
+.acct-card-panel {
   margin-top: 12px; padding: 12px; background: #111; border: 1px solid var(--line); border-radius: 6px;
 }
+.acct-card-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  margin-bottom: 10px; flex-wrap: wrap;
+}
+.acct-card-head > span:first-child {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 12px; font-weight: 900; letter-spacing: 1.5px; color: var(--grey);
+}
+.acct-card-note { font-size: 10px; color: var(--grey2); }
 .acct-msg {
   font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
   letter-spacing: .5px; margin-top: 8px; min-height: 14px;
@@ -242,11 +251,6 @@ select.inp { cursor: pointer; }
   font-size: 11px; color: #7fd99a;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-
-/* ── Vault import bar (top of each account row) ── */
-.acct-vault-bar { margin-bottom: 10px; }
-.acct-vault-bar .inp { font-size: 12px; color: var(--grey); }
-.acct-vault-bar .inp:focus { color: var(--white); }
 
 /* ── Live status badge (bottom of each account row) ── */
 .acct-status-row {
@@ -377,24 +381,7 @@ select.inp { cursor: pointer; }
   padding: 2px 8px; border-radius: 10px; border: 1px solid currentColor;
 }
 
-/* ── Profile Vault card ── */
-.vault-row {
-  display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 10px 0; border-bottom: 1px solid #1e1e1e;
-}
-.vault-row:last-child { border-bottom: none; }
-.vault-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.vault-label {
-  font-family: 'Barlow Condensed', sans-serif;
-  font-size: 14px; font-weight: 700; letter-spacing: .5px;
-}
-.vault-sub {
-  font-size: 11px; color: var(--grey);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.vault-btns { display: flex; gap: 6px; flex-shrink: 0; }
-.vault-card-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-  background: var(--orange); margin-left: 4px; vertical-align: middle;
-  title-attr: "Own card stored";
-}
+/* ── Getting Started guide ── */
+#guideHead h2 { font-size: 14px; }
+#guideBody .steps { margin-top: 8px; }
+#guideBody .steps li { margin-bottom: 6px; }

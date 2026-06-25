@@ -61,6 +61,39 @@
       <!-- ░░ LEFT COLUMN ░░ -->
       <div class="col">
 
+        <!-- Getting Started guide -->
+        <section class="card" id="guideCard">
+          <div class="card-head" id="guideHead" style="cursor:pointer;">
+            <h2>🚀 GETTING STARTED — HOW TO RUN A DROP</h2>
+            <span class="card-tag" id="guideToggle">SHOW</span>
+          </div>
+          <div id="guideBody" style="display:none;">
+            <p class="hint">Follow these once per machine, then steps 4–7 for every drop.</p>
+            <ol class="steps">
+              <li><strong>Install the launcher (one time).</strong> The dashboard can’t open other Chrome
+                profiles by itself. Install the native helper from the <code>native-host/</code> folder,
+                then click <em>Test launcher connection</em> below the accounts. It should turn green.</li>
+              <li><strong>Create a Chrome profile per Nike account.</strong> Use
+                <em>Create Chrome Profile</em> (right column). Each click opens a fresh profile on the
+                Nike SG login page — sign into one Nike account there. Repeat for every account.</li>
+              <li><strong>Add accounts.</strong> Each account row = one Chrome profile. Pick the profile,
+                give it a label, and fill its <strong>card details</strong> right in the row
+                (cards are per account — there are no saved cards in the profiles).</li>
+              <li><strong>Set the drop.</strong> Paste the product URL and pick your size pool in
+                <em>Drop Details</em>. Hit <em>🎲 Randomly assign</em> to deal a size to each account.</li>
+              <li><strong>Save.</strong> Click <em>Save central config</em> so the launcher writes the
+                shared config every profile reads at drop time.</li>
+              <li><strong>Pre-warm (optional but recommended).</strong> A few minutes before the drop,
+                click <em>🚀 Launch all now</em> to open every profile so Kasada warms up. Profiles that
+                aren’t fully set up just open to the SNKRS feed; fully-configured ones go straight to the
+                product.</li>
+              <li><strong>Drop time.</strong> Either let <em>⏰ Scheduled auto-launch</em> open the
+                ⏰-marked accounts automatically, or click <em>🚀 Launch all now</em> yourself. Watch the
+                live status badge on each row, and verify wins in <em>Order Checker</em> afterwards.</li>
+            </ol>
+          </div>
+        </section>
+
         <!-- Central Drop -->
         <section class="card">
           <div class="card-head">
@@ -127,13 +160,18 @@
           <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
         </section>
 
-        <!-- Central Card -->
+        <!-- Fallback Card -->
         <section class="card">
           <div class="card-head">
-            <h2>PAYMENT CARD <span class="lock">🔒</span></h2>
-            <span class="card-tag">APPLIED TO ALL ACCOUNTS</span>
+            <h2>FALLBACK CARD <span class="lock">🔒</span></h2>
+            <span class="card-tag">OPTIONAL · ONLY IF A ROW IS BLANK</span>
           </div>
-          <p class="hint">This is the shared “generic” card every account autofills at checkout — unless an account sets its own below. Stored locally in <code>~/.snkrs-bot/config.json</code>.</p>
+          <p class="hint">
+            Card details live <strong>per account</strong> — fill each account’s card in its row on the right.
+            This fallback card is only used for an account whose own card fields are left blank.
+            Leave this entirely empty if you’d rather type the card manually at checkout for every entry.
+            Stored locally in <code>~/.snkrs-bot/config.json</code>.
+          </p>
 
           <label class="lbl" for="cardName">Name on Card</label>
           <input type="text" id="cardName" class="inp" placeholder="REAGAN TANG" autocomplete="off">
@@ -196,6 +234,27 @@
       <!-- ░░ RIGHT COLUMN ░░ -->
       <div class="col">
 
+        <!-- Chrome Profile Creator -->
+        <section class="card" id="profileCreatorCard">
+          <div class="card-head">
+            <h2>CREATE CHROME PROFILE</h2>
+            <span class="card-tag">ONE PROFILE = ONE NIKE ACCOUNT</span>
+          </div>
+          <p class="hint">
+            Click below to spin up a brand-new Chrome profile and open the Nike SG login page in it.
+            Sign in there with one Nike account. Do this once per account. The new profile is added
+            to your accounts list automatically.
+          </p>
+          <div class="row" style="align-items:flex-end; gap:10px;">
+            <div class="grow">
+              <label class="lbl" for="newProfileName">Profile name <span class="muted">(auto-suggested)</span></label>
+              <input type="text" id="newProfileName" class="inp" placeholder="Profile 5">
+            </div>
+            <button id="createProfileBtn" class="btn btn-light" style="flex:none; white-space:nowrap;">➕ CREATE &amp; OPEN LOGIN</button>
+          </div>
+          <div id="profileCreatorMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+        </section>
+
         <section class="card">
           <div class="card-head">
             <h2>ACCOUNTS</h2>
@@ -218,8 +277,10 @@
             <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL NOW</button>
           </div>
           <p class="hint" style="margin-top:8px; margin-bottom:8px;">
-            <strong>Launch all now</strong> opens every account immediately — use this to pre-warm Kasada before the drop.
-            If you've set a scheduled time, only accounts with ⏰ auto will also open automatically at drop time.
+            <strong>Launch all now</strong> opens <em>every</em> account that has a Chrome profile — even
+            ones you haven’t finished setting up — so you can pre-warm Kasada. Fully-configured accounts
+            (profile + size + URL) go straight to the product and the bot runs; the rest just open to the
+            SNKRS feed to warm up. If you set a scheduled time, only ⏰ auto accounts open automatically at drop time.
           </p>
           <div class="actions">
             <button id="testHostBtn" class="btn btn-dark">Test launcher connection</button>
@@ -275,20 +336,6 @@
           </div>
         </section>
 
-        <!-- Profile Vault -->
-        <section class="card" id="vaultCard">
-          <div class="card-head">
-            <h2>PROFILE VAULT</h2>
-            <span class="card-tag">SAVED TEMPLATES</span>
-          </div>
-          <p class="hint">
-            Save profile templates (label, Chrome profile, size, card) here for quick reuse.
-            Click <strong>💾 vault</strong> on any account row to save it, or <strong>USE →</strong> below to add a row from a template.
-          </p>
-          <div id="vaultList"></div>
-          <div id="vaultMsg" class="status-msg" style="font-size:11px; text-align:left; min-height:14px;"></div>
-        </section>
-
       </div>
     </div>
 
@@ -315,13 +362,6 @@
   <template id="accountRowTpl">
     <div class="acct">
 
-      <!-- Vault import bar -->
-      <div class="acct-vault-bar">
-        <select class="inp f-vault-select" title="Import all settings from a saved vault profile">
-          <option value="">— import from vault —</option>
-        </select>
-      </div>
-
       <div class="acct-grid">
         <div class="acct-field grow">
           <label class="lbl">Label</label>
@@ -338,24 +378,12 @@
         </div>
       </div>
 
-      <div class="acct-foot">
-        <div class="acct-toggles">
-          <label class="chk">
-            <input type="checkbox" class="f-owncard"> own card
-          </label>
-          <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
-            <input type="checkbox" class="f-autolaunch"> ⏰ auto
-          </label>
+      <!-- Card for this account (always shown) -->
+      <div class="acct-card-panel">
+        <div class="acct-card-head">
+          <span>💳 CARD FOR THIS ACCOUNT</span>
+          <span class="acct-card-note">optional — blank uses the fallback card</span>
         </div>
-        <div class="acct-actions">
-          <button class="btn btn-mini btn-dark f-copycmd" title="Copy the terminal command to open this profile">⌘ copy cmd</button>
-          <button class="btn btn-mini btn-dark f-save-vault" title="Save this account to Profile Vault as a reusable template">💾 vault</button>
-          <button class="btn btn-mini btn-accent f-launch">🚀 launch</button>
-          <button class="btn btn-mini btn-danger f-remove" title="Remove account">✕</button>
-        </div>
-      </div>
-
-      <div class="owncard-panel" style="display:none;">
         <div class="row">
           <div class="grow">
             <label class="lbl">Name on Card</label>
@@ -377,6 +405,19 @@
             <label class="lbl">CVV</label>
             <input type="password" class="inp oc-cvv" maxlength="4" autocomplete="off" inputmode="numeric">
           </div>
+        </div>
+      </div>
+
+      <div class="acct-foot">
+        <div class="acct-toggles">
+          <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
+            <input type="checkbox" class="f-autolaunch"> ⏰ auto
+          </label>
+        </div>
+        <div class="acct-actions">
+          <button class="btn btn-mini btn-dark f-copycmd" title="Copy the terminal command to open this profile">⌘ copy cmd</button>
+          <button class="btn btn-mini btn-accent f-launch">🚀 launch</button>
+          <button class="btn btn-mini btn-danger f-remove" title="Remove account">✕</button>
         </div>
       </div>
 

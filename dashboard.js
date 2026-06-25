@@ -17,7 +17,6 @@
 
 const NATIVE_HOST = "com.snkrs.launcher";
 const DASH_KEY    = "snkrsDashboard";
-const VAULT_KEY   = "snkrsVault";
 const STATUS_KEY  = "snkrsStatus";
 const HISTORY_KEY = "snkrsHistory";
 const ORDERS_KEY  = "snkrsOrders";
@@ -27,8 +26,7 @@ const APPAREL_SIZES  = ["XS","S","M","L","XL","XXL"];
 
 let discoveredProfiles = [];   // [{dir,name}]
 let hostOk = false;
-let accounts = [];             // [{id,label,profileDir,manualProfile,size,sizeType,ownCard,card}]
-let savedVault = [];           // [{id,label,profileDir,size,sizeType,card}]
+let accounts = [];             // [{id,label,profileDir,manualProfile,size,sizeType,card}]
 let liveStatuses = {};         // {profileDir: {code,message,time}}
 const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl}
 
@@ -207,7 +205,7 @@ function refreshAllBadges() {
   accounts.forEach(a => { if (a.profileDir) updateStatusBadge(a.profileDir); });
 }
 
-// ── Storage change listener (live status + vault + history sync) ─
+// ── Storage change listener (live status + history sync) ─
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes[STATUS_KEY]) {
@@ -222,11 +220,6 @@ chrome.storage.onChanged.addListener((changes, area) => {
     liveStatuses = newStatuses;
     refreshAllBadges();
   }
-  if (changes[VAULT_KEY]) {
-    savedVault = changes[VAULT_KEY].newValue || [];
-    renderVault();
-    refreshVaultSelects();
-  }
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
   }
@@ -239,99 +232,56 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// ── Vault helpers ─────────────────────────────────────────────
-async function loadVault() {
-  const data = await chrome.storage.local.get(VAULT_KEY);
-  savedVault = Array.isArray(data[VAULT_KEY]) ? data[VAULT_KEY] : [];
+// ── Chrome Profile Creator ────────────────────────────────────
+// Chrome auto-creates a profile directory the first time it's launched with
+// --profile-directory="<name>". So "creating" a profile is just launching a
+// fresh directory name straight onto the Nike SG login page.
+const NIKE_LOGIN_URL = "https://www.nike.com/sg/login";
+
+function nextProfileName() {
+  const nums = [];
+  const grab = (dir) => {
+    const m = /^Profile (\d+)$/.exec((dir || "").trim());
+    if (m) nums.push(parseInt(m[1], 10));
+  };
+  discoveredProfiles.forEach(p => grab(p.dir));
+  accounts.forEach(a => grab(a.profileDir));
+  const max = nums.length ? Math.max(...nums) : 0;
+  return `Profile ${max + 1}`;
 }
 
-async function persistVault() {
-  await chrome.storage.local.set({ [VAULT_KEY]: savedVault });
+function suggestProfileName() {
+  const inp = $("newProfileName");
+  if (inp && !inp.value.trim()) inp.value = nextProfileName();
 }
 
-function fillVaultSelect(sel) {
-  const current = sel.value;
-  sel.innerHTML = "";
-  sel.appendChild(el("option", { value: "" }, "— import from vault —"));
-  savedVault.forEach(vp => {
-    const label = vp.label || vp.profileDir || "Unnamed";
-    const size  = vp.size ? ` · ${vp.sizeType === "apparel" ? "" : "US "}${vp.size}` : "";
-    sel.appendChild(el("option", { value: vp.id }, label + size));
-  });
-  sel.value = current;
-}
+async function createProfile() {
+  const msg = $("profileCreatorMsg");
+  const inp = $("newProfileName");
+  const name = (inp && inp.value.trim()) || nextProfileName();
 
-function refreshVaultSelects() {
-  document.querySelectorAll(".f-vault-select").forEach(sel => fillVaultSelect(sel));
-}
-
-function buildVaultRow(vp) {
-  const row = document.createElement("div");
-  row.className = "vault-row";
-
-  const info = document.createElement("div");
-  info.className = "vault-info";
-
-  const name = document.createElement("span");
-  name.className = "vault-label";
-  name.textContent = vp.label || "(unlabelled)";
-
-  const sub = document.createElement("span");
-  sub.className = "vault-sub";
-  const sizeStr  = vp.size ? `${vp.sizeType === "apparel" ? "" : "US "}${vp.size}` : "no size";
-  const cardStr  = (vp.card && vp.card.cardNumber) ? " · own card" : "";
-  sub.textContent = `${vp.profileDir || "no profile"} · ${sizeStr}${cardStr}`;
-
-  info.append(name, sub);
-
-  const btns = document.createElement("div");
-  btns.className = "vault-btns";
-
-  const useBtn = document.createElement("button");
-  useBtn.className = "btn btn-mini btn-dark";
-  useBtn.textContent = "USE →";
-  useBtn.title = "Add a new account row pre-filled with this template";
-  useBtn.addEventListener("click", () => {
-    accounts.push({
-      id: uid(),
-      label: vp.label || "",
-      profileDir: vp.profileDir || "",
-      size: vp.size || "",
-      sizeType: vp.sizeType || "footwear",
-      ownCard: !!(vp.card && vp.card.cardNumber),
-      card: vp.card ? { ...vp.card } : null,
-    });
-    renderAccounts();
-    document.getElementById("accountsList").lastElementChild
-      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  });
-
-  const delBtn = document.createElement("button");
-  delBtn.className = "btn btn-mini btn-danger";
-  delBtn.textContent = "✕";
-  delBtn.title = "Delete from vault";
-  delBtn.addEventListener("click", async () => {
-    savedVault = savedVault.filter(p => p.id !== vp.id);
-    await persistVault();
-    renderVault();
-    refreshVaultSelects();
-    flashTemp($("vaultMsg"), "Removed from vault.", "#888");
-  });
-
-  btns.append(useBtn, delBtn);
-  row.append(info, btns);
-  return row;
-}
-
-function renderVault() {
-  const list = $("vaultList");
-  if (!list) return;
-  list.innerHTML = "";
-  if (!savedVault.length) {
-    list.appendChild(el("p", { className: "hint" }, "No saved profiles yet. Click 💾 vault on any account row to save it here."));
+  if (accounts.some(a => a.profileDir === name) || discoveredProfiles.some(p => p.dir === name)) {
+    flashTemp(msg, `"${name}" already exists — pick another name.`, "#fa5400", 4000);
     return;
   }
-  savedVault.forEach(vp => list.appendChild(buildVaultRow(vp)));
+
+  flash(msg, `Creating "${name}" and opening Nike login…`, "#888");
+  const resp = await hostSend({ cmd: "launch", profileDir: name, url: NIKE_LOGIN_URL });
+
+  if (resp.ok) {
+    // Add it to the accounts list straight away so it's ready to configure.
+    accounts.push({ id: uid(), label: name, profileDir: name, size: "", sizeType: "footwear", card: {} });
+    renderAccounts();
+    await saveAll(true);
+    if (inp) inp.value = nextProfileName();
+    flashTemp(msg, `✓ Created "${name}" — sign into your Nike account in the new window, then fill its size & card below.`, "#1db954", 9000);
+    document.getElementById("accountsList").lastElementChild
+      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } else if (resp.hostMissing) {
+    flashTemp(msg, "Launcher offline — install the native host first (see the guide / setup below).", "#fa5400", 6000);
+  } else {
+    flashTemp(msg, "Couldn't create profile: " + resp.error, "#e03131", 6000);
+  }
 }
 
 // ── Order checker ─────────────────────────────────────────────
@@ -637,7 +587,6 @@ function importConfig(file) {
       const config = JSON.parse(e.target.result);
       applyConfigToUI(config);
       renderAccounts();
-      renderVault();
       renderDropUI();
       startCountdown();
       await saveAll(false);
@@ -862,15 +811,12 @@ function buildAccountRow(acct) {
   const profileEl   = row.querySelector(".f-profile");
   const manualEl    = row.querySelector(".f-profile-manual");
   const sizeEl      = row.querySelector(".f-size");
-  const ownCardEl   = row.querySelector(".f-owncard");
   const autoEl      = row.querySelector(".f-autolaunch");
-  const panel       = row.querySelector(".owncard-panel");
   const ocName      = row.querySelector(".oc-name");
   const ocNumber    = row.querySelector(".oc-number");
   const ocExpiry    = row.querySelector(".oc-expiry");
   const ocCvv       = row.querySelector(".oc-cvv");
   const msgEl       = row.querySelector(".acct-msg");
-  const vaultSel    = row.querySelector(".f-vault-select");
   const assignedEl  = row.querySelector(".f-assigned");
   const statusRow   = row.querySelector(".f-status-row");
   const statusBadge = row.querySelector(".f-status-badge");
@@ -881,10 +827,7 @@ function buildAccountRow(acct) {
   autoEl.checked = !!acct.autoLaunch;
   fillSizeSelect(sizeEl, acct.size, acct.sizeType);
   fillProfileSelect(profileEl, manualEl, acct.profileDir);
-  fillVaultSelect(vaultSel);
 
-  ownCardEl.checked = !!acct.ownCard;
-  panel.style.display = acct.ownCard ? "block" : "none";
   const c = acct.card || {};
   ocName.value = c.cardName || "";
   ocNumber.value = c.cardNumber || "";
@@ -930,12 +873,8 @@ function buildAccountRow(acct) {
     registerStatus(acct.profileDir);
   });
 
-  ownCardEl.addEventListener("change", () => {
-    acct.ownCard = ownCardEl.checked;
-    panel.style.display = acct.ownCard ? "block" : "none";
-  });
   autoEl.addEventListener("change", () => { acct.autoLaunch = autoEl.checked; });
-  const syncOwnCard = () => {
+  const syncCard = () => {
     acct.card = {
       cardName: ocName.value.trim(),
       cardNumber: ocNumber.value.trim(),
@@ -943,59 +882,7 @@ function buildAccountRow(acct) {
       cardCvv: ocCvv.value.trim(),
     };
   };
-  [ocName, ocNumber, ocExpiry, ocCvv].forEach(i => i.addEventListener("input", syncOwnCard));
-
-  // ── Vault import: fill this row from a saved vault profile ──
-  vaultSel.addEventListener("change", () => {
-    if (!vaultSel.value) return;
-    const vp = savedVault.find(v => v.id === vaultSel.value);
-    if (!vp) { vaultSel.value = ""; return; }
-
-    labelEl.value = vp.label || "";       acct.label     = vp.label || "";
-    fillProfileSelect(profileEl, manualEl, vp.profileDir);
-    acct.profileDir = vp.profileDir || "";
-    fillSizeSelect(sizeEl, vp.size, vp.sizeType);
-    const { size, sizeType } = parseSizeValue(sizeEl.value);
-    acct.size = size; acct.sizeType = sizeType;
-
-    if (vp.card && vp.card.cardNumber) {
-      ownCardEl.checked = true; acct.ownCard = true;
-      panel.style.display = "block";
-      ocName.value   = vp.card.cardName   || "";
-      ocNumber.value = vp.card.cardNumber || "";
-      ocExpiry.value = vp.card.cardExpiry || "";
-      ocCvv.value    = vp.card.cardCvv    || "";
-      acct.card = { ...vp.card };
-    }
-    registerStatus(acct.profileDir);
-    vaultSel.value = ""; // reset after import
-    flashTemp(msgEl, `Imported from vault: "${vp.label || vp.profileDir}".`, "#1db954");
-  });
-
-  // ── Save this account row to vault ──────────────────────────
-  row.querySelector(".f-save-vault").addEventListener("click", async () => {
-    if (!acct.label && !acct.profileDir) {
-      flashTemp(msgEl, "Fill in at least a label or Chrome profile first.", "#fa5400");
-      return;
-    }
-    const vp = {
-      id: uid(),
-      label:      acct.label || acct.profileDir || "Profile",
-      profileDir: acct.profileDir || "",
-      size:       acct.size || "",
-      sizeType:   acct.sizeType || "footwear",
-      card:       acct.ownCard && acct.card && acct.card.cardNumber ? { ...acct.card } : null,
-    };
-    // Avoid exact duplicate labels
-    const dupe = savedVault.find(v => v.label === vp.label && v.profileDir === vp.profileDir);
-    if (dupe) {
-      Object.assign(dupe, vp, { id: dupe.id }); // update in-place
-    } else {
-      savedVault.push(vp);
-    }
-    await persistVault();
-    flashTemp(msgEl, `💾 Saved to vault as "${vp.label}".`, "#1db954");
-  });
+  [ocName, ocNumber, ocExpiry, ocCvv].forEach(i => i.addEventListener("input", syncCard));
 
   // ── Buttons ──
   row.querySelector(".f-remove").addEventListener("click", () => {
@@ -1073,9 +960,17 @@ function buildConfig() {
       url: a.url || "",
       keyword: a.keyword || "",
       autoLaunch: !!a.autoLaunch,
-      card: a.ownCard ? (a.card || {}) : null,
+      card: cardOrNull(a.card),
     })),
   };
+}
+
+// Return the card object only if the user actually entered something,
+// otherwise null so the background falls back to the global card.
+function cardOrNull(card) {
+  if (!card) return null;
+  const has = (card.cardNumber || card.cardName || card.cardExpiry || card.cardCvv || "").trim();
+  return has ? card : null;
 }
 
 // ── Persist: local mirror + shared config file via host ───────
@@ -1172,29 +1067,41 @@ async function launchAccount(acct, msgEl) {
   }
 }
 
+// Warm-up URL for profiles that aren't fully configured — opens the SNKRS feed
+// (no #snkrsBoot marker, so the bot stays idle) just to warm Kasada/cookies.
+const WARMUP_URL = "https://www.nike.com/sg/launch";
+
 async function launchAll() {
-  const ready = accounts.filter(a => a.profileDir && a.size && resolvedUrl(a));
-  if (!ready.length) {
-    flashTemp($("statusMsg"), multiProduct
-      ? "No accounts ready — run 🎲 assign so each gets a product + size."
-      : "No accounts ready (need Drop URL, a profile + size).", "#fa5400");
+  // Launch EVERY account that has a Chrome profile — not just configured ones.
+  const all = accounts.filter(a => a.profileDir);
+  if (!all.length) {
+    flashTemp($("statusMsg"), "No accounts have a Chrome profile set yet.", "#fa5400");
     return;
   }
   const config = await saveAll(true);
   await appendHistory(config);
-  flash($("statusMsg"), `Launching ${ready.length} accounts…`, "#888");
+
+  const isConfigured = (a) => a.size && resolvedUrl(a);
+  const configured   = all.filter(isConfigured);
+  const warmCount    = all.length - configured.length;
+
+  flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
   let okCount = 0, lastErr = "";
-  for (const acct of ready) {
-    const url = bootUrlFor(acct);
+  for (const acct of all) {
+    const url = isConfigured(acct) ? bootUrlFor(acct) : WARMUP_URL;
     const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
     if (resp.ok) okCount++;
     else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 400)); // stagger so Chrome keeps up
   }
-  if (okCount === ready.length) {
-    flashTemp($("statusMsg"), `🚀 Launched all ${okCount} accounts onto the drop.`, "#1db954", 5000);
+
+  if (okCount === all.length) {
+    const tail = warmCount
+      ? ` ${configured.length} went to the drop; ${warmCount} opened to warm up (add their size/URL to run the bot).`
+      : " All went straight to the drop.";
+    flashTemp($("statusMsg"), `🚀 Launched ${okCount} profiles.${tail}`, "#1db954", 8000);
   } else if (okCount > 0) {
-    flashTemp($("statusMsg"), `Launched ${okCount}/${ready.length}. Last error: ${lastErr}`, "#f0c070", 6000);
+    flashTemp($("statusMsg"), `Launched ${okCount}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
   } else {
     flashTemp($("statusMsg"), `Couldn't launch. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
   }
@@ -1282,8 +1189,7 @@ function applyConfigToUI(cfg) {
     url: a.url || "",
     keyword: a.keyword || "",
     autoLaunch: !!a.autoLaunch,
-    ownCard: !!a.card,
-    card: a.card || null,
+    card: a.card || {},
   }));
 }
 
@@ -1367,8 +1273,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   attachCardFormatters($("cardNumber"), $("cardExpiry"), $("cardCvv"));
 
-  // 1) Load saved vault profiles, live status snapshots, and history.
-  await loadVault();
+  // 1) Load live status snapshots and history.
   await loadHistory();
   const storedStatus = await chrome.storage.local.get(STATUS_KEY);
   liveStatuses = storedStatus[STATUS_KEY] || {};
@@ -1388,15 +1293,26 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadProfiles();
   }
 
-  if (!accounts.length) accounts = [{ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", ownCard: false, card: null }];
+  if (!accounts.length) accounts = [{ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", card: {} }];
   renderAccounts();
-  renderVault();
   renderDropUI();
   startCountdown();
+  suggestProfileName();
+
+  // ── Getting Started guide (collapsible) ──
+  $("guideHead").addEventListener("click", () => {
+    const body = $("guideBody");
+    const open = body.style.display !== "none";
+    body.style.display = open ? "none" : "";
+    $("guideToggle").textContent = open ? "SHOW" : "HIDE";
+  });
+
+  // ── Chrome Profile Creator ──
+  $("createProfileBtn").addEventListener("click", createProfile);
 
   // ── Buttons ──
   $("addAccountBtn").addEventListener("click", () => {
-    accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", ownCard: false, card: null });
+    accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", card: {} });
     renderAccounts();
   });
   $("scheduleEnabled").addEventListener("change", () => {
