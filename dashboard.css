@@ -177,18 +177,30 @@ select.inp { cursor: pointer; }
 .chk { font-size: 12px; color: var(--grey); display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .chk input { width: 15px; height: 15px; accent-color: var(--orange); }
 
-.acct-card-panel {
-  margin-top: 12px; padding: 12px; background: #111; border: 1px solid var(--line); border-radius: 6px;
+/* Per-account card picker */
+.acct-card-row { margin-top: 12px; }
+.acct-card-row .f-card-select { font-size: 13px; }
+
+/* Card profiles list */
+.cardprofile-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid #1e1e1e;
 }
-.acct-card-head {
-  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
-  margin-bottom: 10px; flex-wrap: wrap;
-}
-.acct-card-head > span:first-child {
+.cardprofile-row:last-child { border-bottom: none; }
+.cardprofile-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.cardprofile-name {
   font-family: 'Barlow Condensed', sans-serif;
-  font-size: 12px; font-weight: 900; letter-spacing: 1.5px; color: var(--grey);
+  font-size: 14px; font-weight: 700; letter-spacing: .5px;
 }
-.acct-card-note { font-size: 10px; color: var(--grey2); }
+.cardprofile-sub {
+  font-family: 'Courier New', monospace; font-size: 11px; color: var(--grey);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cardprofile-btns { display: flex; gap: 6px; flex-shrink: 0; }
+.cardform {
+  margin-top: 14px; padding: 14px; background: #111;
+  border: 1px solid var(--line); border-radius: 6px;
+}
 .acct-msg {
   font-family: 'Barlow Condensed', sans-serif; font-size: 12px; font-weight: 700;
   letter-spacing: .5px; margin-top: 8px; min-height: 14px;
@@ -304,8 +316,17 @@ select.inp { cursor: pointer; }
   border-radius: var(--radius); padding: 12px; margin-bottom: 10px;
   transition: border-color .15s;
 }
-.order-card.match { border-color: var(--orange); }
+.order-card.match { border-color: var(--green); box-shadow: 0 0 0 1px rgba(29,185,84,.4); }
 .order-card:last-child { margin-bottom: 0; }
+.order-win-banner {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 13px; font-weight: 900; letter-spacing: 1px;
+  color: #fff; background: var(--green);
+  padding: 5px 10px; border-radius: 6px; margin-bottom: 10px; text-align: center;
+}
+.order-item-sku {
+  font-family: 'Courier New', monospace; font-size: 11px; color: #9fe3bd; margin-top: 2px;
+}
 
 .order-head {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -327,9 +348,9 @@ select.inp { cursor: pointer; }
   display: flex; align-items: center; gap: 10px;
   padding: 6px 8px; background: #0f0f0f; border-radius: 6px;
 }
-.order-item.match { background: #1a0d00; border: 1px solid #4a2000; }
+.order-item.match { background: #0f2417; border: 1px solid #1f5a32; }
 .order-thumb {
-  width: 44px; height: 44px; border-radius: 4px;
+  width: 60px; height: 60px; border-radius: 4px;
   object-fit: cover; background: #222; flex-shrink: 0;
 }
 .order-item-info { flex: 1; min-width: 0; }
@@ -341,8 +362,8 @@ select.inp { cursor: pointer; }
 .match-badge {
   font-family: 'Barlow Condensed', sans-serif;
   font-size: 10px; font-weight: 700; letter-spacing: 1px;
-  background: var(--orange); color: #fff; padding: 2px 7px; border-radius: 10px;
-  flex-shrink: 0;
+  background: var(--green); color: #fff; padding: 2px 7px; border-radius: 10px;
+  flex-shrink: 0; white-space: nowrap;
 }
 .order-raw {
   font-size: 11px; color: var(--grey2); margin-top: 6px; line-height: 1.5;

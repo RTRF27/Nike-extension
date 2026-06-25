@@ -71,8 +71,8 @@
     },
     {
       "matches": [
-        "https://www.nike.com/*/orders",
-        "https://www.nike.com/*/orders/*"
+        "https://www.nike.com/*orders*",
+        "https://nike.com/*orders*"
       ],
       "js": ["orders-fetch-interceptor.js"],
       "world": "MAIN",
@@ -80,8 +80,8 @@
     },
     {
       "matches": [
-        "https://www.nike.com/*/orders",
-        "https://www.nike.com/*/orders/*"
+        "https://www.nike.com/*orders*",
+        "https://nike.com/*orders*"
       ],
       "js": ["orders-content-script.js"],
       "run_at": "document_start"

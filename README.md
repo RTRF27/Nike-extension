@@ -9,8 +9,8 @@ The original single-profile bot still works exactly as before. Added on top:
 
 - **Drop Dashboard** (`dashboard.html`) — a full-page control room:
   - **Drop details** entered once → every account cops the **same product**.
-  - **Card details per account** — entered in each account row (with an optional
-    shared **fallback card** for rows left blank).
+  - **Card profiles** — create reusable named cards once, then assign one to any
+    account from a dropdown (multiple accounts can share a card).
   - **Create Chrome Profile** — spin up a new profile straight onto the Nike SG
     login page, one per account.
   - **Accounts list** — each row is pinned to a **Chrome profile**.
@@ -101,12 +101,13 @@ the same steps in short:
 1. **Create Chrome profiles** — use **Create Chrome Profile** (one per Nike
    account). Each click opens a fresh profile on the Nike SG login page; sign
    in there. The profile is added to your accounts list automatically.
-2. **Accounts** — one row per account. Pick its **Chrome profile**, set its
-   **size**, and fill its **card details right in the row** (cards are
-   per-account — Chrome profiles hold no saved cards, so the bot fills the card
-   for every entry).
-3. **Fallback card** (optional) — only used for a row whose own card fields are
-   left blank. Leave it empty to type the card manually at checkout instead.
+2. **Card profiles** — create each card once in **Card Profiles** (give it a
+   nickname). Chrome profiles hold no saved cards, so the bot fills the card for
+   every entry — define them here once and reuse.
+3. **Accounts** — one row per account. Pick its **Chrome profile**, set its
+   **size**, and choose which saved card it uses from the **💳 Card** dropdown.
+   Multiple accounts can share the same card. Leave it on “no card” to type the
+   card manually at checkout.
 4. **Drop details** — paste the product URL once (keyword/SKU only needed for
    multi-product collection pages) and pick a size pool, then **🎲 Randomly
    assign** to deal sizes.

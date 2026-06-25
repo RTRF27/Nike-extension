@@ -68,7 +68,6 @@
         try {
           const url = this.__snkrsUrl || "";
           if (URL_SKIP.test(url)) return;
-          const ct = (this.getResponseHeader && this.getResponseHeader("content-type")) || "";
           if (this.responseType && this.responseType !== "text" && this.responseType !== "json") return;
           let text = "";
           if (this.responseType === "json") {
@@ -82,4 +81,26 @@
       return _send.apply(this, arguments);
     };
   }
+
+  // ── Scrape embedded JSON (server-rendered pages) ────────────
+  // Some Nike order pages ship the order data inside the HTML (Next.js
+  // __NEXT_DATA__, a preloaded-state global, or <script type=application/json>)
+  // and never fire a client fetch/XHR. Sweep those a few times as the SPA
+  // hydrates.
+  function sweepEmbedded() {
+    try {
+      if (window.__NEXT_DATA__) maybeForward("__NEXT_DATA__", JSON.stringify(window.__NEXT_DATA__));
+    } catch {}
+    for (const g of ["__PRELOADED_STATE__", "__INITIAL_STATE__", "__APP_STATE__"]) {
+      try { if (window[g]) maybeForward(g, JSON.stringify(window[g])); } catch {}
+    }
+    try {
+      document.querySelectorAll('script[type="application/json"], script[id*="order" i], script[id*="state" i]')
+        .forEach(s => { if (s.textContent && /order/i.test(s.textContent)) maybeForward("embedded:" + (s.id || "json"), s.textContent); });
+    } catch {}
+  }
+  let _sweeps = 0;
+  const _sw = setInterval(() => { if (++_sweeps > 10) clearInterval(_sw); sweepEmbedded(); }, 1000);
+  if (document.readyState !== "loading") sweepEmbedded();
+  else document.addEventListener("DOMContentLoaded", sweepEmbedded);
 })();

@@ -20,13 +20,16 @@ const DASH_KEY    = "snkrsDashboard";
 const STATUS_KEY  = "snkrsStatus";
 const HISTORY_KEY = "snkrsHistory";
 const ORDERS_KEY  = "snkrsOrders";
+const CARDS_KEY   = "snkrsCardProfiles";
 
 const FOOTWEAR_SIZES = ["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","12.5","13","13.5","14"];
 const APPAREL_SIZES  = ["XS","S","M","L","XL","XXL"];
 
 let discoveredProfiles = [];   // [{dir,name}]
 let hostOk = false;
-let accounts = [];             // [{id,label,profileDir,manualProfile,size,sizeType,card}]
+let accounts = [];             // [{id,label,profileDir,manualProfile,size,sizeType,cardId}]
+let cardProfiles = [];         // [{id,name,cardName,cardNumber,cardExpiry,cardCvv}]
+let editingCardId = null;      // card profile currently being edited (or null)
 let liveStatuses = {};         // {profileDir: {code,message,time}}
 const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl}
 
@@ -223,6 +226,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
   }
+  if (changes[CARDS_KEY]) {
+    cardProfiles = changes[CARDS_KEY].newValue || [];
+    renderCardProfiles();
+    refreshCardSelects();
+  }
   if (changes[ORDERS_KEY]) {
     const profileDir = $("orderCheckerProfile") && $("orderCheckerProfile").value;
     if (profileDir && changes[ORDERS_KEY].newValue?.[profileDir]) {
@@ -270,7 +278,7 @@ async function createProfile() {
 
   if (resp.ok) {
     // Add it to the accounts list straight away so it's ready to configure.
-    accounts.push({ id: uid(), label: name, profileDir: name, size: "", sizeType: "footwear", card: {} });
+    accounts.push({ id: uid(), label: name, profileDir: name, size: "", sizeType: "footwear", cardId: "" });
     renderAccounts();
     await saveAll(true);
     if (inp) inp.value = nextProfileName();
@@ -282,6 +290,149 @@ async function createProfile() {
   } else {
     flashTemp(msg, "Couldn't create profile: " + resp.error, "#e03131", 6000);
   }
+}
+
+// ── Card profiles (reusable cards shared across accounts) ─────
+async function loadCardProfiles() {
+  const data = await chrome.storage.local.get(CARDS_KEY);
+  cardProfiles = Array.isArray(data[CARDS_KEY]) ? data[CARDS_KEY] : [];
+}
+async function persistCardProfiles() {
+  await chrome.storage.local.set({ [CARDS_KEY]: cardProfiles });
+}
+
+// Resolve an account's chosen card id into the card object the bot fills.
+function resolveCard(cardId) {
+  if (!cardId) return null;
+  const cp = cardProfiles.find(c => c.id === cardId);
+  if (!cp) return null;
+  return {
+    cardName:   cp.cardName   || "",
+    cardNumber: cp.cardNumber || "",
+    cardExpiry: cp.cardExpiry || "",
+    cardCvv:    cp.cardCvv    || "",
+  };
+}
+
+function cardMask(num) {
+  const d = (num || "").replace(/\D/g, "");
+  return d ? "•••• " + d.slice(-4) : "no number";
+}
+
+// Fill one account's card <select> with the saved profiles.
+function fillCardSelect(sel, currentId) {
+  if (!sel) return;
+  sel.innerHTML = "";
+  sel.appendChild(el("option", { value: "" }, "— no card (type at checkout) —"));
+  cardProfiles.forEach(cp => {
+    sel.appendChild(el("option", { value: cp.id }, `${cp.name || "Card"} · ${cardMask(cp.cardNumber)}`));
+  });
+  sel.appendChild(el("option", { value: "__new__" }, "➕ New card profile…"));
+  // Keep the selection if it still exists, else fall back to none.
+  sel.value = (currentId && cardProfiles.some(c => c.id === currentId)) ? currentId : "";
+}
+function refreshCardSelects() {
+  document.querySelectorAll(".f-card-select").forEach(sel => {
+    const acct = accounts.find(a => a.id === sel.dataset.acctId);
+    fillCardSelect(sel, acct ? acct.cardId : "");
+  });
+}
+
+function renderCardProfiles() {
+  const list = $("cardProfilesList");
+  if (!list) return;
+  list.innerHTML = "";
+  if (!cardProfiles.length) {
+    list.appendChild(el("p", { className: "hint" }, "No cards yet. Add one below, then pick it from each account’s 💳 Card dropdown."));
+    return;
+  }
+  cardProfiles.forEach(cp => list.appendChild(buildCardProfileRow(cp)));
+}
+
+function buildCardProfileRow(cp) {
+  const row = el("div", { className: "cardprofile-row" });
+  const info = el("div", { className: "cardprofile-info" });
+  const usedBy = accounts.filter(a => a.cardId === cp.id).length;
+  info.append(
+    el("span", { className: "cardprofile-name" }, cp.name || "(unnamed card)"),
+    el("span", { className: "cardprofile-sub" },
+      `${cardMask(cp.cardNumber)}${cp.cardExpiry ? " · " + cp.cardExpiry : ""}${usedBy ? ` · used by ${usedBy}` : ""}`)
+  );
+  const btns = el("div", { className: "cardprofile-btns" });
+  const editBtn = el("button", { className: "btn btn-mini btn-dark" }, "edit");
+  editBtn.addEventListener("click", () => editCardProfile(cp.id));
+  const delBtn = el("button", { className: "btn btn-mini btn-danger" }, "✕");
+  delBtn.title = "Delete this card";
+  delBtn.addEventListener("click", () => deleteCardProfile(cp.id));
+  btns.append(editBtn, delBtn);
+  row.append(info, btns);
+  return row;
+}
+
+function resetCardForm() {
+  editingCardId = null;
+  ["cpName", "cpCardName", "cpNumber", "cpExpiry", "cpCvv"].forEach(id => { const n = $(id); if (n) n.value = ""; });
+  $("cardFormTitle").textContent = "ADD A CARD";
+  $("cpSaveBtn").textContent = "➕ SAVE CARD PROFILE";
+  $("cpCancelBtn").style.display = "none";
+}
+
+function editCardProfile(id) {
+  const cp = cardProfiles.find(c => c.id === id);
+  if (!cp) return;
+  editingCardId = id;
+  $("cpName").value     = cp.name || "";
+  $("cpCardName").value = cp.cardName || "";
+  $("cpNumber").value   = cp.cardNumber || "";
+  $("cpExpiry").value   = cp.cardExpiry || "";
+  $("cpCvv").value      = cp.cardCvv || "";
+  $("cardFormTitle").textContent = "EDIT CARD";
+  $("cpSaveBtn").textContent = "✓ UPDATE CARD PROFILE";
+  $("cpCancelBtn").style.display = "";
+  $("cardForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function saveCardProfile() {
+  const name   = $("cpName").value.trim();
+  const number = $("cpNumber").value.trim();
+  if (!name)   { flashTemp($("cpMsg"), "Give the card a nickname.", "#fa5400"); return; }
+  if (!number) { flashTemp($("cpMsg"), "Enter the card number.", "#fa5400"); return; }
+
+  const fields = {
+    name,
+    cardName:   $("cpCardName").value.trim(),
+    cardNumber: number,
+    cardExpiry: $("cpExpiry").value.trim(),
+    cardCvv:    $("cpCvv").value.trim(),
+  };
+
+  if (editingCardId) {
+    const cp = cardProfiles.find(c => c.id === editingCardId);
+    if (cp) Object.assign(cp, fields);
+    flashTemp($("cpMsg"), `✓ Updated "${name}".`, "#1db954");
+  } else {
+    cardProfiles.push({ id: uid(), ...fields });
+    flashTemp($("cpMsg"), `✓ Saved "${name}". Pick it from an account’s 💳 Card dropdown.`, "#1db954", 5000);
+  }
+  await persistCardProfiles();
+  resetCardForm();
+  renderCardProfiles();
+  refreshCardSelects();
+  await saveAll(true);
+}
+
+async function deleteCardProfile(id) {
+  const cp = cardProfiles.find(c => c.id === id);
+  const usedBy = accounts.filter(a => a.cardId === id);
+  if (usedBy.length && !confirm(`"${cp ? cp.name : "This card"}" is assigned to ${usedBy.length} account(s). Delete it and clear those assignments?`)) return;
+  cardProfiles = cardProfiles.filter(c => c.id !== id);
+  accounts.forEach(a => { if (a.cardId === id) a.cardId = ""; });
+  if (editingCardId === id) resetCardForm();
+  await persistCardProfiles();
+  renderCardProfiles();
+  refreshCardSelects();
+  await saveAll(true);
+  flashTemp($("cpMsg"), "Card deleted.", "#888");
 }
 
 // ── Order checker ─────────────────────────────────────────────
@@ -345,25 +496,36 @@ function extractLineItems(order) {
   }));
 }
 
-// Returns true if any field of the order/product loosely matches the current
-// drop keyword or the last segment of the drop URL.
-function isDropMatch(order, keyword, dropUrl) {
-  if (!keyword && !dropUrl) return false;
-  const terms = [];
-  if (keyword) terms.push(...keyword.toLowerCase().split(/\s+/));
-  if (dropUrl) {
-    try {
-      const last = new URL(/^https?:\/\//i.test(dropUrl) ? dropUrl : "https://" + dropUrl)
-                    .pathname.split("/").filter(Boolean).pop();
-      if (last) terms.push(last.toLowerCase());
-    } catch {}
+// Normalise a SKU/style code for comparison: "IM3198-052" → "IM3198052".
+function normSku(s) { return (s || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+
+// A win = the drop's SKU matches a SKU in the order. We pull SKU-like tokens
+// from the drop keyword/SKU field and the drop URL (single-product) or from
+// every product (multi-product).
+const SKU_PAT = /[A-Z]{2,4}\d{3,4}-?\d{2,4}/gi;
+function dropSkuTokens() {
+  const out = new Set();
+  const add = (str) => (String(str || "").match(SKU_PAT) || []).forEach(t => out.add(normSku(t)));
+  if (multiProduct) {
+    products.forEach(p => { add(p.keyword); add(p.url); });
+  } else {
+    add($("dropKeyword")?.value.trim() || "");
+    add($("dropUrl")?.value.trim() || "");
   }
-  if (!terms.length) return false;
-  const haystack = [
-    order.orderNumber,
-    ...order.products.map(p => `${p.name} ${p.sku}`),
-  ].join(" ").toLowerCase();
-  return terms.some(t => haystack.includes(t));
+  return [...out].filter(Boolean);
+}
+
+// Does a single SKU match the drop?
+function skuMatchesDrop(sku) {
+  const ps = normSku(sku);
+  if (!ps) return false;
+  return dropSkuTokens().some(d => ps === d || ps.includes(d) || d.includes(ps));
+}
+
+// Returns true if any product SKU in this order matches a drop SKU.
+function isDropMatch(order) {
+  if (!dropSkuTokens().length) return false;
+  return (order.products || []).some(p => skuMatchesDrop(p.sku));
 }
 
 function statusMeta(status) {
@@ -375,18 +537,26 @@ function statusMeta(status) {
   return { color: "#8d8d8d" };
 }
 
-function buildOrderCard(order, keyword, dropUrl) {
-  const match = isDropMatch(order, keyword, dropUrl);
+function buildOrderCard(order) {
+  const match = isDropMatch(order);
   const card  = document.createElement("div");
   card.className = "order-card" + (match ? " match" : "");
 
-  // Header row
+  // Win banner when the drop SKU is found in this order
+  if (match) {
+    const win = document.createElement("div");
+    win.className = "order-win-banner";
+    win.textContent = "🏆 WIN — matches this drop’s SKU";
+    card.appendChild(win);
+  }
+
+  // Header row: order number + date + status
   const head = document.createElement("div");
   head.className = "order-head";
 
   const numEl = document.createElement("span");
   numEl.className = "order-num";
-  numEl.textContent = order.orderNumber || "—";
+  numEl.textContent = order.orderNumber ? `#${order.orderNumber}` : "Order";
 
   const dateEl = document.createElement("span");
   dateEl.className = "order-date";
@@ -412,17 +582,16 @@ function buildOrderCard(order, keyword, dropUrl) {
 
   if (order.products && order.products.length) {
     order.products.forEach(p => {
+      const itemMatch = skuMatchesDrop(p.sku);
       const row = document.createElement("div");
-      row.className = "order-item" + (match ? " match" : "");
+      row.className = "order-item" + (itemMatch ? " match" : "");
 
-      if (p.imageUrl) {
-        const img = document.createElement("img");
-        img.className = "order-thumb";
-        img.src = p.imageUrl;
-        img.alt = p.name || "";
-        img.onerror = () => { img.style.display = "none"; };
-        row.appendChild(img);
-      }
+      const img = document.createElement("img");
+      img.className = "order-thumb";
+      img.src = p.imageUrl || "";
+      img.alt = p.name || "";
+      img.onerror = () => { img.style.visibility = "hidden"; };
+      row.appendChild(img);
 
       const info = document.createElement("div");
       info.className = "order-item-info";
@@ -431,17 +600,21 @@ function buildOrderCard(order, keyword, dropUrl) {
       name.className = "order-item-name";
       name.textContent = p.name || "Product";
 
+      const skuEl = document.createElement("div");
+      skuEl.className = "order-item-sku";
+      skuEl.textContent = p.sku ? `SKU ${p.sku}` : "SKU —";
+
       const meta = document.createElement("div");
       meta.className = "order-item-meta";
-      meta.textContent = [p.sku && `SKU: ${p.sku}`, p.size && `Size: ${p.size}`].filter(Boolean).join("  ·  ");
+      meta.textContent = p.size ? `Size ${p.size}` : "";
 
-      info.append(name, meta);
+      info.append(name, skuEl, meta);
       row.appendChild(info);
 
-      if (match) {
+      if (itemMatch) {
         const badge = document.createElement("span");
         badge.className = "match-badge";
-        badge.textContent = "MATCH";
+        badge.textContent = "DROP MATCH";
         row.appendChild(badge);
       }
 
@@ -463,60 +636,49 @@ async function renderOrders(profileDir, entry) {
     return;
   }
 
-  const keyword = $("dropKeyword")?.value.trim() || "";
-  const dropUrl = $("dropUrl")?.value.trim() || "";
-
+  // Prefer richer API data (has order numbers); fall back to / merge DOM scrape.
   let orders = [];
+  if (entry.apiPayloads?.length) orders = normaliseOrderPayloads(entry.apiPayloads);
 
-  if (entry.source === "api" && entry.apiPayloads?.length) {
-    orders = normaliseOrderPayloads(entry.apiPayloads);
-  }
-
-  if (!orders.length && entry.domOrders?.length) {
-    // DOM-scraped fallback — Nike's list view exposes Style code, status, size
-    // and image (but not the order number), so render those.
-    const keyword = $("dropKeyword")?.value.trim() || "";
-    const dropUrl = $("dropUrl")?.value.trim() || "";
-    const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "";
-    const note = document.createElement("p");
-    note.className = "hint";
-    note.style.marginBottom = "10px";
-    note.textContent = `${entry.domOrders.length} order(s) read from the page${ts ? " · " + ts : ""}.`;
-    display.appendChild(note);
-
-    entry.domOrders.forEach(o => {
-      // Reuse the rich card by mapping scraped fields onto the normal shape.
-      const mapped = {
-        orderNumber: o.orderNumber || "",
-        date: "",
-        status: o.status || "",
-        products: [{
-          name: (o.rawText || "Order item").slice(0, 90),
-          sku: o.style || "",
-          size: o.size || "",
-          imageUrl: o.imageUrl || "",
-        }],
-      };
-      display.appendChild(buildOrderCard(mapped, keyword, dropUrl));
+  if (entry.domOrders?.length) {
+    const domMapped = entry.domOrders.map(o => ({
+      orderNumber: o.orderNumber || "",
+      date: "",
+      status: o.status || "",
+      products: [{
+        name: (o.rawText || "Order item").slice(0, 90),
+        sku: o.style || "",
+        size: o.size || "",
+        imageUrl: o.imageUrl || "",
+      }],
+    }));
+    // Merge: add any DOM order whose SKU isn't already covered by API data.
+    const apiSkus = new Set();
+    orders.forEach(o => (o.products || []).forEach(p => { if (p.sku) apiSkus.add(normSku(p.sku)); }));
+    domMapped.forEach(o => {
+      const sku = normSku(o.products[0].sku);
+      if (!sku || !apiSkus.has(sku)) orders.push(o);
     });
-    return;
   }
 
   if (!orders.length) {
-    display.appendChild(el("p", { className: "hint" }, "No orders found. Make sure you're logged in on that Nike profile."));
+    display.appendChild(el("p", { className: "hint" },
+      "No orders read yet. If you’re logged in and orders are visible, give it a few seconds — or reload the extension if you just updated."));
     return;
   }
 
-  const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "";
-  if (ts) {
-    const note = document.createElement("p");
-    note.className = "hint";
-    note.style.marginBottom = "10px";
-    note.textContent = `${orders.length} order(s) · last fetched ${ts}`;
-    display.appendChild(note);
-  }
+  // Wins (drop SKU matches) first, then the rest.
+  orders.sort((a, b) => (isDropMatch(b) ? 1 : 0) - (isDropMatch(a) ? 1 : 0));
 
-  orders.forEach(o => display.appendChild(buildOrderCard(o, keyword, dropUrl)));
+  const wins = orders.filter(isDropMatch).length;
+  const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "";
+  const note = document.createElement("p");
+  note.className = "hint";
+  note.style.marginBottom = "10px";
+  note.textContent = `${orders.length} order(s)${wins ? ` · 🏆 ${wins} match this drop` : " · no drop match"}${ts ? " · " + ts : ""}.`;
+  display.appendChild(note);
+
+  orders.forEach(o => display.appendChild(buildOrderCard(o)));
 }
 
 async function openOrdersPage() {
@@ -586,6 +748,8 @@ function importConfig(file) {
     try {
       const config = JSON.parse(e.target.result);
       applyConfigToUI(config);
+      await persistCardProfiles();
+      renderCardProfiles();
       renderAccounts();
       renderDropUI();
       startCountdown();
@@ -812,10 +976,7 @@ function buildAccountRow(acct) {
   const manualEl    = row.querySelector(".f-profile-manual");
   const sizeEl      = row.querySelector(".f-size");
   const autoEl      = row.querySelector(".f-autolaunch");
-  const ocName      = row.querySelector(".oc-name");
-  const ocNumber    = row.querySelector(".oc-number");
-  const ocExpiry    = row.querySelector(".oc-expiry");
-  const ocCvv       = row.querySelector(".oc-cvv");
+  const cardSel     = row.querySelector(".f-card-select");
   const msgEl       = row.querySelector(".acct-msg");
   const assignedEl  = row.querySelector(".f-assigned");
   const statusRow   = row.querySelector(".f-status-row");
@@ -828,12 +989,8 @@ function buildAccountRow(acct) {
   fillSizeSelect(sizeEl, acct.size, acct.sizeType);
   fillProfileSelect(profileEl, manualEl, acct.profileDir);
 
-  const c = acct.card || {};
-  ocName.value = c.cardName || "";
-  ocNumber.value = c.cardNumber || "";
-  ocExpiry.value = c.cardExpiry || "";
-  ocCvv.value = c.cardCvv || "";
-  attachCardFormatters(ocNumber, ocExpiry, ocCvv);
+  cardSel.dataset.acctId = acct.id;
+  fillCardSelect(cardSel, acct.cardId);
 
   // Show which product this account is assigned to (multi-product mode)
   if (multiProduct && acct.url) {
@@ -874,15 +1031,17 @@ function buildAccountRow(acct) {
   });
 
   autoEl.addEventListener("change", () => { acct.autoLaunch = autoEl.checked; });
-  const syncCard = () => {
-    acct.card = {
-      cardName: ocName.value.trim(),
-      cardNumber: ocNumber.value.trim(),
-      cardExpiry: ocExpiry.value.trim(),
-      cardCvv: ocCvv.value.trim(),
-    };
-  };
-  [ocName, ocNumber, ocExpiry, ocCvv].forEach(i => i.addEventListener("input", syncCard));
+  cardSel.addEventListener("change", () => {
+    if (cardSel.value === "__new__") {
+      // Jump to the card-profile form to create a new card.
+      cardSel.value = acct.cardId || "";
+      $("cpName").focus();
+      $("cardForm").scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+    acct.cardId = cardSel.value;
+    renderCardProfiles(); // refresh "used by N" counts
+  });
 
   // ── Buttons ──
   row.querySelector(".f-remove").addEventListener("click", () => {
@@ -937,12 +1096,8 @@ function buildConfig() {
       keyword: (p.keyword || "").trim(),
       sizePool: (p.sizePool || []).slice(),
     })),
-    card: {
-      cardName: $("cardName").value.trim(),
-      cardNumber: $("cardNumber").value.trim(),
-      cardExpiry: $("cardExpiry").value.trim(),
-      cardCvv: $("cardCvv").value.trim(),
-    },
+    card: {},               // no global card — each account picks a card profile
+    cardProfiles: cardProfiles.map(c => ({ ...c })),
     options: {
       enabled: $("optEnabled").checked,
       testMode: $("optTestMode").checked,
@@ -960,17 +1115,10 @@ function buildConfig() {
       url: a.url || "",
       keyword: a.keyword || "",
       autoLaunch: !!a.autoLaunch,
-      card: cardOrNull(a.card),
+      cardId: a.cardId || "",
+      card: resolveCard(a.cardId),   // resolved card object the bot fills
     })),
   };
-}
-
-// Return the card object only if the user actually entered something,
-// otherwise null so the background falls back to the global card.
-function cardOrNull(card) {
-  if (!card) return null;
-  const has = (card.cardNumber || card.cardName || card.cardExpiry || card.cardCvv || "").trim();
-  return has ? card : null;
 }
 
 // ── Persist: local mirror + shared config file via host ───────
@@ -1146,7 +1294,7 @@ async function loadProfiles() {
 // ── Initial load ──────────────────────────────────────────────
 function applyConfigToUI(cfg) {
   if (!cfg) return;
-  const drop = cfg.drop || {}, card = cfg.card || {}, opts = cfg.options || {};
+  const drop = cfg.drop || {}, opts = cfg.options || {};
   $("dropUrl").value = drop.url || "";
   $("dropKeyword").value = drop.keyword || "";
   const schedOn = !!drop.scheduleEnabled;
@@ -1159,10 +1307,18 @@ function applyConfigToUI(cfg) {
       $("dropTime").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
     }
   }
-  $("cardName").value = card.cardName || "";
-  $("cardNumber").value = card.cardNumber || "";
-  $("cardExpiry").value = card.cardExpiry || "";
-  $("cardCvv").value = card.cardCvv || "";
+  // Card profiles (only replace from config if it actually carries them,
+  // e.g. on import — otherwise keep what we loaded from storage).
+  if (Array.isArray(cfg.cardProfiles)) {
+    cardProfiles = cfg.cardProfiles.map(c => ({
+      id: c.id || uid(),
+      name: c.name || "Card",
+      cardName: c.cardName || "",
+      cardNumber: c.cardNumber || "",
+      cardExpiry: c.cardExpiry || "",
+      cardCvv: c.cardCvv || "",
+    }));
+  }
 
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
@@ -1189,7 +1345,7 @@ function applyConfigToUI(cfg) {
     url: a.url || "",
     keyword: a.keyword || "",
     autoLaunch: !!a.autoLaunch,
-    card: a.card || {},
+    cardId: a.cardId || "",
   }));
 }
 
@@ -1271,10 +1427,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (d.snkrsAdminPubKey && $("adminLink")) $("adminLink").style.display = "";
   });
 
-  attachCardFormatters($("cardNumber"), $("cardExpiry"), $("cardCvv"));
+  attachCardFormatters($("cpNumber"), $("cpExpiry"), $("cpCvv"));
 
-  // 1) Load live status snapshots and history.
+  // 1) Load live status snapshots, history, and card profiles.
   await loadHistory();
+  await loadCardProfiles();
   const storedStatus = await chrome.storage.local.get(STATUS_KEY);
   liveStatuses = storedStatus[STATUS_KEY] || {};
 
@@ -1293,11 +1450,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadProfiles();
   }
 
-  if (!accounts.length) accounts = [{ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", card: {} }];
+  if (!accounts.length) accounts = [{ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", cardId: "" }];
+  renderCardProfiles();
   renderAccounts();
   renderDropUI();
   startCountdown();
   suggestProfileName();
+
+  // ── Card profiles ──
+  $("cpSaveBtn").addEventListener("click", saveCardProfile);
+  $("cpCancelBtn").addEventListener("click", resetCardForm);
 
   // ── Getting Started guide (collapsible) ──
   $("guideHead").addEventListener("click", () => {
@@ -1312,7 +1474,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ── Buttons ──
   $("addAccountBtn").addEventListener("click", () => {
-    accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", card: {} });
+    accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", cardId: "" });
     renderAccounts();
   });
   $("scheduleEnabled").addEventListener("change", () => {
