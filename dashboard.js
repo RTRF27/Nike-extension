@@ -15,6 +15,102 @@
 // commands as a fallback.
 // ============================================================
 
+// ── Page navigation ──────────────────────────────────────────
+let _currentPage = "home";
+function navigateTo(name) {
+  document.querySelectorAll(".page-section").forEach(s => s.classList.remove("active"));
+  document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
+  const sec = document.getElementById("page-" + name);
+  const tab = document.querySelector(`.nav-tab[data-nav="${name}"]`);
+  if (sec) sec.classList.add("active");
+  if (tab) tab.classList.add("active");
+  _currentPage = name;
+  if (name === "home") renderHomeStats();
+}
+
+function renderHomeStats() {
+  // Stats
+  const $s = id => document.getElementById(id);
+  if ($s("statAccounts")) $s("statAccounts").textContent = accounts.length || 0;
+
+  // Count entries + wins from live statuses
+  const statuses = Object.values(liveStatuses || {});
+  const wins = statuses.filter(s => (s.code || "").toLowerCase().includes("won") || (s.code || "").toLowerCase().includes("win")).length;
+  const entries = statuses.filter(s => s.code && s.code !== "idle").length;
+  if ($s("statWins")) $s("statWins").textContent = wins;
+  if ($s("statEntries")) $s("statEntries").textContent = entries;
+  if ($s("statDrops")) {
+    chrome.storage.local.get(HISTORY_KEY, d => {
+      const hist = Array.isArray(d[HISTORY_KEY]) ? d[HISTORY_KEY] : [];
+      $s("statDrops").textContent = hist.length;
+      renderLastDrop(hist);
+    });
+  }
+
+  // Live status board
+  const list = document.getElementById("homeStatusList");
+  if (list) {
+    const acctStatuses = accounts.filter(a => a.profileDir && liveStatuses[a.profileDir]);
+    if (!acctStatuses.length) {
+      list.innerHTML = "<p class='hint'>No accounts running. Launch from the DROP tab.</p>";
+    } else {
+      list.innerHTML = "";
+      acctStatuses.forEach(a => {
+        const s = liveStatuses[a.profileDir] || {};
+        const row = document.createElement("div");
+        row.className = "home-status-row";
+        const lbl = document.createElement("span");
+        lbl.className = "home-status-label";
+        lbl.textContent = a.label || a.profileDir;
+        const badge = document.createElement("span");
+        badge.className = "home-status-badge";
+        badge.textContent = s.code || "IDLE";
+        badge.style.color = (s.code||"").toLowerCase().includes("won") ? "var(--green)"
+          : (s.code||"").toLowerCase().includes("fail") || (s.code||"").toLowerCase().includes("err") ? "var(--red)"
+          : "var(--purple2)";
+        row.append(lbl, badge);
+        list.appendChild(row);
+      });
+    }
+  }
+
+  // Current drop summary
+  const dropDiv = document.getElementById("homeDropSummary");
+  if (dropDiv) {
+    const url = (document.getElementById("dropUrl") || {}).value || "";
+    const kw = (document.getElementById("dropKeyword") || {}).value || "";
+    if (url) {
+      dropDiv.innerHTML = `<div class="home-drop-url">${url}</div>` +
+        (kw ? `<span class="home-drop-chip" style="color:var(--purple2)">SKU: ${kw}</span>` : "") +
+        `<span class="home-drop-chip" style="color:var(--grey)">${accounts.length} account(s)</span>`;
+    } else {
+      dropDiv.innerHTML = "<p class='hint'>No drop configured. Go to the DROP tab to set one up.</p>";
+    }
+  }
+}
+
+function renderLastDrop(hist) {
+  const div = document.getElementById("lastDropSummary");
+  const tag = document.getElementById("lastDropTag");
+  if (!div) return;
+  if (!hist.length) {
+    div.innerHTML = "<p class='hint'>No drop history. Run a drop to see results here.</p>";
+    if (tag) tag.textContent = "NO RUNS YET";
+    return;
+  }
+  const last = hist[hist.length - 1];
+  const d = new Date(last.ts || 0);
+  const wins = (last.results || []).filter(r => (r.status||"").toLowerCase().includes("won")).length;
+  if (tag) tag.textContent = `${wins > 0 ? "🏆 " + wins + " WIN" + (wins > 1 ? "S" : "") : "NO WINS"} · ${d.toLocaleDateString()}`;
+  let html = `<div class="home-drop-url">${last.url || "(no URL)"}</div>`;
+  (last.results || []).slice(0, 8).forEach(r => {
+    const won = (r.status || "").toLowerCase().includes("won");
+    const color = won ? "var(--green)" : (r.status||"").toLowerCase().includes("fail") ? "var(--red)" : "var(--grey)";
+    html += `<span class="home-drop-chip" style="color:${color}">${r.label || r.profileDir || "?"}: ${r.status || "?"}</span>`;
+  });
+  div.innerHTML = html;
+}
+
 const NATIVE_HOST = "com.snkrs.launcher";
 const DASH_KEY    = "snkrsDashboard";
 const STATUS_KEY  = "snkrsStatus";
@@ -1612,13 +1708,26 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("cpSaveBtn").addEventListener("click", saveCardProfile);
   $("cpCancelBtn").addEventListener("click", resetCardForm);
 
-  // ── Getting Started guide (collapsible) ──
-  $("guideHead").addEventListener("click", () => {
-    const body = $("guideBody");
-    const open = body.style.display !== "none";
-    body.style.display = open ? "none" : "";
-    $("guideToggle").textContent = open ? "SHOW" : "HIDE";
+  // ── Page navigation ──
+  document.querySelectorAll(".nav-tab").forEach(tab => {
+    tab.addEventListener("click", () => navigateTo(tab.dataset.nav));
   });
+  renderHomeStats();
+
+  // ── Getting Started guide (collapsible, lives on HOME page) ──
+  const _guideToggle = $("guideToggle");
+  if (_guideToggle) {
+    _guideToggle.addEventListener("click", () => {
+      const body = $("guideBody");
+      const open = body && body.style.display !== "none";
+      if (body) body.style.display = open ? "none" : "";
+      _guideToggle.textContent = open ? "SHOW" : "HIDE";
+    });
+  }
+
+  // ── Setup link → navigate to settings ──
+  const sl = $("setupLink");
+  if (sl) sl.addEventListener("click", e => { e.preventDefault(); navigateTo("settings"); });
 
   // ── Chrome Profile Creator ──
   $("createProfileBtn").addEventListener("click", createProfile);
@@ -1668,7 +1777,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     refreshAllBadges();
     flashTemp($("statusMsg"), "Live status cleared.", "#888");
   });
-  $("setupLink").addEventListener("click", (e) => { e.preventDefault(); $("setupHelp").style.display = "block"; $("setupHelp").scrollIntoView({ behavior: "smooth" }); });
+  // setupLink is now wired via navigateTo("settings") — see nav section above.
 
   // ── Order checker ──
   refreshOrderCheckerProfiles();
@@ -1704,6 +1813,30 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (file) importConfig(file);
     e.target.value = ""; // reset so the same file can be re-imported
   });
+
+  // ── Home-page quick-launch mirrors ──
+  if ($("saveBtnHome")) $("saveBtnHome").addEventListener("click", () => saveAll(false));
+  if ($("launchAllBtnHome")) $("launchAllBtnHome").addEventListener("click", launchAll);
+  // Re-route home action messages to the home action msg div
+  // (saveAll and launchAll use statusMsg; we'll update home separately via storage listener)
+
+  // ── Settings-page host test/reload mirrors ──
+  if ($("testHostBtnSettings")) {
+    $("testHostBtnSettings").addEventListener("click", async () => {
+      const msgEl = $("settingsStatusMsg");
+      if (msgEl) flash(msgEl, "Pinging launcher…", "#888");
+      const up = await pingHost();
+      if (up) { await loadProfiles(); if (msgEl) flashTemp(msgEl, "✓ Launcher connected.", "var(--green)"); }
+      else if (msgEl) flashTemp(msgEl, "Launcher not reachable — see setup instructions above.", "var(--orange)", 5000);
+    });
+  }
+  if ($("refreshProfilesBtnSettings")) {
+    $("refreshProfilesBtnSettings").addEventListener("click", async () => {
+      const msgEl = $("settingsStatusMsg");
+      await loadProfiles();
+      if (msgEl) flashTemp(msgEl, hostOk ? `Reloaded ${discoveredProfiles.length} profile(s).` : "Launcher offline.", hostOk ? "var(--green)" : "var(--orange)");
+    });
+  }
   $("clearHistoryBtn").addEventListener("click", async () => {
     currentRunId = null;
     await chrome.storage.local.remove(HISTORY_KEY);

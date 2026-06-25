@@ -10,13 +10,11 @@
 </head>
 <body>
 
-  <!-- ░░ LICENSE GATE — shown until a valid key is entered ░░ -->
+  <!-- ░░ LICENSE GATE ░░ -->
   <div id="licenseGate" class="license-gate" style="display:none;">
     <div class="license-card">
       <div class="license-swoosh">
-        <svg viewBox="0 0 24 9" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/>
-        </svg>
+        <svg viewBox="0 0 24 9" fill="none"><path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/></svg>
       </div>
       <h1 class="license-title">SNKRS BOT</h1>
       <p class="license-sub">Enter your license key to access the dashboard.</p>
@@ -26,361 +24,467 @@
     </div>
   </div>
 
-  <div class="page">
-
-    <!-- Header -->
-    <header class="topbar">
-      <div class="brand">
-        <div class="nike-swoosh">
-          <svg viewBox="0 0 24 9" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/>
-          </svg>
-        </div>
-        <div class="brand-text">
-          <span class="brand-label">SNKRS</span>
-          <span class="brand-sub">DROP DASHBOARD · MULTI-ACCOUNT</span>
-        </div>
+  <!-- ░░ TOPBAR ░░ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="nike-swoosh">
+        <svg viewBox="0 0 24 9" fill="none"><path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/></svg>
       </div>
-      <a href="admin.html" id="adminLink" class="btn btn-dark" style="font-size:11px; padding:7px 12px; text-decoration:none; display:none;" title="Admin panel — key management">⚙ Admin</a>
-      <div class="host-pill" id="hostPill" title="Native launcher status">
-        <span class="host-dot" id="hostDot"></span>
-        <span id="hostText">CHECKING LAUNCHER…</span>
+      <div class="brand-text">
+        <span class="brand-label">SNKRS</span>
+        <span class="brand-sub">DROP DASHBOARD</span>
       </div>
-    </header>
-
-    <!-- Launcher-missing banner -->
-    <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
-      <strong>Launcher not connected.</strong>
-      The dashboard can still edit central config, but the
-      <em>Launch</em> buttons need the one-time native host install.
-      <a href="#" id="setupLink">How to install →</a>
     </div>
 
-    <div class="grid">
+    <nav class="nav-tabs" id="navTabs">
+      <button class="nav-tab active" data-nav="home">HOME</button>
+      <button class="nav-tab" data-nav="drop">DROP</button>
+      <button class="nav-tab" data-nav="profiles">PROFILES</button>
+      <button class="nav-tab" data-nav="cards">CARDS</button>
+      <button class="nav-tab" data-nav="orders">ORDERS</button>
+      <button class="nav-tab" data-nav="history">HISTORY</button>
+      <button class="nav-tab" data-nav="settings">SETTINGS</button>
+    </nav>
 
-      <!-- ░░ LEFT COLUMN ░░ -->
-      <div class="col">
+    <div class="topbar-right">
+      <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;">⚙ ADMIN</a>
+      <div class="host-pill" id="hostPill">
+        <span class="host-dot" id="hostDot"></span>
+        <span id="hostText">CHECKING…</span>
+      </div>
+    </div>
+  </header>
 
-        <!-- Getting Started guide -->
-        <section class="card" id="guideCard">
-          <div class="card-head" id="guideHead" style="cursor:pointer;">
-            <h2>🚀 GETTING STARTED — HOW TO RUN A DROP</h2>
-            <span class="card-tag" id="guideToggle">SHOW</span>
-          </div>
-          <div id="guideBody" style="display:none;">
-            <p class="hint">Follow these once per machine, then steps 4–7 for every drop.</p>
-            <ol class="steps">
-              <li><strong>Install the launcher (one time).</strong> The dashboard can’t open other Chrome
-                profiles by itself. Install the native helper from the <code>native-host/</code> folder,
-                then click <em>Test launcher connection</em> below the accounts. It should turn green.</li>
-              <li><strong>Create a Chrome profile per Nike account.</strong> Use
-                <em>Create Chrome Profile</em> (right column). Each click opens a fresh profile on the
-                Nike SG login page — sign into one Nike account there. Repeat for every account.</li>
-              <li><strong>Create your cards.</strong> In <em>Card Profiles</em>, add each card once
-                (nickname + details). Profiles hold no saved cards, so the bot fills one per entry.</li>
-              <li><strong>Add accounts.</strong> Each account row = one Chrome profile. Pick the profile,
-                give it a label, set its size, and choose which saved card it uses from the
-                <strong>💳 Card</strong> dropdown (several accounts can share one card).</li>
-              <li><strong>Set the drop.</strong> Paste the product URL and pick your size pool in
-                <em>Drop Details</em>. Hit <em>🎲 Randomly assign</em> to deal a size to each account.</li>
-              <li><strong>Save.</strong> Click <em>Save central config</em> so the launcher writes the
-                shared config every profile reads at drop time.</li>
-              <li><strong>Pre-warm (optional but recommended).</strong> A few minutes before the drop,
-                click <em>🚀 Launch all now</em> to open every profile so Kasada warms up. Profiles that
-                aren’t fully set up just open to the SNKRS feed; fully-configured ones go straight to the
-                product.</li>
-              <li><strong>Drop time.</strong> Either let <em>⏰ Scheduled auto-launch</em> open the
-                ⏰-marked accounts automatically, or click <em>🚀 Launch all now</em> yourself. Watch the
-                live status badge on each row, and verify wins in <em>Order Checker</em> afterwards.</li>
-            </ol>
-          </div>
-        </section>
+  <!-- Launcher-missing banner -->
+  <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
+    <strong>Launcher not connected.</strong> Launch buttons need the one-time native host install.
+    <a href="#" id="setupLink">How to install →</a>
+  </div>
 
-        <!-- Central Drop -->
-        <section class="card">
-          <div class="card-head">
-            <h2>DROP DETAILS</h2>
-            <span class="card-tag" id="dropModeTag">EVERYONE COPS THE SAME DROP</span>
-          </div>
+  <!-- ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ PAGES ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ -->
+  <main class="main">
 
-          <div class="toggle">
-            <div>
-              <div class="t-label">Multi-product drop</div>
-              <div class="t-hint">Cop several products at once — accounts get split across them</div>
+    <!-- ─────────────────── HOME ─────────────────── -->
+    <div class="page-section active" id="page-home">
+
+      <!-- Stats row -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value" id="statAccounts">0</div>
+          <div class="stat-label">ACCOUNTS</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statEntries">0</div>
+          <div class="stat-label">ENTRIES TODAY</div>
+        </div>
+        <div class="stat-card win">
+          <div class="stat-value" id="statWins">0</div>
+          <div class="stat-label">WINS</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" id="statDrops">0</div>
+          <div class="stat-label">DROPS RUN</div>
+        </div>
+      </div>
+
+      <div class="home-grid">
+
+        <!-- Left: Live status board -->
+        <div class="col">
+          <section class="card">
+            <div class="card-head">
+              <h2>⚡ LIVE STATUS</h2>
+              <span class="card-tag">ALL ACCOUNTS</span>
             </div>
-            <label class="switch"><input type="checkbox" id="multiProductToggle"><span class="track"></span></label>
-          </div>
+            <div id="homeStatusList">
+              <p class="hint">No accounts running. Launch from the DROP page.</p>
+            </div>
+          </section>
 
-          <!-- SINGLE-PRODUCT panel -->
-          <div id="singleProductPanel" style="margin-top:12px;">
-            <p class="hint">Set the product once here. Every launched account opens this exact URL at drop time.</p>
+          <!-- Last drop summary -->
+          <section class="card">
+            <div class="card-head">
+              <h2>LAST DROP</h2>
+              <span class="card-tag" id="lastDropTag">NO RUNS YET</span>
+            </div>
+            <div id="lastDropSummary">
+              <p class="hint">No drop history. Run a drop to see results here.</p>
+            </div>
+          </section>
+        </div>
 
-            <label class="lbl" for="dropUrl">Product URL</label>
-            <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
+        <!-- Right: Quick actions -->
+        <div class="col">
+          <section class="card">
+            <div class="card-head">
+              <h2>QUICK LAUNCH</h2>
+              <span class="card-tag">READY TO GO</span>
+            </div>
+            <p class="hint">Save config first, then launch all profiles straight onto the drop. Pre-warming Kasada? Click launch a few minutes early.</p>
+            <div class="actions" style="margin-bottom:10px;">
+              <button id="saveBtnHome" class="btn btn-light">SAVE CONFIG</button>
+              <button id="launchAllBtnHome" class="btn btn-accent">🚀 LAUNCH ALL</button>
+            </div>
+            <div id="homeActionMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+          </section>
 
-            <label class="lbl" for="dropKeyword" style="margin-top:10px;">Product keyword / SKU <span class="muted">(optional — only for collection pages)</span></label>
-            <input type="text" id="dropKeyword" class="inp" placeholder="e.g. Anthem Jacket  or  IM3219-100">
+          <section class="card">
+            <div class="card-head"><h2>CURRENT DROP</h2></div>
+            <div id="homeDropSummary">
+              <p class="hint">No drop configured. Go to the DROP tab to set one up.</p>
+            </div>
+          </section>
 
-            <label class="lbl" style="margin-top:12px;">Size pool <span class="muted">(sizes you’ll take — randomly assigned to accounts)</span></label>
-            <div class="size-pool" id="singleSizePool"></div>
-          </div>
+          <section class="card">
+            <div class="card-head">
+              <h2>🚀 GETTING STARTED</h2>
+              <span class="card-tag" id="guideToggle" style="cursor:pointer;">SHOW</span>
+            </div>
+            <div id="guideBody" style="display:none;">
+              <ol class="steps">
+                <li><strong>Install the launcher (one time).</strong> Go to <em>Settings → Setup</em> and follow the instructions. Click <em>Test connection</em> until it turns green.</li>
+                <li><strong>Create Chrome profiles.</strong> Go to <em>Profiles</em> → <em>Create Chrome Profile</em>. One per Nike account. Sign into each.</li>
+                <li><strong>Add your cards.</strong> Go to <em>Cards</em> and save each card once. Multiple accounts can share one card.</li>
+                <li><strong>Set accounts.</strong> In <em>Profiles</em>, add each account — pick its Chrome profile, size, and card.</li>
+                <li><strong>Set the drop.</strong> Go to <em>Drop</em> — paste the URL, pick sizes, hit <em>Randomly assign</em>.</li>
+                <li><strong>Save config</strong> (Quick Launch above or the Save button on Drop page).</li>
+                <li><strong>Launch!</strong> Hit <em>Launch All</em> a few minutes early to warm Kasada, or use the scheduled timer.</li>
+              </ol>
+            </div>
+            <div id="guideCard" style="display:none;"></div><!-- kept for JS compat -->
+            <div id="guideHead" style="display:none;"></div><!-- kept for JS compat -->
+          </section>
+        </div>
 
-          <!-- MULTI-PRODUCT panel -->
-          <div id="multiProductPanel" style="margin-top:12px; display:none;">
-            <p class="hint">Add each product with its URL, SKU/keyword and the size range you’d take. Hit <strong>🎲 assign</strong> below and your accounts get spread evenly (and randomly) across the products and sizes.</p>
-            <div id="productsList"></div>
-            <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
-          </div>
+      </div>
+    </div>
 
-          <!-- Scheduled auto-launch (opt-in block) -->
-          <div style="margin-top:16px; padding-top:14px; border-top:1px solid #2a2a2a;">
-            <div class="toggle" style="padding:0; border:none;">
+    <!-- ─────────────────── DROP ─────────────────── -->
+    <div class="page-section" id="page-drop">
+      <div class="section-header">
+        <h1 class="section-title">DROP DETAILS</h1>
+        <span class="section-sub">Configure the product every account will cop</span>
+      </div>
+
+      <div class="two-col">
+        <div class="col">
+          <section class="card">
+            <div class="card-head">
+              <h2>PRODUCT</h2>
+              <span class="card-tag" id="dropModeTag">SINGLE DROP</span>
+            </div>
+
+            <div class="toggle">
               <div>
-                <div class="t-label">⏰ Scheduled auto-launch <span style="font-weight:400; font-size:12px; color:#666;">— optional</span></div>
-                <div class="t-hint">
-                  Enable to have tabs open automatically at a set time.<br>
-                  <strong>Leave off</strong> if you plan to open tabs manually beforehand
-                  (e.g. to pre-warm Kasada before the drop).
-                </div>
+                <div class="t-label">Multi-product drop</div>
+                <div class="t-hint">Split accounts across multiple products</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="multiProductToggle"><span class="track"></span></label>
+            </div>
+
+            <div id="singleProductPanel" style="margin-top:14px;">
+              <label class="lbl" for="dropUrl">Product URL</label>
+              <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
+              <label class="lbl" for="dropKeyword" style="margin-top:10px;">Keyword / SKU <span class="muted">(optional — for collection pages)</span></label>
+              <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IM3219-100">
+              <label class="lbl" style="margin-top:14px;">Size pool <span class="muted">(randomly assigned to accounts)</span></label>
+              <div class="size-pool" id="singleSizePool"></div>
+            </div>
+
+            <div id="multiProductPanel" style="margin-top:14px; display:none;">
+              <p class="hint">Add each product with its URL, SKU and size range. Hit <strong>Randomly assign</strong> to spread accounts across them.</p>
+              <div id="productsList"></div>
+              <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
+            </div>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card">
+            <div class="card-head">
+              <h2>SCHEDULE</h2>
+              <span class="card-tag">OPTIONAL</span>
+            </div>
+            <div class="toggle" style="border:none; padding:0;">
+              <div>
+                <div class="t-label">⏰ Scheduled auto-launch</div>
+                <div class="t-hint">Opens ⏰-marked accounts automatically at drop time. Leave off to launch manually.</div>
               </div>
               <label class="switch"><input type="checkbox" id="scheduleEnabled"><span class="track"></span></label>
             </div>
-
             <div id="schedulePanel" style="display:none; margin-top:12px;">
-              <label class="lbl" for="dropTime">Open tabs at this time</label>
+              <label class="lbl" for="dropTime">Open tabs at</label>
               <input type="datetime-local" id="dropTime" class="inp">
-              <p class="hint" style="margin-top:6px; margin-bottom:0;">
-                Only accounts with <strong>⏰ auto</strong> checked in their row will open here.
-                All other accounts are unaffected — launch them manually whenever you like.
-              </p>
               <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
               <div id="dropCountdown" class="drop-countdown" style="display:none;"></div>
             </div>
-          </div>
+          </section>
 
-          <button id="randomAssignBtn" class="btn btn-light" style="margin-top:16px; width:100%;">🎲 RANDOMLY ASSIGN TO ACCOUNTS</button>
-          <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
-        </section>
-
-        <!-- Card Profiles -->
-        <section class="card" id="cardProfilesCard">
-          <div class="card-head">
-            <h2>CARD PROFILES <span class="lock">🔒</span></h2>
-            <span class="card-tag">REUSABLE CARDS</span>
-          </div>
-          <p class="hint">
-            Create a card once here, then assign it to any account from that account’s
-            <strong>💳 Card</strong> dropdown on the right. Multiple accounts can share the same card —
-            no need to type it for each one. Stored locally in <code>~/.snkrs-bot/config.json</code>.
-          </p>
-
-          <div id="cardProfilesList"></div>
-
-          <div class="cardform" id="cardForm">
-            <div class="card-head" style="margin-bottom:8px;">
-              <h2 id="cardFormTitle" style="font-size:13px;">ADD A CARD</h2>
-              <button id="cpCancelBtn" class="btn btn-mini btn-dark" style="display:none;">cancel edit</button>
+          <section class="card">
+            <div class="card-head"><h2>ACTIONS</h2></div>
+            <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;">🎲 RANDOMLY ASSIGN SIZES</button>
+            <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
+            <div class="actions">
+              <button id="saveBtn" class="btn btn-light">SAVE CONFIG</button>
+              <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL</button>
             </div>
-            <label class="lbl" for="cpName">Card nickname <span class="muted">(how you’ll recognise it)</span></label>
-            <input type="text" id="cpName" class="inp" placeholder="e.g. Reagan Visa" autocomplete="off">
-
-            <label class="lbl" for="cpCardName" style="margin-top:8px;">Name on Card</label>
-            <input type="text" id="cpCardName" class="inp" placeholder="REAGAN TANG" autocomplete="off">
-
-            <label class="lbl" for="cpNumber" style="margin-top:8px;">Card Number</label>
-            <input type="text" id="cpNumber" class="inp mono" placeholder="1234 5678 9012 3456" maxlength="19" autocomplete="off" inputmode="numeric">
-
-            <div class="row" style="margin-top:8px;">
-              <div class="grow">
-                <label class="lbl" for="cpExpiry">Expiry</label>
-                <input type="text" id="cpExpiry" class="inp" placeholder="MM/YY" maxlength="5" autocomplete="off" inputmode="numeric">
-              </div>
-              <div class="grow">
-                <label class="lbl" for="cpCvv">CVV</label>
-                <input type="password" id="cpCvv" class="inp" placeholder="•••" maxlength="4" autocomplete="off" inputmode="numeric">
-              </div>
-            </div>
-            <button id="cpSaveBtn" class="btn btn-light" style="margin-top:10px; width:100%;">➕ SAVE CARD PROFILE</button>
-            <div id="cpMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
-          </div>
-          <p class="warn">⚠ Card data is stored unencrypted on this computer. Don’t use on shared machines.</p>
-        </section>
-
-        <!-- Global options -->
-        <section class="card">
-          <div class="card-head"><h2>GLOBAL OPTIONS</h2></div>
-
-          <div class="toggle">
-            <div>
-              <div class="t-label">Bot Enabled</div>
-              <div class="t-hint">Auto-select size and submit on every launched account</div>
-            </div>
-            <label class="switch"><input type="checkbox" id="optEnabled" checked><span class="track"></span></label>
-          </div>
-          <div class="toggle">
-            <div>
-              <div class="t-label">Test Mode</div>
-              <div class="t-hint">Selects size + fills card but never submits (for every account)</div>
-            </div>
-            <label class="switch"><input type="checkbox" id="optTestMode"><span class="track"></span></label>
-          </div>
-          <div class="toggle">
-            <div>
-              <div class="t-label">Status Poller</div>
-              <div class="t-hint">Refresh for the result and alert on win</div>
-            </div>
-            <label class="switch"><input type="checkbox" id="optPoller" checked><span class="track"></span></label>
-          </div>
-          <div class="row" style="margin-top:10px; align-items:center;">
-            <label class="lbl" style="margin:0;">Refresh every</label>
-            <input type="number" id="optPollerMin" class="inp" style="width:64px; text-align:center;" min="1" max="60" value="3">
-            <span class="lbl" style="margin:0;">min</span>
-          </div>
-
-          <label class="lbl" for="logWebhook" style="margin-top:12px;">Discord Log Webhook <span class="muted">(shared)</span></label>
-          <input type="text" id="logWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
-          <label class="lbl" for="alertWebhook" style="margin-top:10px;">Discord Alert Webhook <span class="badge">@here</span></label>
-          <input type="text" id="alertWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
-        </section>
-
-      </div>
-
-      <!-- ░░ RIGHT COLUMN ░░ -->
-      <div class="col">
-
-        <!-- Chrome Profile Creator -->
-        <section class="card" id="profileCreatorCard">
-          <div class="card-head">
-            <h2>CREATE CHROME PROFILE</h2>
-            <span class="card-tag">ONE PROFILE = ONE NIKE ACCOUNT</span>
-          </div>
-          <p class="hint">
-            Click below to spin up a brand-new Chrome profile and open the Nike SG login page in it.
-            Sign in there with one Nike account. Do this once per account. The new profile is added
-            to your accounts list automatically.
-          </p>
-          <div class="row" style="align-items:flex-end; gap:10px;">
-            <div class="grow">
-              <label class="lbl" for="newProfileName">Profile name <span class="muted">(auto-suggested)</span></label>
-              <input type="text" id="newProfileName" class="inp" placeholder="Profile 5">
-            </div>
-            <button id="createProfileBtn" class="btn btn-light" style="flex:none; white-space:nowrap;">➕ CREATE &amp; OPEN LOGIN</button>
-          </div>
-          <div id="profileCreatorMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
-        </section>
-
-        <section class="card">
-          <div class="card-head">
-            <h2>ACCOUNTS</h2>
-            <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
-          </div>
-          <p class="hint">
-            Each account maps to a Chrome profile. Pick the profile, set the size that account wants,
-            then hit <em>Launch</em> to open that profile straight onto the drop — no manual opening.
-            <span id="profileSourceNote"></span>
-          </p>
-
-          <div id="accountsList"></div>
-
-          <button id="addAccountBtn" class="btn btn-ghost" style="margin-top:12px;">+ ADD ACCOUNT</button>
-        </section>
-
-        <section class="card sticky-actions">
-          <div class="actions">
-            <button id="saveBtn" class="btn btn-light">SAVE CENTRAL CONFIG</button>
-            <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL NOW</button>
-          </div>
-          <p class="hint" style="margin-top:8px; margin-bottom:8px;">
-            <strong>Launch all now</strong> opens <em>every</em> account that has a Chrome profile — even
-            ones you haven’t finished setting up — so you can pre-warm Kasada. Fully-configured accounts
-            (profile + size + URL) go straight to the product and the bot runs; the rest just open to the
-            SNKRS feed to warm up. If you set a scheduled time, only ⏰ auto accounts open automatically at drop time.
-          </p>
-          <div class="actions">
-            <button id="testHostBtn" class="btn btn-dark">Test launcher connection</button>
-            <button id="refreshProfilesBtn" class="btn btn-dark">Reload Chrome profiles</button>
-          </div>
-          <div class="actions" style="margin-top:8px;">
-            <button id="clearStatusBtn" class="btn btn-dark" style="flex:none; font-size:11px;">Clear live status</button>
-          </div>
-          <div class="actions" style="margin-top:8px;">
-            <button id="exportConfigBtn" class="btn btn-dark" style="font-size:11px;">⬇ Export config</button>
-            <label class="btn btn-dark" style="font-size:11px; text-align:center; cursor:pointer; flex:1;" title="Import a previously exported config JSON">
-              ⬆ Import config
-              <input type="file" id="importFileInput" accept=".json" style="display:none;">
-            </label>
-          </div>
-          <div id="statusMsg" class="status-msg"></div>
-        </section>
-
-        <!-- Order Checker -->
-        <section class="card" id="orderCheckerCard">
-          <div class="card-head">
-            <h2>ORDER CHECKER</h2>
-            <span class="card-tag">WIN VERIFICATION</span>
-          </div>
-          <p class="hint">
-            Select an account and click <em>Open Orders</em> to load its Nike orders page
-            in the correct Chrome profile. Orders pull back here automatically.
-            Products matching the current drop keyword/SKU are highlighted.
-          </p>
-
-          <div class="row" style="align-items:flex-end; gap:10px; margin-bottom:10px;">
-            <div class="grow">
-              <label class="lbl" for="orderCheckerProfile">Account</label>
-              <select class="inp" id="orderCheckerProfile"></select>
-            </div>
-            <button id="openOrdersBtn" class="btn btn-dark" style="flex:none; white-space:nowrap; padding:9px 14px; font-size:12px;">Open Orders Page</button>
-            <button id="clearOrdersBtn" class="btn btn-danger btn-mini" style="flex:none;" title="Clear cached orders for this account">✕</button>
-          </div>
-
-          <div class="row" style="gap:10px; margin-bottom:10px;">
-            <button id="diagnoseOrdersBtn" class="btn btn-dark" style="flex:none; font-size:11px; padding:7px 12px;">🔍 Diagnose order checker</button>
-          </div>
-          <pre id="ordersDiag" style="display:none; white-space:pre-wrap; font-family:'Courier New',monospace; font-size:11px; color:#9fe3bd; background:#0f1411; border:1px solid var(--line); padding:10px; margin:0 0 10px; max-height:220px; overflow:auto;"></pre>
-
-          <div id="orderCheckerMsg" class="status-msg" style="text-align:left; min-height:14px; margin:0 0 8px;"></div>
-          <div id="ordersDisplay"></div>
-        </section>
-
-        <!-- Drop History -->
-        <section class="card" id="historyCard">
-          <div class="card-head">
-            <h2>DROP HISTORY</h2>
-            <span class="card-tag">RECENT RUNS</span>
-          </div>
-          <div id="historyList"></div>
-          <div class="actions" style="margin-top:10px;">
-            <button id="clearHistoryBtn" class="btn btn-dark" style="flex:none; font-size:11px;">Clear history</button>
-          </div>
-        </section>
-
+            <div id="statusMsg" class="status-msg"></div>
+          </section>
+        </div>
       </div>
     </div>
 
-    <!-- Setup help (toggled) -->
-    <section class="card help" id="setupHelp" style="display:none;">
-      <div class="card-head"><h2>ONE-TIME LAUNCHER SETUP</h2></div>
-      <ol class="steps">
-        <li>Make sure <strong>Node.js</strong> is installed (<code>node --version</code> in a terminal).</li>
-        <li>In the <code>native-host/</code> folder of this extension, run the installer:
-          <ul>
-            <li><strong>Windows:</strong> double-click <code>install-windows.bat</code></li>
-            <li><strong>macOS / Linux:</strong> <code>./install-unix.sh</code> in a terminal</li>
-          </ul>
-        </li>
-        <li>Install/reload this extension in <code>chrome://extensions</code> (Developer mode → Load unpacked). Its ID is fixed to <code>kopeofjmoelfkdcmfcenkedojhoaolfb</code>.</li>
-        <li>Come back here and click <em>Test launcher connection</em>. It should turn green.</li>
-      </ol>
-      <p class="hint">Why a helper? Chrome extensions are sandboxed and cannot open other Chrome profiles by themselves. This tiny local helper is what actually runs <code>chrome --profile-directory=…</code> for each account.</p>
-    </section>
+    <!-- ─────────────────── PROFILES ─────────────────── -->
+    <div class="page-section" id="page-profiles">
+      <div class="section-header">
+        <h1 class="section-title">PROFILES</h1>
+        <span class="section-sub">One Chrome profile = one Nike account</span>
+      </div>
 
-  </div>
+      <div class="two-col">
+        <div class="col">
+          <section class="card" id="profileCreatorCard">
+            <div class="card-head">
+              <h2>CREATE CHROME PROFILE</h2>
+              <span class="card-tag">ONE-CLICK SETUP</span>
+            </div>
+            <p class="hint">Creates a fresh Chrome profile and opens Nike SG login. Sign in there. Repeat for every account.</p>
+            <div class="row" style="align-items:flex-end; gap:10px;">
+              <div class="grow">
+                <label class="lbl" for="newProfileName">Profile name</label>
+                <input type="text" id="newProfileName" class="inp" placeholder="Profile 5">
+              </div>
+              <button id="createProfileBtn" class="btn btn-purple" style="flex:none; white-space:nowrap;">➕ CREATE &amp; LOGIN</button>
+            </div>
+            <div id="profileCreatorMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+          </section>
+        </div>
 
-  <!-- Account row template -->
+        <div class="col">
+          <section class="card">
+            <div class="card-head">
+              <h2>QUICK ACTIONS</h2>
+            </div>
+            <div class="actions" style="margin-bottom:10px;">
+              <button id="testHostBtn" class="btn btn-dark">Test connection</button>
+              <button id="refreshProfilesBtn" class="btn btn-dark">Reload profiles</button>
+            </div>
+            <div class="actions">
+              <button id="clearStatusBtn" class="btn btn-dark" style="font-size:11px;">Clear live status</button>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <section class="card" style="margin-top:0;">
+        <div class="card-head">
+          <h2>ACCOUNTS</h2>
+          <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
+        </div>
+        <p class="hint">
+          Each account maps to one Chrome profile.
+          Pick the profile, set size, assign a card, then launch.
+          <span id="profileSourceNote"></span>
+        </p>
+        <div id="accountsList"></div>
+        <button id="addAccountBtn" class="btn btn-ghost" style="margin-top:12px;">+ ADD ACCOUNT</button>
+      </section>
+    </div>
+
+    <!-- ─────────────────── CARDS ─────────────────── -->
+    <div class="page-section" id="page-cards">
+      <div class="section-header">
+        <h1 class="section-title">CARD PROFILES</h1>
+        <span class="section-sub">Create once, assign to any number of accounts</span>
+      </div>
+
+      <div class="two-col">
+        <div class="col">
+          <section class="card" id="cardProfilesCard">
+            <div class="card-head">
+              <h2>SAVED CARDS 🔒</h2>
+              <span class="card-tag">REUSABLE</span>
+            </div>
+            <p class="hint">Assign a card to accounts from their <strong>💳 Card</strong> dropdown. Multiple accounts can share one card.</p>
+            <div id="cardProfilesList"></div>
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card">
+            <div class="cardform" id="cardForm" style="padding:0; border:none; background:none;">
+              <div class="card-head" style="margin-bottom:12px;">
+                <h2 id="cardFormTitle">ADD A CARD</h2>
+                <button id="cpCancelBtn" class="btn btn-mini btn-dark" style="display:none;">cancel edit</button>
+              </div>
+              <label class="lbl" for="cpName">Card nickname</label>
+              <input type="text" id="cpName" class="inp" placeholder="e.g. Reagan Visa" autocomplete="off">
+              <label class="lbl" for="cpCardName" style="margin-top:10px;">Name on card</label>
+              <input type="text" id="cpCardName" class="inp" placeholder="REAGAN TANG" autocomplete="off">
+              <label class="lbl" for="cpNumber" style="margin-top:10px;">Card number</label>
+              <input type="text" id="cpNumber" class="inp mono" placeholder="1234 5678 9012 3456" maxlength="19" autocomplete="off" inputmode="numeric">
+              <div class="row" style="margin-top:10px;">
+                <div class="grow">
+                  <label class="lbl" for="cpExpiry">Expiry</label>
+                  <input type="text" id="cpExpiry" class="inp" placeholder="MM/YY" maxlength="5" autocomplete="off" inputmode="numeric">
+                </div>
+                <div class="grow">
+                  <label class="lbl" for="cpCvv">CVV</label>
+                  <input type="password" id="cpCvv" class="inp" placeholder="•••" maxlength="4" autocomplete="off" inputmode="numeric">
+                </div>
+              </div>
+              <button id="cpSaveBtn" class="btn btn-purple" style="margin-top:14px; width:100%;">➕ SAVE CARD</button>
+              <div id="cpMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+            </div>
+            <p class="warn" style="margin-top:12px;">⚠ Card data stored unencrypted on this machine. Don't use on shared computers.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─────────────────── ORDERS ─────────────────── -->
+    <div class="page-section" id="page-orders">
+      <div class="section-header">
+        <h1 class="section-title">ORDER CHECKER</h1>
+        <span class="section-sub">Win verification — checks orders against drop SKU</span>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>CHECK ACCOUNT ORDERS</h2>
+          <span class="card-tag">WIN VERIFICATION</span>
+        </div>
+        <p class="hint">
+          Select an account and click <em>Open Orders Page</em>. The extension opens that Chrome profile's
+          Nike orders page, scrapes the results, and shows them here. Products matching your drop SKU are
+          highlighted as wins.
+        </p>
+
+        <div class="row" style="align-items:flex-end; gap:10px; margin-bottom:10px;">
+          <div class="grow">
+            <label class="lbl" for="orderCheckerProfile">Account</label>
+            <select class="inp" id="orderCheckerProfile"></select>
+          </div>
+          <button id="openOrdersBtn" class="btn btn-purple" style="flex:none; white-space:nowrap;">Open Orders Page</button>
+          <button id="clearOrdersBtn" class="btn btn-danger btn-mini" style="flex:none;" title="Clear cached orders">✕</button>
+        </div>
+
+        <div class="row" style="gap:10px; margin-bottom:12px;">
+          <button id="diagnoseOrdersBtn" class="btn btn-dark" style="flex:none; font-size:11px;">🔍 Diagnose</button>
+        </div>
+        <pre id="ordersDiag" style="display:none; white-space:pre-wrap; font-family:'Courier New',monospace; font-size:11px; color:#c4b5fd; background:#0d0a18; border:1px solid #3b2a6a; padding:12px; margin:0 0 12px; border-radius:8px; max-height:240px; overflow:auto;"></pre>
+
+        <div id="orderCheckerMsg" class="status-msg" style="text-align:left; min-height:14px; margin:0 0 8px;"></div>
+        <div id="ordersDisplay"></div>
+      </section>
+    </div>
+
+    <!-- ─────────────────── HISTORY ─────────────────── -->
+    <div class="page-section" id="page-history">
+      <div class="section-header">
+        <h1 class="section-title">DROP HISTORY</h1>
+        <span class="section-sub">Record of every run</span>
+      </div>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>RECENT RUNS</h2>
+          <button id="clearHistoryBtn" class="btn btn-mini btn-dark">Clear history</button>
+        </div>
+        <div id="historyList"></div>
+      </section>
+    </div>
+
+    <!-- ─────────────────── SETTINGS ─────────────────── -->
+    <div class="page-section" id="page-settings">
+      <div class="section-header">
+        <h1 class="section-title">SETTINGS</h1>
+        <span class="section-sub">Bot behaviour, webhooks, config backup</span>
+      </div>
+
+      <div class="two-col">
+        <div class="col">
+          <section class="card">
+            <div class="card-head"><h2>BOT OPTIONS</h2></div>
+            <div class="toggle">
+              <div>
+                <div class="t-label">Bot Enabled</div>
+                <div class="t-hint">Auto-select size and submit on every launched account</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="optEnabled" checked><span class="track"></span></label>
+            </div>
+            <div class="toggle">
+              <div>
+                <div class="t-label">Test Mode</div>
+                <div class="t-hint">Selects size + fills card but never submits</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="optTestMode"><span class="track"></span></label>
+            </div>
+            <div class="toggle">
+              <div>
+                <div class="t-label">Status Poller</div>
+                <div class="t-hint">Refresh for result and alert on win</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="optPoller" checked><span class="track"></span></label>
+            </div>
+            <div class="row" style="margin-top:12px; align-items:center; gap:8px;">
+              <label class="lbl" style="margin:0; white-space:nowrap;">Refresh every</label>
+              <input type="number" id="optPollerMin" class="inp" style="width:64px; text-align:center;" min="1" max="60" value="3">
+              <span class="lbl" style="margin:0;">min</span>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head"><h2>DISCORD WEBHOOKS</h2></div>
+            <label class="lbl" for="logWebhook">Log Webhook <span class="muted">(all events)</span></label>
+            <input type="text" id="logWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+            <label class="lbl" for="alertWebhook" style="margin-top:10px;">Alert Webhook <span class="badge">@here on win</span></label>
+            <input type="text" id="alertWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+          </section>
+        </div>
+
+        <div class="col">
+          <section class="card">
+            <div class="card-head"><h2>CONFIG BACKUP</h2></div>
+            <p class="hint">Export your full config (accounts, cards, drop settings) to a JSON file. Import to restore on a different machine.</p>
+            <div class="actions" style="margin-bottom:8px;">
+              <button id="exportConfigBtn" class="btn btn-dark">⬇ Export config</button>
+              <label class="btn btn-dark" style="text-align:center; cursor:pointer; flex:1;">
+                ⬆ Import config
+                <input type="file" id="importFileInput" accept=".json" style="display:none;">
+              </label>
+            </div>
+          </section>
+
+          <section class="card" id="setupHelp">
+            <div class="card-head"><h2>LAUNCHER SETUP</h2></div>
+            <p class="hint">One-time install — required to open other Chrome profiles and carry order data back.</p>
+            <ol class="steps">
+              <li>Confirm Node.js is installed: <code>node --version</code></li>
+              <li>In the <code>native-host/</code> folder:
+                <ul>
+                  <li><strong>Windows:</strong> double-click <code>install-windows.bat</code></li>
+                  <li><strong>macOS/Linux:</strong> <code>./install-unix.sh</code></li>
+                </ul>
+              </li>
+              <li>Reload the extension in <code>chrome://extensions</code>.</li>
+              <li>Click <em>Test connection</em> below — should turn green.</li>
+            </ol>
+            <div class="actions" style="margin-top:14px;">
+              <button id="testHostBtnSettings" class="btn btn-purple">Test connection</button>
+              <button id="refreshProfilesBtnSettings" class="btn btn-dark">Reload profiles</button>
+            </div>
+            <div id="settingsStatusMsg" class="status-msg"></div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ─────────── TEMPLATES ─────────── -->
   <template id="accountRowTpl">
     <div class="acct">
-
       <div class="acct-grid">
         <div class="acct-field grow">
           <label class="lbl">Label</label>
@@ -396,13 +500,10 @@
           <select class="inp f-size"></select>
         </div>
       </div>
-
-      <!-- Which saved card this account uses -->
       <div class="acct-card-row">
         <label class="lbl">💳 Card</label>
         <select class="inp f-card-select"></select>
       </div>
-
       <div class="acct-foot">
         <div class="acct-toggles">
           <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
@@ -410,27 +511,21 @@
           </label>
         </div>
         <div class="acct-actions">
-          <button class="btn btn-mini btn-dark f-copycmd" title="Copy the terminal command to open this profile">⌘ copy cmd</button>
+          <button class="btn btn-mini btn-dark f-copycmd" title="Copy terminal command">⌘ copy cmd</button>
           <button class="btn btn-mini btn-accent f-launch">🚀 launch</button>
           <button class="btn btn-mini btn-danger f-remove" title="Remove account">✕</button>
         </div>
       </div>
-
-      <!-- Assigned product note (multi-product mode) -->
       <div class="acct-assigned f-assigned" style="display:none;"></div>
-
-      <!-- Live status badge -->
       <div class="acct-status-row f-status-row">
         <span class="acct-status-badge f-status-badge"></span>
         <span class="acct-status-text f-status-text"></span>
         <span class="acct-status-time f-status-time"></span>
       </div>
-
       <div class="acct-msg"></div>
     </div>
   </template>
 
-  <!-- Product row template (multi-product mode) -->
   <template id="productRowTpl">
     <div class="product">
       <div class="product-head">
