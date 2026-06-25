@@ -121,14 +121,23 @@ function listProfiles() {
   })).sort((a, b) => (b.active || 0) - (a.active || 0));
 }
 
-function launchProfile(profileDir, url) {
+// Extension folder is always the parent of this native-host directory.
+// Passing --load-extension ensures every launched profile has the bot
+// loaded, even brand-new profiles that have never seen it before.
+const EXTENSION_DIR = path.resolve(__dirname, "..");
+
+function launchProfile(profileDir, url, extensionDir) {
   const chrome = findChrome();
   if (!chrome) {
     return { ok: false, error: "Chrome executable not found. Set SNKRS_CHROME_PATH." };
   }
   if (!profileDir) return { ok: false, error: "Missing profileDir." };
 
-  const args = [`--profile-directory=${profileDir}`];
+  const extDir = extensionDir || EXTENSION_DIR;
+  const args = [
+    `--profile-directory=${profileDir}`,
+    `--load-extension=${extDir}`,
+  ];
   if (url) args.push(url);
 
   try {
@@ -152,6 +161,7 @@ function handle(msg) {
         chrome: findChrome(),
         userDataDir: userDataDir(),
         configPath: CONFIG_PATH,
+        extensionDir: EXTENSION_DIR,
       };
     case "listProfiles":
       return { ok: true, profiles: listProfiles() };
@@ -165,7 +175,7 @@ function handle(msg) {
         return { ok: false, error: String(e && e.message || e) };
       }
     case "launch":
-      return launchProfile(msg.profileDir, msg.url);
+      return launchProfile(msg.profileDir, msg.url, msg.extensionDir);
     default:
       return { ok: false, error: `Unknown cmd: ${cmd}` };
   }
