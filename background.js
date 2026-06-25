@@ -401,11 +401,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         entry.apiPayloads = list;
         entry.source = "api";
       } else {
-        // DOM fallback — only store if we have no API data yet
-        if (!entry.source || entry.source === "dom") {
-          entry.domOrders = msg.orders;
-          entry.source    = "dom";
-        }
+        // Always keep the latest DOM scrape too — the dashboard falls back to
+        // it when API payloads can't be parsed into orders.
+        entry.domOrders = msg.orders;
+        if (!entry.source) entry.source = "dom";
       }
 
       store[profileDir] = entry;

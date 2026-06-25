@@ -523,22 +523,31 @@ async function renderOrders(profileDir, entry) {
   }
 
   if (!orders.length && entry.domOrders?.length) {
-    // DOM-scraped fallback — render as raw text cards
+    // DOM-scraped fallback — Nike's list view exposes Style code, status, size
+    // and image (but not the order number), so render those.
+    const keyword = $("dropKeyword")?.value.trim() || "";
+    const dropUrl = $("dropUrl")?.value.trim() || "";
+    const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "";
     const note = document.createElement("p");
     note.className = "hint";
-    note.textContent = "Orders captured via page text (API data not available). Matching is limited.";
+    note.style.marginBottom = "10px";
+    note.textContent = `${entry.domOrders.length} order(s) read from the page${ts ? " · " + ts : ""}.`;
     display.appendChild(note);
+
     entry.domOrders.forEach(o => {
-      const card = document.createElement("div");
-      card.className = "order-card";
-      const num = document.createElement("div");
-      num.className = "order-num";
-      num.textContent = o.orderNumber || "—";
-      const raw = document.createElement("div");
-      raw.className = "order-raw";
-      raw.textContent = o.rawText || "";
-      card.append(num, raw);
-      display.appendChild(card);
+      // Reuse the rich card by mapping scraped fields onto the normal shape.
+      const mapped = {
+        orderNumber: o.orderNumber || "",
+        date: "",
+        status: o.status || "",
+        products: [{
+          name: (o.rawText || "Order item").slice(0, 90),
+          sku: o.style || "",
+          size: o.size || "",
+          imageUrl: o.imageUrl || "",
+        }],
+      };
+      display.appendChild(buildOrderCard(mapped, keyword, dropUrl));
     });
     return;
   }

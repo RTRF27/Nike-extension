@@ -14,58 +14,102 @@ let _dir = '';
   }
 })();
 
-// ── Relay fetch-interceptor payloads ──────────────────────────
+// ── Relay fetch/XHR-interceptor payloads ──────────────────────
 window.addEventListener('message', (e) => {
   if (!e.data || !e.data.__snkrsOrd) return;
-  chrome.runtime.sendMessage({
-    type:     'orders_api_data',
-    profileDir: _dir,
-    raw:      e.data.data,
-    apiUrl:   e.data.url,
-  });
+  try {
+    chrome.runtime.sendMessage({
+      type:       'orders_api_data',
+      profileDir: _dir,
+      raw:        e.data.data,
+      apiUrl:     e.data.url,
+    });
+  } catch {}
 });
 
 // ── DOM scrape fallback ───────────────────────────────────────
-// Fires if no API data arrives (e.g. cached response, no orders).
-let _scraped = false;
+// Always runs alongside the API path. Nike's list view shows each order's
+// Style code (e.g. "IM3198-052") and status ("Delivered"), but NOT the order
+// number — so we anchor on Style codes / status instead of order numbers.
+
+const STYLE_RE  = /\b[A-Z]{2,4}\d{3,4}-\d{2,4}\b/;          // IM3198-052
+const ORDER_RE  = /\b(C\d{9,}|[A-Z]{2,3}\d{8,})\b/;          // C0123456789
+const STATUS_RE = /\b(Delivered|Shipped|Arriving|Out for delivery|In transit|Processing|Confirmed|Order placed|Preparing|Cancelled|Canceled|Returned|Refunded|On its way|Ready)\b/i;
+
+function _closestCard(startEl) {
+  // Climb to a container that looks like an order card (has an image and a
+  // reasonable height), without going all the way to <body>.
+  let el = startEl;
+  for (let i = 0; i < 8 && el && el !== document.body; i++) {
+    const h = el.offsetHeight || 0;
+    if (h >= 80 && el.querySelector && el.querySelector('img')) return el;
+    el = el.parentElement;
+  }
+  return startEl.parentElement || startEl;
+}
+
+function _field(text, re) {
+  const m = text.match(re);
+  return m ? m[1] || m[0] : '';
+}
 
 function _scrape() {
-  if (_scraped) return;
+  if (!document.body) return [];
   const orders = [];
-  const seen   = new Set();
+  const seenCards = new Set();
 
-  // Walk every text node looking for Nike order-number patterns
+  // Anchor candidates: every text node containing a Style code or a status word.
+  const anchors = [];
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
-    const m = node.data.match(/\b(C\d{10,}|[A-Z]{2,3}\d{8,})\b/);
-    if (!m || seen.has(m[1])) continue;
-    seen.add(m[1]);
-
-    // Walk up to a "card-sized" ancestor
-    let el = node.parentElement;
-    for (let i = 0; i < 6 && el; i++, el = el.parentElement) {
-      if (el.offsetHeight > 60) break;
+    const t = node.data;
+    if (!t || t.length > 200) continue;
+    if (STYLE_RE.test(t) || /\bStyle\b/i.test(t) || (STATUS_RE.test(t) && t.length < 40)) {
+      if (node.parentElement) anchors.push(node.parentElement);
     }
-    const imgEl = el ? el.querySelector('img[src]') : null;
-    const text  = el ? el.textContent.replace(/\s+/g, ' ').trim() : node.data;
+  }
+
+  for (const a of anchors) {
+    const card = _closestCard(a);
+    if (!card || seenCards.has(card)) continue;
+    seenCards.add(card);
+
+    const text = (card.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+
+    const style = _field(text, STYLE_RE);
+    const order = _field(text, ORDER_RE);
+    // Require at least a style code or an order number to count it as a card.
+    if (!style && !order) continue;
+
+    const imgEl  = card.querySelector('img[src]');
+    const status = _field(text, STATUS_RE);
+    const size   = (text.match(/\bSize\s+([A-Za-z0-9.\/ ]{1,8})/) || [])[1] || '';
 
     orders.push({
-      orderNumber: m[1],
-      rawText:    text.slice(0, 400),
-      imageUrl:   imgEl ? imgEl.src : '',
+      orderNumber: order || '',
+      style:       style || '',
+      status:      status || '',
+      size:        (size || '').trim(),
+      rawText:     text.slice(0, 300),
+      imageUrl:    imgEl ? imgEl.src : '',
     });
   }
 
-  if (orders.length) {
-    _scraped = true;
-    chrome.runtime.sendMessage({ type: 'orders_dom_data', profileDir: _dir, orders });
-  }
+  return orders;
 }
 
-// Poll – give the SPA up to ~30 s to render
+// Poll – give the SPA time to render, and keep refreshing as more cards load.
+let _lastCount = -1;
 let _ticks = 0;
 const _t = setInterval(() => {
-  if (++_ticks > 20 || _scraped) { clearInterval(_t); return; }
-  if (document.body) _scrape();
-}, 1500);
+  if (++_ticks > 24) { clearInterval(_t); return; }
+  const orders = _scrape();
+  if (orders.length && orders.length !== _lastCount) {
+    _lastCount = orders.length;
+    try {
+      chrome.runtime.sendMessage({ type: 'orders_dom_data', profileDir: _dir, orders });
+    } catch {}
+  }
+}, 1200);
