@@ -61,6 +61,23 @@
       "js": ["gs-payments-content-script.js"],
       "run_at": "document_idle",
       "all_frames": true
+    },
+    {
+      "matches": [
+        "https://www.nike.com/*/orders",
+        "https://www.nike.com/*/orders/*"
+      ],
+      "js": ["orders-fetch-interceptor.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.nike.com/*/orders",
+        "https://www.nike.com/*/orders/*"
+      ],
+      "js": ["orders-content-script.js"],
+      "run_at": "document_start"
     }
   ]
 }

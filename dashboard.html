@@ -220,6 +220,31 @@
           <div id="statusMsg" class="status-msg"></div>
         </section>
 
+        <!-- Order Checker -->
+        <section class="card" id="orderCheckerCard">
+          <div class="card-head">
+            <h2>ORDER CHECKER</h2>
+            <span class="card-tag">WIN VERIFICATION</span>
+          </div>
+          <p class="hint">
+            Select an account and click <em>Open Orders</em> to load its Nike orders page
+            in the correct Chrome profile. Orders pull back here automatically.
+            Products matching the current drop keyword/SKU are highlighted.
+          </p>
+
+          <div class="row" style="align-items:flex-end; gap:10px; margin-bottom:10px;">
+            <div class="grow">
+              <label class="lbl" for="orderCheckerProfile">Account</label>
+              <select class="inp" id="orderCheckerProfile"></select>
+            </div>
+            <button id="openOrdersBtn" class="btn btn-dark" style="flex:none; white-space:nowrap; padding:9px 14px; font-size:12px;">Open Orders Page</button>
+            <button id="clearOrdersBtn" class="btn btn-danger btn-mini" style="flex:none;" title="Clear cached orders for this account">✕</button>
+          </div>
+
+          <div id="orderCheckerMsg" class="status-msg" style="text-align:left; min-height:14px; margin:0 0 8px;"></div>
+          <div id="ordersDisplay"></div>
+        </section>
+
         <!-- Drop History -->
         <section class="card" id="historyCard">
           <div class="card-head">

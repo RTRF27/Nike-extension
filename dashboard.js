@@ -20,6 +20,7 @@ const DASH_KEY    = "snkrsDashboard";
 const VAULT_KEY   = "snkrsVault";
 const STATUS_KEY  = "snkrsStatus";
 const HISTORY_KEY = "snkrsHistory";
+const ORDERS_KEY  = "snkrsOrders";
 
 const FOOTWEAR_SIZES = ["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","12.5","13","13.5","14"];
 const APPAREL_SIZES  = ["XS","S","M","L","XL","XXL"];
@@ -229,6 +230,13 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
   }
+  if (changes[ORDERS_KEY]) {
+    const profileDir = $("orderCheckerProfile") && $("orderCheckerProfile").value;
+    if (profileDir && changes[ORDERS_KEY].newValue?.[profileDir]) {
+      renderOrders(profileDir, changes[ORDERS_KEY].newValue[profileDir]);
+      flashTemp($("orderCheckerMsg"), "Orders updated.", "#1db954");
+    }
+  }
 });
 
 // ── Vault helpers ─────────────────────────────────────────────
@@ -324,6 +332,250 @@ function renderVault() {
     return;
   }
   savedVault.forEach(vp => list.appendChild(buildVaultRow(vp)));
+}
+
+// ── Order checker ─────────────────────────────────────────────
+
+// Populate the profile picker from the current accounts list
+function refreshOrderCheckerProfiles() {
+  const sel = $("orderCheckerProfile");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = "";
+  if (!accounts.length) {
+    sel.appendChild(el("option", { value: "" }, "— add accounts first —"));
+    return;
+  }
+  accounts.forEach(a => {
+    const label = (a.label || a.profileDir || "Unnamed") + (a.profileDir ? `  ·  ${a.profileDir}` : "");
+    sel.appendChild(el("option", { value: a.profileDir || "" }, label));
+  });
+  // Restore previous selection if still valid
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+}
+
+// Normalise raw API payloads from Nike's various order endpoints into a
+// flat array of { orderNumber, date, status, products:[{name,sku,size,imageUrl}] }.
+function normaliseOrderPayloads(payloads) {
+  const orders = [];
+  for (const p of (payloads || [])) {
+    extractOrders(p.data).forEach(o => {
+      if (!orders.find(x => x.orderNumber === o.orderNumber)) orders.push(o);
+    });
+  }
+  return orders;
+}
+
+function extractOrders(raw) {
+  if (!raw) return [];
+  // Try many possible shapes Nike uses
+  let items = raw.orders || raw.orderHistory || raw.data?.orders
+           || raw.results || raw.content || raw.items;
+  if (!Array.isArray(items)) {
+    if (Array.isArray(raw)) items = raw;
+    else return [];
+  }
+  return items.map(o => ({
+    orderNumber: o.orderNumber || o.orderId || o.id || o.order_number || "",
+    date:        o.orderDate   || o.placedDate || o.submittedDate || o.created_at || o.date || "",
+    status:      o.orderStatus || o.status     || o.state || o.fulfillmentStatus || "",
+    products:    extractLineItems(o),
+  })).filter(o => o.orderNumber || o.products.length);
+}
+
+function extractLineItems(order) {
+  const raw = order.lineItems || order.items || order.products
+           || order.orderLines || order.orderItems || [];
+  if (!Array.isArray(raw)) return [];
+  return raw.map(i => ({
+    name:     i.productName || i.name || i.title || i.product?.name || i.skuName || "",
+    sku:      i.sku || i.styleCode || i.productCode || i.product?.sku || i.upc || "",
+    size:     i.size || i.selectedSize || i.localSize || i.displaySize || "",
+    imageUrl: i.imageUrl || i.image?.url || i.product?.imageUrl || i.thumbnailUrl || "",
+  }));
+}
+
+// Returns true if any field of the order/product loosely matches the current
+// drop keyword or the last segment of the drop URL.
+function isDropMatch(order, keyword, dropUrl) {
+  if (!keyword && !dropUrl) return false;
+  const terms = [];
+  if (keyword) terms.push(...keyword.toLowerCase().split(/\s+/));
+  if (dropUrl) {
+    try {
+      const last = new URL(/^https?:\/\//i.test(dropUrl) ? dropUrl : "https://" + dropUrl)
+                    .pathname.split("/").filter(Boolean).pop();
+      if (last) terms.push(last.toLowerCase());
+    } catch {}
+  }
+  if (!terms.length) return false;
+  const haystack = [
+    order.orderNumber,
+    ...order.products.map(p => `${p.name} ${p.sku}`),
+  ].join(" ").toLowerCase();
+  return terms.some(t => haystack.includes(t));
+}
+
+function statusMeta(status) {
+  const s = (status || "").toLowerCase();
+  if (s.includes("deliver") || s.includes("complete")) return { color: "#1db954" };
+  if (s.includes("ship") || s.includes("transit"))    return { color: "#4a90e2" };
+  if (s.includes("process") || s.includes("confirm")) return { color: "#fa8c00" };
+  if (s.includes("cancel"))                            return { color: "#e03131" };
+  return { color: "#8d8d8d" };
+}
+
+function buildOrderCard(order, keyword, dropUrl) {
+  const match = isDropMatch(order, keyword, dropUrl);
+  const card  = document.createElement("div");
+  card.className = "order-card" + (match ? " match" : "");
+
+  // Header row
+  const head = document.createElement("div");
+  head.className = "order-head";
+
+  const numEl = document.createElement("span");
+  numEl.className = "order-num";
+  numEl.textContent = order.orderNumber || "—";
+
+  const dateEl = document.createElement("span");
+  dateEl.className = "order-date";
+  if (order.date) {
+    try {
+      const d = new Date(order.date);
+      dateEl.textContent = isNaN(d) ? order.date
+        : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    } catch { dateEl.textContent = order.date; }
+  }
+
+  const statusEl = document.createElement("span");
+  statusEl.className = "order-status";
+  const sm = statusMeta(order.status);
+  statusEl.style.color = sm.color;
+  statusEl.textContent = (order.status || "PLACED").toUpperCase();
+
+  head.append(numEl, dateEl, statusEl);
+
+  // Products
+  const itemsWrap = document.createElement("div");
+  itemsWrap.className = "order-items";
+
+  if (order.products && order.products.length) {
+    order.products.forEach(p => {
+      const row = document.createElement("div");
+      row.className = "order-item" + (match ? " match" : "");
+
+      if (p.imageUrl) {
+        const img = document.createElement("img");
+        img.className = "order-thumb";
+        img.src = p.imageUrl;
+        img.alt = p.name || "";
+        img.onerror = () => { img.style.display = "none"; };
+        row.appendChild(img);
+      }
+
+      const info = document.createElement("div");
+      info.className = "order-item-info";
+
+      const name = document.createElement("div");
+      name.className = "order-item-name";
+      name.textContent = p.name || "Product";
+
+      const meta = document.createElement("div");
+      meta.className = "order-item-meta";
+      meta.textContent = [p.sku && `SKU: ${p.sku}`, p.size && `Size: ${p.size}`].filter(Boolean).join("  ·  ");
+
+      info.append(name, meta);
+      row.appendChild(info);
+
+      if (match) {
+        const badge = document.createElement("span");
+        badge.className = "match-badge";
+        badge.textContent = "MATCH";
+        row.appendChild(badge);
+      }
+
+      itemsWrap.appendChild(row);
+    });
+  }
+
+  card.append(head, itemsWrap);
+  return card;
+}
+
+async function renderOrders(profileDir, entry) {
+  const display = $("ordersDisplay");
+  if (!display) return;
+  display.innerHTML = "";
+
+  if (!entry) {
+    display.appendChild(el("p", { className: "hint" }, "No orders loaded yet — click Open Orders Page."));
+    return;
+  }
+
+  const keyword = $("dropKeyword")?.value.trim() || "";
+  const dropUrl = $("dropUrl")?.value.trim() || "";
+
+  let orders = [];
+
+  if (entry.source === "api" && entry.apiPayloads?.length) {
+    orders = normaliseOrderPayloads(entry.apiPayloads);
+  }
+
+  if (!orders.length && entry.domOrders?.length) {
+    // DOM-scraped fallback — render as raw text cards
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.textContent = "Orders captured via page text (API data not available). Matching is limited.";
+    display.appendChild(note);
+    entry.domOrders.forEach(o => {
+      const card = document.createElement("div");
+      card.className = "order-card";
+      const num = document.createElement("div");
+      num.className = "order-num";
+      num.textContent = o.orderNumber || "—";
+      const raw = document.createElement("div");
+      raw.className = "order-raw";
+      raw.textContent = o.rawText || "";
+      card.append(num, raw);
+      display.appendChild(card);
+    });
+    return;
+  }
+
+  if (!orders.length) {
+    display.appendChild(el("p", { className: "hint" }, "No orders found. Make sure you're logged in on that Nike profile."));
+    return;
+  }
+
+  const ts = entry.ts ? new Date(entry.ts).toLocaleTimeString() : "";
+  if (ts) {
+    const note = document.createElement("p");
+    note.className = "hint";
+    note.style.marginBottom = "10px";
+    note.textContent = `${orders.length} order(s) · last fetched ${ts}`;
+    display.appendChild(note);
+  }
+
+  orders.forEach(o => display.appendChild(buildOrderCard(o, keyword, dropUrl)));
+}
+
+async function openOrdersPage() {
+  const sel     = $("orderCheckerProfile");
+  const profileDir = sel && sel.value;
+  if (!profileDir) {
+    flashTemp($("orderCheckerMsg"), "Pick an account first.", "#fa5400"); return;
+  }
+  const url = `https://www.nike.com/sg/orders/#snkrsOrderCheck=${encodeURIComponent(profileDir)}`;
+  flash($("orderCheckerMsg"), "Opening orders page…", "#888");
+  const resp = await hostSend({ cmd: "launch", profileDir, url });
+  if (resp.ok) {
+    flashTemp($("orderCheckerMsg"), `Opened "${profileDir}" — orders will appear here once the page loads.`, "#1db954", 8000);
+  } else if (resp.hostMissing) {
+    flashTemp($("orderCheckerMsg"), "Launcher offline — open the orders page manually in that Chrome profile.", "#fa5400", 6000);
+  } else {
+    flashTemp($("orderCheckerMsg"), "Launch failed: " + resp.error, "#e03131", 5000);
+  }
 }
 
 // ── Drop countdown timer ──────────────────────────────────────
@@ -590,6 +842,7 @@ function renderAccounts() {
   }
   accounts.forEach((acct) => list.appendChild(buildAccountRow(acct)));
   updateProfileSourceNote();
+  refreshOrderCheckerProfiles();
 }
 
 function buildAccountRow(acct) {
@@ -1101,6 +1354,36 @@ document.addEventListener("DOMContentLoaded", async () => {
     flashTemp($("statusMsg"), "Live status cleared.", "#888");
   });
   $("setupLink").addEventListener("click", (e) => { e.preventDefault(); $("setupHelp").style.display = "block"; $("setupHelp").scrollIntoView({ behavior: "smooth" }); });
+
+  // ── Order checker ──
+  refreshOrderCheckerProfiles();
+  // Pre-load any cached orders for the first profile
+  (async () => {
+    const sel = $("orderCheckerProfile");
+    if (sel && sel.value) {
+      const data = await chrome.storage.local.get(ORDERS_KEY);
+      const entry = data[ORDERS_KEY]?.[sel.value];
+      if (entry) renderOrders(sel.value, entry);
+    }
+  })();
+  $("orderCheckerProfile").addEventListener("change", async () => {
+    const profileDir = $("orderCheckerProfile").value;
+    $("ordersDisplay").innerHTML = "";
+    if (!profileDir) return;
+    const data = await chrome.storage.local.get(ORDERS_KEY);
+    renderOrders(profileDir, data[ORDERS_KEY]?.[profileDir] || null);
+  });
+  $("openOrdersBtn").addEventListener("click", openOrdersPage);
+  $("clearOrdersBtn").addEventListener("click", async () => {
+    const profileDir = $("orderCheckerProfile")?.value;
+    if (!profileDir) return;
+    const data = await chrome.storage.local.get(ORDERS_KEY);
+    const store = data[ORDERS_KEY] || {};
+    delete store[profileDir];
+    await chrome.storage.local.set({ [ORDERS_KEY]: store });
+    $("ordersDisplay").innerHTML = "";
+    flashTemp($("orderCheckerMsg"), "Orders cleared.", "#888");
+  });
 
   $("exportConfigBtn").addEventListener("click", exportConfig);
   $("importFileInput").addEventListener("change", (e) => {

@@ -378,6 +378,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // Orders page — store raw API or DOM-scraped data keyed by profileDir.
+  // Dashboard.js normalises and displays it.
+  if (msg.type === "orders_api_data" || msg.type === "orders_dom_data") {
+    const tabId     = sender?.tab?.id;
+    const profileDir = msg.profileDir || (tabId ? tabProfileMap[tabId] : "");
+    if (!profileDir) return false;
+
+    chrome.storage.local.get("snkrsOrders", (data) => {
+      const store   = data.snkrsOrders || {};
+      const entry   = store[profileDir] || {};
+      entry.ts      = Date.now();
+      entry.profileDir = profileDir;
+
+      if (msg.type === "orders_api_data") {
+        // Accumulate raw API payloads — Nike pages fire several fetches per load.
+        // Dedup by apiUrl so reloads don't bloat storage.
+        const list = Array.isArray(entry.apiPayloads) ? entry.apiPayloads : [];
+        const idx  = list.findIndex(p => p.url === msg.apiUrl);
+        const payload = { url: msg.apiUrl, data: msg.raw, ts: Date.now() };
+        if (idx >= 0) list[idx] = payload; else list.push(payload);
+        entry.apiPayloads = list;
+        entry.source = "api";
+      } else {
+        // DOM fallback — only store if we have no API data yet
+        if (!entry.source || entry.source === "dom") {
+          entry.domOrders = msg.orders;
+          entry.source    = "dom";
+        }
+      }
+
+      store[profileDir] = entry;
+      chrome.storage.local.set({ snkrsOrders: store });
+    });
+    return false;
+  }
+
   if (msg.type === "card_fill_done") {
     // The payments iframe and gs-content-script are in the SAME tab.
     // sender.tab.id is the tab the iframe message came from —
