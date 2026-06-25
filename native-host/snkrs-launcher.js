@@ -33,22 +33,40 @@ const HOST_VERSION = "1.1.0";
 // ── Shared config file ("the generic file") ───────────────────
 const CONFIG_DIR = path.join(os.homedir(), ".snkrs-bot");
 const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
+// Shared orders file. The orders page runs inside each account's OWN Chrome
+// profile, whose chrome.storage.local the dashboard (a different profile)
+// cannot see. So scraped orders are routed here, on disk, where any profile
+// can read them — the same cross-profile trick the config uses.
+const ORDERS_PATH = path.join(CONFIG_DIR, "orders.json");
 
-function readConfig() {
+function readJsonFile(p) {
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, "utf8");
-    return JSON.parse(raw);
+    return JSON.parse(fs.readFileSync(p, "utf8"));
   } catch (e) {
     return null; // not created yet
   }
 }
 
-function writeConfig(config) {
+function writeJsonFile(p, obj) {
   fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  const tmp = CONFIG_PATH + ".tmp";
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2), { mode: 0o600 });
-  fs.renameSync(tmp, CONFIG_PATH);
-  try { fs.chmodSync(CONFIG_PATH, 0o600); } catch (e) {}
+  const tmp = p + ".tmp";
+  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
+  fs.renameSync(tmp, p);
+  try { fs.chmodSync(p, 0o600); } catch (e) {}
+}
+
+function readConfig() { return readJsonFile(CONFIG_PATH); }
+function writeConfig(config) { writeJsonFile(CONFIG_PATH, config); }
+
+function readOrders() { return readJsonFile(ORDERS_PATH) || {}; }
+// Merge one profile's order entry into the shared map. The caller
+// (background.js) has already accumulated/deduped the entry, so we just store
+// it under its profileDir.
+function setOrdersEntry(profileDir, entry) {
+  const map = readOrders();
+  map[profileDir] = entry;
+  writeJsonFile(ORDERS_PATH, map);
+  return map;
 }
 
 // ── Locate Chrome ─────────────────────────────────────────────
@@ -176,6 +194,29 @@ function handle(msg) {
       }
     case "launch":
       return launchProfile(msg.profileDir, msg.url, msg.extensionDir);
+    case "getOrders":
+      return { ok: true, orders: readOrders() };
+    case "setOrders":
+      if (!msg.profileDir) return { ok: false, error: "Missing profileDir." };
+      try {
+        setOrdersEntry(msg.profileDir, msg.entry || {});
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "clearOrders":
+      try {
+        if (msg.profileDir) {
+          const map = readOrders();
+          delete map[msg.profileDir];
+          writeJsonFile(ORDERS_PATH, map);
+        } else {
+          writeJsonFile(ORDERS_PATH, {});
+        }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
     default:
       return { ok: false, error: `Unknown cmd: ${cmd}` };
   }

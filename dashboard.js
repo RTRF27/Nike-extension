@@ -681,6 +681,43 @@ async function renderOrders(profileDir, entry) {
   orders.forEach(o => display.appendChild(buildOrderCard(o)));
 }
 
+// ── Cross-profile order polling ───────────────────────────────
+// Orders are scraped inside each account's OWN Chrome profile and written to
+// the shared on-disk orders file via the native host. The dashboard (a
+// different profile) reads them back here. We poll because there's no
+// storage.onChanged signal across profiles.
+let ordersPollTimer = null;
+
+async function fetchOrdersForProfile(profileDir) {
+  if (!profileDir) return null;
+  // Prefer the shared host file (works cross-profile); fall back to local
+  // storage (covers the case where the dashboard IS the account's profile).
+  const resp = await hostSend({ cmd: "getOrders" });
+  if (resp && resp.ok && resp.orders && resp.orders[profileDir]) {
+    return resp.orders[profileDir];
+  }
+  const data = await chrome.storage.local.get(ORDERS_KEY);
+  return data[ORDERS_KEY]?.[profileDir] || null;
+}
+
+async function loadAndRenderOrders(profileDir) {
+  if (!profileDir) return;
+  const entry = await fetchOrdersForProfile(profileDir);
+  if (entry) renderOrders(profileDir, entry);
+}
+
+function startOrdersPolling() {
+  stopOrdersPolling();
+  ordersPollTimer = setInterval(() => {
+    const sel = $("orderCheckerProfile");
+    if (sel && sel.value) loadAndRenderOrders(sel.value);
+  }, 2500);
+}
+
+function stopOrdersPolling() {
+  if (ordersPollTimer) { clearInterval(ordersPollTimer); ordersPollTimer = null; }
+}
+
 async function openOrdersPage() {
   const sel     = $("orderCheckerProfile");
   const profileDir = sel && sel.value;
@@ -1521,21 +1558,17 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ── Order checker ──
   refreshOrderCheckerProfiles();
-  // Pre-load any cached orders for the first profile
+  // Pre-load any cached orders for the first profile and start cross-profile polling.
   (async () => {
     const sel = $("orderCheckerProfile");
-    if (sel && sel.value) {
-      const data = await chrome.storage.local.get(ORDERS_KEY);
-      const entry = data[ORDERS_KEY]?.[sel.value];
-      if (entry) renderOrders(sel.value, entry);
-    }
+    if (sel && sel.value) await loadAndRenderOrders(sel.value);
   })();
+  startOrdersPolling();
   $("orderCheckerProfile").addEventListener("change", async () => {
     const profileDir = $("orderCheckerProfile").value;
     $("ordersDisplay").innerHTML = "";
     if (!profileDir) return;
-    const data = await chrome.storage.local.get(ORDERS_KEY);
-    renderOrders(profileDir, data[ORDERS_KEY]?.[profileDir] || null);
+    await loadAndRenderOrders(profileDir);
   });
   $("openOrdersBtn").addEventListener("click", openOrdersPage);
   $("clearOrdersBtn").addEventListener("click", async () => {
@@ -1545,6 +1578,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     const store = data[ORDERS_KEY] || {};
     delete store[profileDir];
     await chrome.storage.local.set({ [ORDERS_KEY]: store });
+    await hostSend({ cmd: "clearOrders", profileDir });
     $("ordersDisplay").innerHTML = "";
     flashTemp($("orderCheckerMsg"), "Orders cleared.", "#888");
   });

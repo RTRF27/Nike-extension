@@ -409,6 +409,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       store[profileDir] = entry;
       chrome.storage.local.set({ snkrsOrders: store });
+      // Also push to the shared on-disk orders file via the native host so the
+      // DASHBOARD (which runs in a different Chrome profile and therefore can't
+      // see this profile's chrome.storage.local) can read these orders.
+      nativeSend({ cmd: "setOrders", profileDir, entry }).catch(() => {});
     });
     return false;
   }
