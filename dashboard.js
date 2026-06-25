@@ -25,7 +25,10 @@ function navigateTo(name) {
   if (sec) sec.classList.add("active");
   if (tab) tab.classList.add("active");
   _currentPage = name;
-  if (name === "home") renderHomeStats();
+  if (name === "home") {
+    renderHomeStats();
+    if (!_upcomingLoaded) loadUpcoming(false);
+  }
 }
 
 function renderHomeStats() {
@@ -109,6 +112,88 @@ function renderLastDrop(hist) {
     html += `<span class="home-drop-chip" style="color:${color}">${r.label || r.profileDir || "?"}: ${r.status || "?"}</span>`;
   });
   div.innerHTML = html;
+}
+
+// ── Upcoming SNKRS drops ──────────────────────────────────────
+function fmtUpcomingDate(iso) {
+  if (!iso) return "TBA";
+  const d = new Date(iso);
+  if (isNaN(d)) return "TBA";
+  return d.toLocaleString("en-SG", { weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+function renderUpcoming(drops, note) {
+  const list = document.getElementById("upcomingList");
+  const msg = document.getElementById("upcomingMsg");
+  if (!list) return;
+  if (msg) msg.textContent = note || `${drops.length} upcoming drop(s) on Nike SG.`;
+  list.innerHTML = "";
+  if (!drops.length) {
+    if (msg) msg.textContent = note || "No upcoming drops found right now.";
+    return;
+  }
+  drops.forEach(d => {
+    const card = document.createElement("div");
+    card.className = "upcoming-card";
+
+    if (d.imageUrl) {
+      const img = document.createElement("img");
+      img.className = "upcoming-img";
+      img.src = d.imageUrl; img.loading = "lazy"; img.alt = d.title || "";
+      card.appendChild(img);
+    }
+
+    const body = document.createElement("div");
+    body.className = "upcoming-body";
+
+    const name = el("div", { className: "upcoming-name" }, d.title || "Nike Drop");
+    body.appendChild(name);
+    if (d.subtitle) body.appendChild(el("div", { className: "upcoming-sub" }, d.subtitle));
+    body.appendChild(el("div", { className: "upcoming-date" }, "📅 " + fmtUpcomingDate(d.dateISO)));
+
+    const metaRow = document.createElement("div");
+    metaRow.className = "upcoming-meta-row";
+    metaRow.appendChild(el("span", { className: "upcoming-price" },
+      d.price !== "" ? `${d.currency || "SGD"} ${d.price}` : ""));
+    if (d.method) metaRow.appendChild(el("span", { className: "upcoming-method" }, String(d.method)));
+    body.appendChild(metaRow);
+
+    if (d.sku) body.appendChild(el("div", { className: "upcoming-sku" }, d.sku));
+
+    const useBtn = el("button", { className: "upcoming-use" }, "USE FOR DROP →");
+    useBtn.addEventListener("click", () => {
+      if (d.url && $("dropUrl")) $("dropUrl").value = d.url;
+      if (d.sku && $("dropKeyword")) $("dropKeyword").value = d.sku;
+      navigateTo("drop");
+      flashTemp($("assignMsg"), `Loaded "${d.title}" into the drop. Set sizes and save.`, "var(--green)", 5000);
+    });
+    body.appendChild(useBtn);
+
+    card.appendChild(body);
+    list.appendChild(card);
+  });
+}
+
+let _upcomingLoaded = false;
+function loadUpcoming(force) {
+  const msg = document.getElementById("upcomingMsg");
+  if (msg) msg.textContent = force ? "Refreshing from Nike…" : "Loading upcoming drops from Nike…";
+  chrome.runtime.sendMessage({ type: "fetch_upcoming", force: !!force }, (resp) => {
+    if (chrome.runtime.lastError) {
+      if (msg) msg.textContent = "Couldn't reach the background worker — reload the extension.";
+      return;
+    }
+    if (!resp) { if (msg) msg.textContent = "No response from background."; return; }
+    if (resp.ok || (resp.drops && resp.drops.length)) {
+      _upcomingLoaded = true;
+      const note = resp.ok
+        ? `${resp.drops.length} upcoming drop(s)${resp.cached ? " (cached)" : ""}.`
+        : `Showing cached drops — live fetch failed (${resp.error || "network"}).`;
+      renderUpcoming(resp.drops || [], note);
+    } else {
+      if (msg) msg.textContent = `Couldn't load upcoming drops: ${resp.error || "unknown error"}. Nike's feed may be temporarily blocking requests.`;
+    }
+  });
 }
 
 const NATIVE_HOST = "com.snkrs.launcher";
@@ -1817,6 +1902,50 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ── Home-page quick-launch mirrors ──
   if ($("saveBtnHome")) $("saveBtnHome").addEventListener("click", () => saveAll(false));
   if ($("launchAllBtnHome")) $("launchAllBtnHome").addEventListener("click", launchAll);
+
+  // ── Upcoming drops ──
+  loadUpcoming(false);
+  if ($("refreshUpcomingBtn")) $("refreshUpcomingBtn").addEventListener("click", () => loadUpcoming(true));
+
+  // Load saved new-drop alert config into the settings fields.
+  chrome.storage.local.get("snkrsUpcomingCfg", (d) => {
+    const cfg = d.snkrsUpcomingCfg || {};
+    if ($("upcomingEnabled")) $("upcomingEnabled").checked = !!cfg.enabled;
+    if ($("upcomingWebhook")) $("upcomingWebhook").value = cfg.webhook || "";
+    if ($("upcomingInterval") && cfg.intervalMin) $("upcomingInterval").value = cfg.intervalMin;
+  });
+  if ($("saveUpcomingBtn")) {
+    $("saveUpcomingBtn").addEventListener("click", () => {
+      const cfg = {
+        enabled: $("upcomingEnabled") ? $("upcomingEnabled").checked : false,
+        webhook: $("upcomingWebhook") ? $("upcomingWebhook").value.trim() : "",
+        intervalMin: $("upcomingInterval") ? Math.max(1, Number($("upcomingInterval").value) || 5) : 5,
+      };
+      const msgEl = $("upcomingCfgMsg");
+      if (cfg.enabled && !cfg.webhook) {
+        if (msgEl) flashTemp(msgEl, "Enter a Discord webhook URL first.", "var(--orange)", 4000);
+        return;
+      }
+      chrome.runtime.sendMessage({ type: "set_upcoming_cfg", cfg }, () => {
+        if (msgEl) flashTemp(msgEl, cfg.enabled ? "✓ Monitoring armed — you'll be pinged on new drops." : "Saved (monitoring off).", "var(--green)", 5000);
+      });
+    });
+  }
+  if ($("testUpcomingBtn")) {
+    $("testUpcomingBtn").addEventListener("click", () => {
+      const msgEl = $("upcomingCfgMsg");
+      const webhook = $("upcomingWebhook") ? $("upcomingWebhook").value.trim() : "";
+      if (!webhook) { if (msgEl) flashTemp(msgEl, "Enter a webhook URL first.", "var(--orange)", 4000); return; }
+      if (msgEl) flash(msgEl, "Checking Nike feed + webhook…", "#888");
+      chrome.runtime.sendMessage({ type: "test_upcoming_now", webhook }, (resp) => {
+        if (resp && resp.ok) {
+          if (msgEl) flashTemp(msgEl, "✓ Test posted — check your Discord channel.", "var(--green)", 6000);
+        } else {
+          if (msgEl) flashTemp(msgEl, "Failed: " + ((resp && resp.error) || "no response"), "var(--red)", 6000);
+        }
+      });
+    });
+  }
   // Re-route home action messages to the home action msg div
   // (saveAll and launchAll use statusMsg; we'll update home separately via storage listener)
 

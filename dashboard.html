@@ -87,6 +87,19 @@
         </div>
       </div>
 
+      <!-- Upcoming drops preview -->
+      <section class="card" style="margin-bottom:20px;">
+        <div class="card-head">
+          <h2>🔥 UPCOMING SNKRS DROPS</h2>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="card-tag" id="upcomingTag">SG · LIVE FEED</span>
+            <button id="refreshUpcomingBtn" class="btn btn-mini btn-dark">↻ Refresh</button>
+          </div>
+        </div>
+        <p class="hint" id="upcomingMsg">Loading upcoming drops from Nike…</p>
+        <div class="upcoming-grid" id="upcomingList"></div>
+      </section>
+
       <div class="home-grid">
 
         <!-- Left: Live status board -->
@@ -440,6 +453,33 @@
             <input type="text" id="logWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
             <label class="lbl" for="alertWebhook" style="margin-top:10px;">Alert Webhook <span class="badge">@here on win</span></label>
             <input type="text" id="alertWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>🔔 NEW-DROP ALERTS</h2>
+              <span class="card-tag">SNKRS MONITOR</span>
+            </div>
+            <p class="hint">Pings this Discord webhook the moment a new SNKRS SG release appears on Nike's upcoming feed.</p>
+            <div class="toggle" style="border:none; padding:0 0 10px;">
+              <div>
+                <div class="t-label">Monitor upcoming drops</div>
+                <div class="t-hint">Polls Nike on an interval and pings on new releases</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="upcomingEnabled"><span class="track"></span></label>
+            </div>
+            <label class="lbl" for="upcomingWebhook">Drop-alert Webhook</label>
+            <input type="text" id="upcomingWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+            <div class="row" style="margin-top:10px; align-items:center; gap:8px;">
+              <label class="lbl" style="margin:0; white-space:nowrap;">Check every</label>
+              <input type="number" id="upcomingInterval" class="inp" style="width:64px; text-align:center;" min="1" max="120" value="5">
+              <span class="lbl" style="margin:0;">min</span>
+            </div>
+            <div class="actions" style="margin-top:12px;">
+              <button id="saveUpcomingBtn" class="btn btn-purple">SAVE &amp; ARM</button>
+              <button id="testUpcomingBtn" class="btn btn-dark">Test now</button>
+            </div>
+            <div id="upcomingCfgMsg" class="status-msg" style="text-align:left;"></div>
           </section>
         </div>
 

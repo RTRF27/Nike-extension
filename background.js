@@ -49,6 +49,179 @@ async function sendLog(message) {
   }).catch(console.warn);
 }
 
+// ── Upcoming SNKRS drops (preview + new-release alerts) ───────
+// Nike exposes its launch feed through the public product-feed API. We poll it
+// on an alarm, render it in the dashboard, and ping a Discord webhook whenever
+// a brand-new thread appears.
+const UPCOMING_POLL_ALARM = "snkrsUpcomingPoll";
+const UPCOMING_CFG_KEY    = "snkrsUpcomingCfg";   // {webhook, enabled, intervalMin}
+const UPCOMING_SEEN_KEY   = "snkrsUpcomingSeen";  // {threadId: true}
+const UPCOMING_CACHE_KEY  = "snkrsUpcomingCache"; // {ts, drops:[]}
+
+// SNKRS Web channel for the SG marketplace. If Nike ever rotates this, it's the
+// only value that needs changing.
+const SNKRS_CHANNEL_ID = "010794e5-35fe-4e32-aaff-cd2c74f89d61";
+const SNKRS_MARKETPLACE = "SG";
+const SNKRS_LANGUAGE    = "en-GB";
+
+function upcomingFeedUrl() {
+  const filters = [
+    `marketplace(${SNKRS_MARKETPLACE})`,
+    `language(${SNKRS_LANGUAGE})`,
+    `upcoming(true)`,
+    `channelId(${SNKRS_CHANNEL_ID})`,
+    `exclusiveAccess(true,false)`,
+  ].map(f => `filter=${encodeURIComponent(f)}`).join("&");
+  return `https://api.nike.com/product_feed/threads/v2/?anchor=0&count=50&${filters}`;
+}
+
+// Pull the squarish image URL out of a thread's published content.
+function _threadImage(obj) {
+  try {
+    const nodes = obj?.publishedContent?.nodes || [];
+    for (const n of nodes) {
+      const p = n.properties || {};
+      if (p.squarishURL) return p.squarishURL;
+      if (p.portraitURL) return p.portraitURL;
+      if (p.coverCard && p.coverCard.properties && p.coverCard.properties.squarishURL)
+        return p.coverCard.properties.squarishURL;
+    }
+    const cc = obj?.publishedContent?.properties?.coverCard?.properties;
+    if (cc && (cc.squarishURL || cc.portraitURL)) return cc.squarishURL || cc.portraitURL;
+  } catch {}
+  return "";
+}
+
+// Normalise one feed object into a flat drop record.
+function _normaliseThread(obj) {
+  const pi = (obj.productInfo && obj.productInfo[0]) || {};
+  const merch = pi.merchProduct || {};
+  const launch = pi.launchView || {};
+  const content = pi.productContent || {};
+  const price = pi.merchPrice || {};
+  const props = (obj.publishedContent && obj.publishedContent.properties) || {};
+
+  const title = content.fullTitle || props.title || content.title || "Nike Drop";
+  const subtitle = content.subtitle || props.subtitle || "";
+  const sku = merch.styleColor || "";
+  // Entry/availability time: prefer the draw entry start, else commerce start.
+  const dateISO = launch.startEntryDate || merch.commerceStartDate || launch.stopEntryDate || "";
+  const slug = content.slug || props.seo?.slug || "";
+  const url = slug ? `https://www.nike.com/${SNKRS_MARKETPLACE.toLowerCase()}/launch/t/${slug}` : "";
+  const method = launch.method || props.threadType || ""; // DRAW / LEO / etc.
+
+  return {
+    id: obj.id || obj.threadId || sku || slug,
+    title, subtitle, sku,
+    dateISO,
+    price: price.currentPrice != null ? price.currentPrice : (price.fullPrice != null ? price.fullPrice : ""),
+    currency: price.currency || "SGD",
+    method,
+    url,
+    imageUrl: _threadImage(obj),
+  };
+}
+
+async function fetchUpcomingDrops() {
+  const res = await fetch(upcomingFeedUrl(), {
+    headers: { "Accept": "application/json" },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Nike feed HTTP ${res.status}`);
+  const json = await res.json();
+  const objects = Array.isArray(json.objects) ? json.objects : [];
+  const drops = objects
+    .map(_normaliseThread)
+    .filter(d => d.id && (d.title || d.sku));
+  // Sort by release date ascending (soonest first); undated go last.
+  drops.sort((a, b) => {
+    const ta = a.dateISO ? Date.parse(a.dateISO) : Infinity;
+    const tb = b.dateISO ? Date.parse(b.dateISO) : Infinity;
+    return ta - tb;
+  });
+  // Cache for instant dashboard render.
+  await chrome.storage.local.set({ [UPCOMING_CACHE_KEY]: { ts: Date.now(), drops } });
+  return drops;
+}
+
+function _fmtDropTime(iso) {
+  if (!iso) return "TBA";
+  const d = new Date(iso);
+  if (isNaN(d)) return "TBA";
+  return d.toLocaleString("en-SG", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+async function postDropToDiscord(webhook, drop) {
+  const fields = [];
+  if (drop.sku)   fields.push({ name: "SKU", value: drop.sku, inline: true });
+  if (drop.price !== "") fields.push({ name: "Price", value: `${drop.currency} ${drop.price}`, inline: true });
+  if (drop.method) fields.push({ name: "Type", value: String(drop.method), inline: true });
+  fields.push({ name: "Release", value: _fmtDropTime(drop.dateISO), inline: false });
+
+  const embed = {
+    title: [drop.title, drop.subtitle].filter(Boolean).join(" — ").slice(0, 250),
+    url: drop.url || undefined,
+    color: 0x8b5cf6,
+    fields,
+    footer: { text: "SNKRS SG · Upcoming" },
+    timestamp: drop.dateISO && !isNaN(Date.parse(drop.dateISO)) ? new Date(drop.dateISO).toISOString() : undefined,
+  };
+  if (drop.imageUrl) embed.thumbnail = { url: drop.imageUrl };
+
+  try {
+    await fetch(webhook, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "🔥 **New SNKRS SG drop detected!**", embeds: [embed] }),
+    });
+  } catch (e) {
+    console.warn("[SNKRSBot BG] Discord post failed:", e);
+  }
+}
+
+async function getUpcomingCfg() {
+  const d = await chrome.storage.local.get(UPCOMING_CFG_KEY);
+  return Object.assign({ webhook: "", enabled: false, intervalMin: 5 }, d[UPCOMING_CFG_KEY] || {});
+}
+
+// Re-arm (or clear) the polling alarm to match the saved config.
+async function armUpcomingPoll() {
+  const cfg = await getUpcomingCfg();
+  await chrome.alarms.clear(UPCOMING_POLL_ALARM);
+  if (cfg.enabled) {
+    const period = Math.max(1, Number(cfg.intervalMin) || 5);
+    chrome.alarms.create(UPCOMING_POLL_ALARM, { periodInMinutes: period, delayInMinutes: 0.1 });
+  }
+}
+
+// The poll: fetch, diff against seen set, ping Discord for new threads.
+async function runUpcomingPoll() {
+  const cfg = await getUpcomingCfg();
+  if (!cfg.enabled || !cfg.webhook) return;
+
+  let drops;
+  try { drops = await fetchUpcomingDrops(); }
+  catch (e) { console.warn("[SNKRSBot BG] upcoming fetch failed:", e); return; }
+
+  const store = await chrome.storage.local.get(UPCOMING_SEEN_KEY);
+  const seen  = store[UPCOMING_SEEN_KEY];
+
+  // First ever run: seed the seen-set silently so we don't dump the whole feed.
+  if (!seen || typeof seen !== "object" || !Object.keys(seen).length) {
+    const seed = {};
+    drops.forEach(d => { seed[d.id] = Date.now(); });
+    await chrome.storage.local.set({ [UPCOMING_SEEN_KEY]: seed });
+    return;
+  }
+
+  const newOnes = drops.filter(d => !seen[d.id]);
+  for (const d of newOnes) {
+    await postDropToDiscord(cfg.webhook, d);
+    seen[d.id] = Date.now();
+  }
+  if (newOnes.length) await chrome.storage.local.set({ [UPCOMING_SEEN_KEY]: seen });
+}
+
 // ── Multi-product drop scheduler ──────────────────────────────
 // Opens each configured slot in its own tab, tagging the URL with
 // #snkrsSlot=N so the content script knows which product/size to use.
@@ -122,15 +295,20 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "snkrsDashLaunchAlarm") {
     autoDashLaunch();
   }
+  if (alarm.name === UPCOMING_POLL_ALARM) {
+    runUpcomingPoll();
+  }
 });
 
 // Re-arm the alarm when the service worker starts (e.g. browser restart).
 chrome.runtime.onStartup.addListener(() => {
   scheduleDropAlarm();
   rescheduleDashLaunch();
+  armUpcomingPoll();
 });
 chrome.runtime.onInstalled.addListener(() => {
   scheduleDropAlarm();
+  armUpcomingPoll();
 });
 
 // ── Dashboard auto-launch (per-account scheduled open) ────────
@@ -292,6 +470,73 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // host through us if they prefer. {cmd} is forwarded verbatim.
   if (msg.type === "native") {
     nativeSend(msg.payload || {}).then(sendResponse);
+    return true;
+  }
+
+  // Dashboard asks for upcoming SNKRS drops. Serve cache instantly if fresh,
+  // otherwise fetch live. Pass {force:true} to always hit the network.
+  if (msg.type === "fetch_upcoming") {
+    (async () => {
+      try {
+        if (!msg.force) {
+          const c = await chrome.storage.local.get(UPCOMING_CACHE_KEY);
+          const cache = c[UPCOMING_CACHE_KEY];
+          if (cache && Array.isArray(cache.drops) && (Date.now() - (cache.ts || 0) < 5 * 60 * 1000)) {
+            sendResponse({ ok: true, drops: cache.drops, cached: true, ts: cache.ts });
+            return;
+          }
+        }
+        const drops = await fetchUpcomingDrops();
+        sendResponse({ ok: true, drops, cached: false, ts: Date.now() });
+      } catch (e) {
+        // On failure, fall back to whatever's cached so the UI isn't empty.
+        const c = await chrome.storage.local.get(UPCOMING_CACHE_KEY);
+        const cache = c[UPCOMING_CACHE_KEY];
+        sendResponse({
+          ok: false,
+          error: String(e && e.message || e),
+          drops: (cache && cache.drops) || [],
+          ts: cache && cache.ts,
+        });
+      }
+    })();
+    return true;
+  }
+
+  // Dashboard saved the upcoming-alert config — persist + re-arm the poller.
+  if (msg.type === "set_upcoming_cfg") {
+    (async () => {
+      await chrome.storage.local.set({ [UPCOMING_CFG_KEY]: msg.cfg || {} });
+      await armUpcomingPoll();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  // Manual webhook test: post the soonest real upcoming drop (or a synthetic
+  // sample) so the user can confirm the webhook works, then run a normal poll
+  // so any genuinely-new drops also ping.
+  if (msg.type === "test_upcoming_now") {
+    (async () => {
+      const cfg = await getUpcomingCfg();
+      const webhook = (msg.webhook && msg.webhook.trim()) || cfg.webhook;
+      if (!webhook) { sendResponse({ ok: false, error: "No webhook configured." }); return; }
+      let drop = null;
+      try {
+        const drops = await fetchUpcomingDrops();
+        drop = drops[0] || null;
+      } catch (e) {}
+      if (!drop) {
+        drop = {
+          title: "Webhook test", subtitle: "If you can read this, alerts work.",
+          sku: "TEST-000", price: "199", currency: "SGD", method: "DRAW",
+          dateISO: "", url: "https://www.nike.com/sg/launch/upcoming", imageUrl: "",
+        };
+      }
+      await postDropToDiscord(webhook, drop);
+      await runUpcomingPoll();
+      sendResponse({ ok: true });
+    })();
     return true;
   }
 
