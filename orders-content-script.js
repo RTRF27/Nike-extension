@@ -144,6 +144,23 @@ function _scrape() {
   return orders;
 }
 
+// Allow the dashboard to trigger an on-demand scrape of an already-open
+// orders tab (e.g. the user manually navigated without the #snkrsOrderCheck
+// hash). The dashboard sends this message with the profileDir it wants the
+// data attributed to.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type !== 'scrapeOrdersNow') return false;
+  if (msg.profileDir) _dir = msg.profileDir;
+  const orders = _scrape();
+  if (orders.length) {
+    try {
+      chrome.runtime.sendMessage({ type: 'orders_dom_data', profileDir: _dir, orders });
+    } catch {}
+  }
+  sendResponse({ ok: true, count: orders.length });
+  return false;
+});
+
 // Poll – give the SPA time to render, and keep refreshing as more cards load.
 let _lastCount = -1;
 let _ticks = 0;

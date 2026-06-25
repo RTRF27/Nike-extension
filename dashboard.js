@@ -724,16 +724,51 @@ async function openOrdersPage() {
   if (!profileDir) {
     flashTemp($("orderCheckerMsg"), "Pick an account first.", "#fa5400"); return;
   }
-  const url = `https://www.nike.com/sg/orders/#snkrsOrderCheck=${encodeURIComponent(profileDir)}`;
+
   flash($("orderCheckerMsg"), "Opening orders page…", "#888");
+
+  // Scrape any orders tabs already open in THIS Chrome profile. This handles
+  // the case where the user manually navigated to the orders page — those tabs
+  // load without the #snkrsOrderCheck hash so profileDir was unknown. We now
+  // tell them which profile to attribute the data to.
+  let foundOpenTab = false;
+  try {
+    const existingTabs = await chrome.tabs.query({
+      url: ["*://www.nike.com/*orders*", "*://nike.com/*orders*"]
+    });
+    for (const tab of existingTabs) {
+      try {
+        const res = await chrome.tabs.sendMessage(tab.id, { type: "scrapeOrdersNow", profileDir });
+        if (res && res.ok) {
+          foundOpenTab = true;
+          // Data is flowing through background → shared file; poll will pick it up.
+        }
+      } catch { /* tab may not have the content script yet — ignore */ }
+    }
+  } catch {}
+
+  // Always also launch the account's own Chrome profile via native host so
+  // the correct account's orders page opens (the existing tab above might
+  // belong to a different Nike account logged in here).
+  const url = `https://www.nike.com/sg/orders/#snkrsOrderCheck=${encodeURIComponent(profileDir)}`;
   const resp = await hostSend({ cmd: "launch", profileDir, url });
-  if (resp.ok) {
+
+  if (foundOpenTab && (resp.ok || resp.hostMissing)) {
+    flashTemp($("orderCheckerMsg"), "Orders loading from open tab — also launching profile window…", "#1db954", 8000);
+  } else if (resp.ok) {
     flashTemp($("orderCheckerMsg"), `Opened "${profileDir}" — orders will appear here once the page loads.`, "#1db954", 8000);
   } else if (resp.hostMissing) {
-    flashTemp($("orderCheckerMsg"), "Launcher offline — open the orders page manually in that Chrome profile.", "#fa5400", 6000);
+    if (foundOpenTab) {
+      flashTemp($("orderCheckerMsg"), "Launcher offline — reading from open tab instead.", "#888", 6000);
+    } else {
+      flashTemp($("orderCheckerMsg"), "Launcher offline — open the orders page manually in that profile, then click here again.", "#fa5400", 8000);
+    }
   } else {
     flashTemp($("orderCheckerMsg"), "Launch failed: " + resp.error, "#e03131", 5000);
   }
+
+  // Kick the poll immediately so results appear as soon as data is written.
+  setTimeout(() => loadAndRenderOrders(profileDir), 1500);
 }
 
 // ── Drop countdown timer ──────────────────────────────────────
