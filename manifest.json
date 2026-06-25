@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nike SNKRS Bot SG",
-  "version": "1.1",
+  "version": "1.2",
   "description": "Auto-selects size and submits SNKRS raffle entries on nike.com/sg. Multi-account dashboard launches each Chrome profile for the same drop.",
 
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5CpsjFnwzzTINYH8RltnA2EaDng08nYTg7ow0Ud3ps3pFeNcyBviyXoHiZU/emLE58c9jvV0MBrDOgm/Pr9lQDCFxHGiXNAn79vaDjizuCOdKDJR04n8oqKu4gKdjw2iElJvJ/WbFT3Lhug670xabUXq2CTMAl8BI32nKubJ0XpBdoCaANFtU0YyyqLKZD3Afxu741UIPnSKBSK+5+GniSI1VZQI3ilCXDsTvGQ757yHuE1q/Ix/4LDAVUn0DvTLbwgUvB1T1XYYBmArdUMsQfNJEXbqzQBS9DASIYycyeGdSyfjsQiO68MST/NFdNOkPim1GMVtPzFZ2VeK5nTdqQIDAQAB",
@@ -19,6 +19,13 @@
     "*://*.nike.com/*",
     "*://gs.nike.com/*",
     "*://gs-payments.nike.com/*"
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["license.json"],
+      "matches":   ["<all_urls>"]
+    }
   ],
 
   "background": {

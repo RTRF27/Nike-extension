@@ -1278,7 +1278,84 @@ function applyConfigToUI(cfg) {
   }));
 }
 
+// ── License gate ──────────────────────────────────────────────
+const LICENSE_STORE = "snkrsLicense";
+
+async function _getRevokedIds(cfg) {
+  // Merge: license.json list + locally revoked list + optional live URL
+  const local = await chrome.storage.local.get(["snkrsRevoked"]);
+  const ids   = new Set([...(cfg.revokedIds || []), ...(local.snkrsRevoked || [])]);
+  if (cfg.revocationUrl) {
+    try {
+      const r   = await fetch(cfg.revocationUrl, { cache: "no-store" });
+      const obj = await r.json();
+      (obj.revokedIds || []).forEach(id => ids.add(id));
+    } catch {}
+  }
+  return [...ids];
+}
+
+// Returns { allowed: bool, reason: string }
+async function checkLicense() {
+  const cfg = await getLicenseConfig();
+  if (!cfg.pubKey) return { allowed: true, reason: "no-gate" }; // license system not configured
+
+  const stored = await chrome.storage.local.get(LICENSE_STORE);
+  const ks     = stored[LICENSE_STORE];
+  if (!ks) return { allowed: false, reason: "no-key" };
+
+  const revoked = await _getRevokedIds(cfg);
+  const result  = await verifyLicenseKey(ks, cfg.pubKey, revoked);
+  if (!result.ok) {
+    await chrome.storage.local.remove(LICENSE_STORE); // clear bad key
+    return { allowed: false, reason: result.err };
+  }
+  return { allowed: true, reason: "ok", payload: result.payload };
+}
+
+async function activateLicense(ks) {
+  const cfg     = await getLicenseConfig();
+  if (!cfg.pubKey) return { ok: false, err: "License system not configured (no public key)." };
+  const revoked = await _getRevokedIds(cfg);
+  const result  = await verifyLicenseKey(ks.trim(), cfg.pubKey, revoked);
+  if (!result.ok) return result;
+  await chrome.storage.local.set({ [LICENSE_STORE]: ks.trim() });
+  return result;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  // ── License check — must pass before showing dashboard ──
+  const licCheck = await checkLicense();
+  if (!licCheck.allowed) {
+    $("licenseGate").style.display = "flex";
+    // Show reason if there was a bad/expired key
+    if (licCheck.reason && licCheck.reason !== "no-key") {
+      const msg = $("licenseMsg");
+      if (msg) { msg.style.color = "#e03131"; msg.textContent = licCheck.reason; }
+    }
+    const flashActivate = (msg, color) => { const n = $("licenseMsg"); if (n) { n.style.color = color || "#1db954"; n.textContent = msg; } };
+  $("activateBtn").addEventListener("click", async () => {
+      const ks = $("licenseKeyInput").value.trim();
+      if (!ks) { flashActivate("Enter your license key.", "#fa5400"); return; }
+      $("activateBtn").disabled = true;
+      flashActivate("Validating…", "#888");
+      const result = await activateLicense(ks);
+      if (result.ok) {
+        flashActivate(`✓ Activated for ${result.payload.user || "user"}. Loading…`, "#1db954");
+        setTimeout(() => location.reload(), 800);
+      } else {
+        flashActivate(result.err || "Invalid key.", "#e03131");
+        $("activateBtn").disabled = false;
+      }
+    });
+    return; // stop dashboard init until licensed
+  }
+
+  // Show admin link if admin keys are set up on this machine
+  chrome.storage.local.get("snkrsAdminPubKey", (d) => {
+    if (d.snkrsAdminPubKey && $("adminLink")) $("adminLink").style.display = "";
+  });
+
   attachCardFormatters($("cardNumber"), $("cardExpiry"), $("cardCvv"));
 
   // 1) Load saved vault profiles, live status snapshots, and history.

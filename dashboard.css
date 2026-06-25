@@ -272,6 +272,28 @@ select.inp { cursor: pointer; }
   flex-shrink: 0; white-space: nowrap;
 }
 
+/* ── License gate ── */
+.license-gate {
+  position: fixed; inset: 0; z-index: 9999;
+  background: var(--black);
+  display: flex; align-items: center; justify-content: center;
+}
+.license-card {
+  width: 100%; max-width: 420px; padding: 36px 32px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  text-align: center;
+}
+.license-swoosh svg { width: 52px; height: 19px; margin-bottom: 16px; }
+.license-title {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 32px; font-weight: 900; letter-spacing: 6px; margin-bottom: 6px;
+}
+.license-sub { font-size: 13px; color: var(--grey); margin-bottom: 18px; }
+.license-input {
+  text-align: left; font-size: 11px; resize: none;
+  letter-spacing: 1px; word-break: break-all;
+}
+
 /* ── Order Checker ── */
 .order-card {
   background: var(--panel2); border: 1px solid var(--line);

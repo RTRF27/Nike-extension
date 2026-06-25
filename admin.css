@@ -1,0 +1,38 @@
+/* ── Admin gate / login card ── */
+.admin-gate {
+  max-width: 480px; margin: 40px auto;
+}
+
+/* ── Key rows ── */
+.key-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0; border-bottom: 1px solid #1e1e1e;
+}
+.key-row:last-child { border-bottom: none; }
+.key-row-info {
+  display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0;
+}
+.key-user {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 14px; font-weight: 700; letter-spacing: .5px;
+}
+.key-meta { font-size: 11px; color: var(--grey); }
+.key-row-badges { flex-shrink: 0; }
+.key-status-badge {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 10px; font-weight: 700; letter-spacing: 1px;
+  padding: 3px 9px; border-radius: 12px; border: 1px solid currentColor;
+  white-space: nowrap;
+}
+.key-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
+/* ── Confirm modal ── */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.75);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.modal-box {
+  width: 100%; max-width: 420px; margin: 20px;
+}

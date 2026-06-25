@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SNKRS Bot · Admin Panel</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;900&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div class="page">
+
+    <header class="topbar">
+      <div class="brand">
+        <div class="nike-swoosh">
+          <svg viewBox="0 0 24 9" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-label">SNKRS</span>
+          <span class="brand-sub">BOT · ADMIN PANEL</span>
+        </div>
+      </div>
+      <a href="dashboard.html" class="btn btn-dark" style="font-size:12px; padding:7px 14px; text-decoration:none;">← Dashboard</a>
+    </header>
+
+    <!-- ░░ PIN GATE (shown until logged in) ░░ -->
+    <div id="pinGate" class="admin-gate card">
+      <div id="setupSection" style="display:none;">
+        <div class="card-head"><h2>FIRST-TIME SETUP</h2></div>
+        <p class="hint">
+          Generate your RSA key pair. The <strong>private key</strong> stays encrypted on this machine.
+          The <strong>public key</strong> gets embedded in the extension you distribute to users —
+          only keys you sign will be accepted.
+        </p>
+        <label class="lbl" for="setupPin">Set Admin PIN</label>
+        <input type="password" id="setupPin" class="inp" placeholder="Choose a PIN (min 6 chars)" autocomplete="new-password">
+        <label class="lbl" for="setupPin2" style="margin-top:10px;">Confirm PIN</label>
+        <input type="password" id="setupPin2" class="inp" placeholder="Confirm PIN" autocomplete="new-password">
+        <button id="setupBtn" class="btn btn-accent" style="width:100%; margin-top:14px;">Generate Key Pair & Set Up</button>
+      </div>
+
+      <div id="loginSection" style="display:none;">
+        <div class="card-head"><h2>ADMIN LOGIN</h2></div>
+        <p class="hint">Enter your admin PIN to access key management.</p>
+        <label class="lbl" for="loginPin">Admin PIN</label>
+        <input type="password" id="loginPin" class="inp" placeholder="Enter PIN" autocomplete="current-password">
+        <button id="loginBtn" class="btn btn-accent" style="width:100%; margin-top:14px;">UNLOCK</button>
+      </div>
+
+      <div id="gateMsg" class="status-msg" style="margin-top:10px;"></div>
+    </div>
+
+    <!-- ░░ ADMIN CONTENT (shown after login) ░░ -->
+    <div id="adminContent" style="display:none;">
+
+      <div class="grid">
+        <!-- LEFT -->
+        <div class="col">
+
+          <!-- Key Generator -->
+          <section class="card">
+            <div class="card-head">
+              <h2>GENERATE KEY</h2>
+              <span class="card-tag">SIGN WITH PRIVATE KEY</span>
+            </div>
+            <p class="hint">Fill in the details and click Generate. Send the resulting key to your user — it can only be activated once per machine.</p>
+
+            <label class="lbl" for="genUser">User / Label</label>
+            <input type="text" id="genUser" class="inp" placeholder="e.g. Reagan">
+
+            <label class="lbl" for="genExpiry" style="margin-top:10px;">Expiry date <span class="muted">(leave blank = never expires)</span></label>
+            <input type="date" id="genExpiry" class="inp">
+
+            <label class="lbl" for="genNote" style="margin-top:10px;">Internal note <span class="muted">(optional)</span></label>
+            <input type="text" id="genNote" class="inp" placeholder="e.g. 1-month trial">
+
+            <button id="genBtn" class="btn btn-accent" style="width:100%; margin-top:14px;">GENERATE KEY</button>
+
+            <div id="genResult" style="display:none; margin-top:14px;">
+              <label class="lbl">Generated Key — copy and send to user</label>
+              <textarea id="genKeyOut" class="inp mono" rows="4" readonly style="word-break:break-all; font-size:11px; resize:none;"></textarea>
+              <button id="copyGenBtn" class="btn btn-light" style="width:100%; margin-top:8px;">📋 COPY KEY</button>
+            </div>
+            <div id="genMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+          </section>
+
+          <!-- Distribution / Setup -->
+          <section class="card">
+            <div class="card-head">
+              <h2>DISTRIBUTION</h2>
+              <span class="card-tag">PUBLIC KEY EXPORT</span>
+            </div>
+            <p class="hint">
+              After setup, download <code>license.json</code> and replace the copy in your extension folder.
+              Redistribute the extension folder to users — they'll need your public key to validate their key.
+              Do this <strong>once</strong> after first setup. Regenerating the key pair invalidates all existing keys.
+            </p>
+
+            <label class="lbl" for="revUrl" style="margin-top:4px;">Live revocation URL <span class="muted">(optional)</span></label>
+            <input type="text" id="revUrl" class="inp" placeholder="https://raw.githubusercontent.com/you/gist/.../revoked.json">
+            <p class="hint" style="margin-top:6px; margin-bottom:0;">
+              Host a JSON file <code>{"revokedIds":[]}</code> here. Extensions check it on startup — add IDs to revoke in real-time without redistributing.
+            </p>
+
+            <div class="actions" style="margin-top:14px;">
+              <button id="exportLicenseBtn" class="btn btn-light">⬇ Download license.json</button>
+              <button id="dangerRegenBtn" class="btn btn-danger">⚠ Regen key pair</button>
+            </div>
+            <div id="distMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+          </section>
+
+        </div>
+
+        <!-- RIGHT -->
+        <div class="col">
+
+          <!-- Key list -->
+          <section class="card">
+            <div class="card-head">
+              <h2>ISSUED KEYS</h2>
+              <span id="keyCountTag" class="card-tag">0 KEYS</span>
+            </div>
+            <div id="keyList">
+              <p class="hint">No keys generated yet.</p>
+            </div>
+          </section>
+
+          <!-- Danger zone -->
+          <section class="card">
+            <div class="card-head"><h2>DANGER ZONE</h2></div>
+            <p class="hint">Change your admin PIN. This does not affect issued keys.</p>
+            <div class="row" style="gap:10px; align-items:flex-end;">
+              <div class="grow">
+                <label class="lbl" for="newPin">New PIN</label>
+                <input type="password" id="newPin" class="inp" placeholder="New PIN">
+              </div>
+              <div class="grow">
+                <label class="lbl" for="newPin2">Confirm</label>
+                <input type="password" id="newPin2" class="inp" placeholder="Confirm">
+              </div>
+              <button id="changePinBtn" class="btn btn-dark" style="flex:none;">Change PIN</button>
+            </div>
+            <div id="pinMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+          </section>
+
+        </div>
+      </div>
+
+    </div><!-- /adminContent -->
+
+  </div>
+
+  <!-- Key row template -->
+  <template id="keyRowTpl">
+    <div class="key-row">
+      <div class="key-row-info">
+        <span class="key-user"></span>
+        <span class="key-meta"></span>
+      </div>
+      <div class="key-row-badges">
+        <span class="key-status-badge"></span>
+      </div>
+      <div class="key-row-actions">
+        <button class="btn btn-mini btn-dark k-copy" title="Copy key string">📋 copy</button>
+        <button class="btn btn-mini k-toggle"></button>
+      </div>
+    </div>
+  </template>
+
+  <!-- Regen confirm modal -->
+  <div id="regenModal" class="modal-backdrop" style="display:none;">
+    <div class="modal-box card">
+      <div class="card-head"><h2>REGENERATE KEY PAIR?</h2></div>
+      <p class="hint" style="color:#f0c070; margin-bottom:14px;">
+        ⚠ This <strong>invalidates every key you have ever issued</strong>. All users will be locked out
+        until you distribute a new key to each of them. This cannot be undone.
+      </p>
+      <label class="lbl" for="regenPin">Confirm with current PIN</label>
+      <input type="password" id="regenPin" class="inp" placeholder="Current PIN">
+      <div class="actions" style="margin-top:14px;">
+        <button id="regenCancelBtn" class="btn btn-dark">Cancel</button>
+        <button id="regenConfirmBtn" class="btn btn-danger">Yes, regenerate</button>
+      </div>
+      <div id="regenMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+    </div>
+  </div>
+
+  <script src="license.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
