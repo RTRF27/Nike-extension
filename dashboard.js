@@ -718,6 +718,85 @@ function stopOrdersPolling() {
   if (ordersPollTimer) { clearInterval(ordersPollTimer); ordersPollTimer = null; }
 }
 
+// Step-by-step health check so the user can SEE where cross-profile order
+// reading breaks: native host reachable? shared file written? which profiles
+// have data?
+async function diagnoseOrderChecker() {
+  const box = $("ordersDiag");
+  if (!box) return;
+  box.style.display = "block";
+  const lines = [];
+  const stamp = new Date().toLocaleTimeString();
+  lines.push(`Order Checker diagnostic — ${stamp}`);
+  lines.push("");
+
+  // 1. Native host reachable?
+  const ping = await hostSend({ cmd: "ping" });
+  if (ping && ping.ok) {
+    lines.push("✅ Native host CONNECTED");
+    lines.push(`   version: ${ping.version || "?"}   chrome: ${ping.chrome || "not found"}`);
+    lines.push(`   config:  ${ping.configPath || "?"}`);
+    if (ping.extensionDir) lines.push(`   ext dir: ${ping.extensionDir}`);
+  } else {
+    lines.push("❌ Native host NOT CONNECTED");
+    lines.push(`   ${ping && ping.error ? ping.error : "no response"}`);
+    lines.push("   → Cross-profile orders CANNOT work without the host.");
+    lines.push("   → Reinstall: native-host/install-unix.sh (mac/linux)");
+    lines.push("              or native-host/install-windows.bat (windows)");
+    box.textContent = lines.join("\n");
+    return;
+  }
+
+  // 2. Shared orders file — what's in it?
+  lines.push("");
+  const ord = await hostSend({ cmd: "getOrders" });
+  if (ord && ord.ok) {
+    const map = ord.orders || {};
+    const keys = Object.keys(map);
+    if (!keys.length) {
+      lines.push("⚠️  Shared orders file is EMPTY.");
+      lines.push("   No account has scraped + written orders yet.");
+      lines.push("   → This means the account profile's browser hasn't opened");
+      lines.push("     the orders page with the UPDATED extension code.");
+      lines.push("   → Fully QUIT Chrome (all profiles), reopen, then click");
+      lines.push("     'Open Orders Page' — it relaunches the profile fresh.");
+    } else {
+      lines.push(`✅ Shared orders file has ${keys.length} profile(s):`);
+      keys.forEach(k => {
+        const e = map[k] || {};
+        const dom = Array.isArray(e.domOrders) ? e.domOrders.length : 0;
+        const api = Array.isArray(e.apiPayloads) ? e.apiPayloads.length : 0;
+        const when = e.ts ? new Date(e.ts).toLocaleTimeString() : "?";
+        lines.push(`   • ${k}: ${dom} scraped, ${api} api payload(s)  (${when})`);
+      });
+    }
+  } else {
+    lines.push("❌ getOrders failed — host is too OLD (no getOrders command).");
+    lines.push(`   ${ord && ord.error ? ord.error : ""}`);
+    lines.push("   → git pull, then reinstall the native host.");
+  }
+
+  // 3. Selected account status
+  lines.push("");
+  const sel = $("orderCheckerProfile");
+  const pd = sel && sel.value;
+  if (pd) {
+    lines.push(`Selected account profileDir: "${pd}"`);
+    const entry = await fetchOrdersForProfile(pd);
+    if (entry) {
+      const dom = Array.isArray(entry.domOrders) ? entry.domOrders.length : 0;
+      lines.push(`   → ${dom} scraped order(s) available for this account.`);
+    } else {
+      lines.push("   → No data for this account yet. Click 'Open Orders Page'");
+      lines.push("     and confirm a Chrome window for THIS account opens.");
+    }
+  } else {
+    lines.push("⚠️  No account selected in the dropdown.");
+  }
+
+  box.textContent = lines.join("\n");
+}
+
 async function openOrdersPage() {
   const sel     = $("orderCheckerProfile");
   const profileDir = sel && sel.value;
@@ -1606,6 +1685,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     await loadAndRenderOrders(profileDir);
   });
   $("openOrdersBtn").addEventListener("click", openOrdersPage);
+  $("diagnoseOrdersBtn").addEventListener("click", diagnoseOrderChecker);
   $("clearOrdersBtn").addEventListener("click", async () => {
     const profileDir = $("orderCheckerProfile")?.value;
     if (!profileDir) return;

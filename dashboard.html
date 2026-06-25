@@ -334,6 +334,11 @@
             <button id="clearOrdersBtn" class="btn btn-danger btn-mini" style="flex:none;" title="Clear cached orders for this account">✕</button>
           </div>
 
+          <div class="row" style="gap:10px; margin-bottom:10px;">
+            <button id="diagnoseOrdersBtn" class="btn btn-dark" style="flex:none; font-size:11px; padding:7px 12px;">🔍 Diagnose order checker</button>
+          </div>
+          <pre id="ordersDiag" style="display:none; white-space:pre-wrap; font-family:'Courier New',monospace; font-size:11px; color:#9fe3bd; background:#0f1411; border:1px solid var(--line); padding:10px; margin:0 0 10px; max-height:220px; overflow:auto;"></pre>
+
           <div id="orderCheckerMsg" class="status-msg" style="text-align:left; min-height:14px; margin:0 0 8px;"></div>
           <div id="ordersDisplay"></div>
         </section>
