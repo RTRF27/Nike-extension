@@ -53,7 +53,51 @@ function _field(text, re) {
   return m ? m[1] || m[0] : '';
 }
 
+// ── Structured scrape (preferred) ─────────────────────────────
+// Nike's orders list renders each order as a [data-testid="order-item"] card
+// with stable testid'd children. Read those directly — no guessing.
+function _scrapeStructured() {
+  const cards = document.querySelectorAll('[data-testid="order-item"]');
+  if (!cards.length) return [];
+  const orders = [];
+  cards.forEach((card) => {
+    const img   = card.querySelector('img[data-testid="Product Image"]') || card.querySelector('img[src]');
+    const status = (card.querySelector('[data-testid="status-text"]')?.textContent || '').trim();
+    const nameEl = card.querySelector('[data-testid="productNameLink-headline"]');
+    const name   = (nameEl?.getAttribute('aria-label') || nameEl?.textContent || '').trim();
+    const subtitle = (card.querySelector('[data-testid="Product Subtitle"]')?.textContent || '').trim();
+    const sizeRaw  = (card.querySelector('[data-testid="Product Size"]')?.textContent || '').trim();
+    const styleRaw = (card.querySelector('[data-testid="Product Style Color"]')?.textContent || '').trim();
+
+    const size  = sizeRaw.replace(/^\s*size\s*/i, '').trim();
+    const styleM = styleRaw.match(STYLE_RE);
+    const style  = styleM ? styleM[0] : styleRaw.replace(/^\s*style\s*/i, '').trim();
+
+    // aria-label usually already contains the full "<collection> <subtitle>".
+    let fullName = name;
+    if (subtitle && (!fullName || !fullName.toLowerCase().includes(subtitle.toLowerCase()))) {
+      fullName = fullName ? `${fullName} ${subtitle}` : subtitle;
+    }
+
+    if (!style && !fullName && !status) return; // empty card, skip
+    orders.push({
+      orderNumber: '',
+      style:       style || '',
+      status:      status || '',
+      size:        size || '',
+      rawText:     (fullName || subtitle || '').slice(0, 160),
+      imageUrl:    img ? img.src : '',
+    });
+  });
+  return orders;
+}
+
 function _scrape() {
+  // Try the precise testid-based scrape first; fall back to the heuristic
+  // tree-walker only if Nike changes the markup.
+  const structured = _scrapeStructured();
+  if (structured.length) return structured;
+
   if (!document.body) return [];
   const orders = [];
   const seenCards = new Set();
