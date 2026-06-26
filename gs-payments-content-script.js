@@ -30,6 +30,9 @@ async function waitFor(fn, timeoutMs = 15000, intervalMs = 150) {
 async function quickMouseTo(el) {
   if (!el) return;
   const rect = el.getBoundingClientRect();
+  // When the window is minimized getBoundingClientRect() returns all zeros —
+  // skip mouse-move simulation since the coordinates would be meaningless.
+  if (rect.width === 0 && rect.height === 0) return;
   const targetX = rect.left + rect.width  * randFloat(0.25, 0.75);
   const targetY = rect.top  + rect.height * randFloat(0.25, 0.75);
   const startX  = targetX + randInt(-50, 50);
@@ -53,10 +56,22 @@ async function humanClick(el, label) {
   if (!el) { log(`humanClick: null for "${label}"`); return; }
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   await wait(randInt(150, 300));
-  await quickMouseTo(el);
+  await quickMouseTo(el); // no-ops when minimized (zero rect)
   await wait(randInt(30, 80));
 
   const rect = el.getBoundingClientRect();
+  const minimized = rect.width === 0 && rect.height === 0;
+
+  if (minimized) {
+    // Window is minimized — getBoundingClientRect() returns zeros.
+    // Skip coordinate-dependent mouse events; use direct focus+click instead.
+    log(`humanClick: window minimized for "${label}" — using direct focus+click`);
+    el.focus();
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, view: window }));
+    el.click();
+    return;
+  }
+
   const cx = rect.left + rect.width  * randFloat(0.3, 0.7);
   const cy = rect.top  + rect.height * randFloat(0.3, 0.7);
 
@@ -186,7 +201,8 @@ function findCvvField() {
 // No signal needed — this iframe only loads after the payment
 // section is expanded, so it's safe to start filling immediately.
 (async function init() {
-  log("Payment iframe script loaded —", location.href);
+  const minimizedAtLoad = document.body && document.body.getBoundingClientRect().width === 0;
+  log("Payment iframe script loaded —", location.href, minimizedAtLoad ? "[WINDOW MINIMIZED]" : "[window visible]");
 
   const saved = await chrome.storage.sync.get(SETTINGS_KEY);
   settings = saved[SETTINGS_KEY] || {};

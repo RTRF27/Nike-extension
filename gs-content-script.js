@@ -38,6 +38,52 @@ function logBG(msg) {
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
+// ── Minimized-window helpers ──────────────────────────────────
+// Chrome sets offsetParent=null for ALL elements in a minimized window (no layout
+// pass occurs off-screen). getBoundingClientRect() also returns all-zero rects.
+// These helpers work correctly regardless of window state.
+
+function isWindowMinimized() {
+  return !!(document.body && document.body.getBoundingClientRect().width === 0);
+}
+
+// CSS-computed visibility — works when window is minimized (unlike offsetParent).
+function isLogicallyVisible(el) {
+  if (!el) return false;
+  const s = window.getComputedStyle(el);
+  return s.display !== "none" && s.visibility !== "hidden" && parseFloat(s.opacity || "1") > 0;
+}
+
+// Returns the DOM element that anchors the top of the payment card form.
+// Used for above/below ordering via compareDocumentPosition instead of Y coordinates —
+// the only approach that is reliable in minimized windows.
+function findPaymentFormEl() {
+  const iframe = document.querySelector("iframe.newCard[src*='gs-payments'], iframe[src*='gs-payments']");
+  if (iframe && isLogicallyVisible(iframe)) return iframe;
+
+  const cardInput = Array.from(document.querySelectorAll("input")).find(inp => {
+    const hay = [inp.name, inp.id, inp.placeholder, inp.getAttribute("aria-label"), inp.autocomplete]
+      .join(" ").toLowerCase();
+    return /card\s*number|cardnumber|cc-number|ccnumber|creditcard/.test(hay);
+  });
+  if (cardInput && isLogicallyVisible(cardInput)) return cardInput;
+
+  const cardLabel = Array.from(document.querySelectorAll("label, span, div, p")).find(el => {
+    const t = (el.textContent || "").trim().toLowerCase();
+    return t === "card number" || t === "card number *" || t.startsWith("card number");
+  });
+  if (cardLabel && isLogicallyVisible(cardLabel)) return cardLabel;
+
+  return null;
+}
+
+// Sort elements by DOM order (earlier in document = lower index).
+function sortByDomOrder(els) {
+  return els.slice().sort((a, b) =>
+    a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1
+  );
+}
+
 function profileTag() {
   return settings?.profileLabel?.trim() ? ` **[${settings.profileLabel.trim()}]**` : "";
 }
@@ -143,27 +189,38 @@ function findDeliveryContinueButton() {
 // Nike GS can show a PAYMENT-section CONTINUE and a SUBMIT ORDER button at the
 // same time. The old flow sometimes treated the payment CONTINUE as delivery
 // and then clicked SUBMIT before the card iframe finished filling.
+//
+// Uses CSS-computed visibility + DOM order instead of offsetParent/getBoundingClientRect
+// so it works correctly when the browser window is minimized.
 function findDeliveryContinueOnly() {
   const visibleContinues = Array.from(document.querySelectorAll("button.button-continue"))
-    .filter(b => !b.disabled && b.offsetParent !== null);
+    .filter(b => !b.disabled && isLogicallyVisible(b));
 
-  if (!visibleContinues.length) return null;
-
-  // If the payment form is visible, delivery is already confirmed. Any CONTINUE
-  // below the form belongs to PAYMENT, so do not click it as delivery.
-  const formTop = getPaymentFormTop();
-  if (formTop != null) {
-    const aboveForm = visibleContinues.filter(
-      b => b.getBoundingClientRect().top < formTop - 5
-    );
-    if (!aboveForm.length) return null;
-    aboveForm.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-    return aboveForm[0];
+  if (!visibleContinues.length) {
+    log(`findDeliveryContinueOnly: no non-disabled visible CONTINUEs (minimized=${isWindowMinimized()})`);
+    return null;
   }
 
-  // Before payment is expanded, the visible CONTINUE is normally delivery.
-  visibleContinues.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-  return visibleContinues[0];
+  // If the payment form is visible, delivery is already confirmed. Any CONTINUE
+  // that appears AFTER the form in the DOM belongs to PAYMENT — do not click it.
+  const formEl = findPaymentFormEl();
+  if (formEl != null) {
+    const aboveForm = visibleContinues.filter(b =>
+      !!(formEl.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_PRECEDING)
+    );
+    if (!aboveForm.length) {
+      log(`findDeliveryContinueOnly: all CONTINUEs are after the payment form — none are delivery`);
+      return null;
+    }
+    const sorted = sortByDomOrder(aboveForm);
+    log(`findDeliveryContinueOnly: found delivery CONTINUE (above payment form)`);
+    return sorted[0];
+  }
+
+  // Before payment is expanded, the earliest CONTINUE in DOM order is delivery.
+  const sorted = sortByDomOrder(visibleContinues);
+  log(`findDeliveryContinueOnly: found delivery CONTINUE (no payment form yet)`);
+  return sorted[0];
 }
 
 // The PAYMENT accordion row — find any element whose visible text is
@@ -207,40 +264,25 @@ function findPaymentAccordionRow() {
   return null;
 }
 
-// Finds the top Y position of the PAYMENT card form, whether it's rendered as
-// an iframe (iframe.newCard) OR as inline native inputs (card number / MM-YY /
-// CVV). Returns null if no card form is detectable.
+// Finds the top Y position of the PAYMENT card form for legacy callers.
+// NOTE: When the window is minimized, getBoundingClientRect() returns 0 for everything.
+// New code should use findPaymentFormEl() + compareDocumentPosition instead.
+// This function adds an offsetTop fallback so callers that still need a number
+// get something non-zero even when minimized.
 function getPaymentFormTop() {
-  // Case 1: card iframe
-  const iframe = document.querySelector("iframe.newCard[src*='gs-payments'], iframe[src*='gs-payments']");
-  if (iframe && iframe.offsetParent !== null) {
-    return iframe.getBoundingClientRect().top;
+  const el = findPaymentFormEl();
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  // If rect.top is non-zero the window is visible — use it directly.
+  if (rect.top !== 0 || rect.height !== 0) return rect.top;
+  // Minimized: climb the DOM to build an approximate offsetTop.
+  let top = 0;
+  let node = el;
+  while (node && node !== document.body) {
+    top += node.offsetTop || 0;
+    node = node.offsetParent;
   }
-
-  // Case 2: inline card inputs. Match by name/id/placeholder/label text.
-  const inputs = Array.from(document.querySelectorAll("input"));
-  const cardInput = inputs.find(inp => {
-    const hay = [
-      inp.name, inp.id, inp.placeholder,
-      inp.getAttribute("aria-label"), inp.autocomplete,
-    ].join(" ").toLowerCase();
-    return /card\s*number|cardnumber|cc-number|ccnumber|creditcard/.test(hay);
-  });
-  if (cardInput && cardInput.offsetParent !== null) {
-    return cardInput.getBoundingClientRect().top;
-  }
-
-  // Case 3: a label/text node that says "Card number"
-  const labels = Array.from(document.querySelectorAll("label, span, div, p"));
-  const cardLabel = labels.find(el => {
-    const t = (el.textContent || "").trim().toLowerCase();
-    return t === "card number" || t === "card number *" || t.startsWith("card number");
-  });
-  if (cardLabel && cardLabel.offsetParent !== null) {
-    return cardLabel.getBoundingClientRect().top;
-  }
-
-  return null;
+  return top;
 }
 
 // Payment iframe — only present when PAYMENT section is expanded
@@ -259,40 +301,46 @@ function findPaymentContinueButton() {
 
 // Strict payment-section CONTINUE finder.
 // Returns the CONTINUE that belongs to the PAYMENT section. We anchor on the
-// card form's vertical position (iframe OR inline inputs), so the delivery
-// CONTINUE (which sits above the card form) is never returned.
-//
-// Handles all observed cases:
-//  - Card in an iframe → anchor on iframe.
-//  - Card as inline inputs (no iframe) → anchor on the card-number field.
-//  - Only ONE visible CONTINUE and it's below the card form → that's payment.
-//  - The only CONTINUE is the delivery one (above the card form) → return null.
+// card form element in the DOM (via findPaymentFormEl), using compareDocumentPosition
+// for above/below ordering — this works in minimized windows where
+// getBoundingClientRect() returns zeros and offsetParent is null for everything.
 function findPaymentContinueOnly() {
   const visibleContinues = Array.from(document.querySelectorAll("button.button-continue"))
-    .filter(b => !b.disabled && b.offsetParent !== null);
+    .filter(b => !b.disabled && isLogicallyVisible(b));
 
-  if (!visibleContinues.length) return null;
-
-  const formTop = getPaymentFormTop();
-
-  if (formTop == null) {
-    // No detectable card form. If there's exactly one visible CONTINUE, it's
-    // most likely the payment one at this stage (delivery already confirmed).
-    // If there are several, we can't safely disambiguate → return null.
-    if (visibleContinues.length === 1) return visibleContinues[0];
+  if (!visibleContinues.length) {
+    log(`findPaymentContinueOnly: no enabled visible CONTINUEs (minimized=${isWindowMinimized()})`);
     return null;
   }
 
-  // Keep only CONTINUEs clearly BELOW the card form (the payment section).
-  const belowForm = visibleContinues.filter(
-    b => b.getBoundingClientRect().top > formTop + 5
+  const formEl = findPaymentFormEl();
+
+  if (formEl == null) {
+    // No detectable card form. If there's exactly one visible CONTINUE, it's
+    // most likely the payment one at this stage (delivery already confirmed).
+    // If there are several, we can't safely disambiguate → return null.
+    if (visibleContinues.length === 1) {
+      log(`findPaymentContinueOnly: single CONTINUE, no payment form yet — treating as payment`);
+      return visibleContinues[0];
+    }
+    log(`findPaymentContinueOnly: ${visibleContinues.length} CONTINUEs but no card form — ambiguous`);
+    return null;
+  }
+
+  // Keep only CONTINUEs that come AFTER the card form element in the DOM.
+  const afterForm = visibleContinues.filter(b =>
+    !!(formEl.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING)
   );
 
-  if (!belowForm.length) return null;
+  if (!afterForm.length) {
+    log(`findPaymentContinueOnly: all CONTINUEs are before the card form — none are payment`);
+    return null;
+  }
 
-  // Lowest one = the payment CONTINUE.
-  belowForm.sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
-  return belowForm[belowForm.length - 1];
+  // Last one in DOM order = payment CONTINUE.
+  const sorted = sortByDomOrder(afterForm);
+  log(`findPaymentContinueOnly: found payment CONTINUE (after card form in DOM)`);
+  return sorted[sorted.length - 1];
 }
 
 // SUBMIT ORDER — confirmed class: button-submit
@@ -313,12 +361,17 @@ function findSubmitOrderButton() {
 //   - There is NO open payment card iframe AND a card brand/last-4 is shown in
 //     the collapsed PAYMENT row (e.g. "VISA 5992").
 //   - SUBMIT ORDER is already present and enabled while no card iframe is open.
+//
+// Uses isLogicallyVisible() instead of offsetParent so this works in minimized windows.
 function isPaymentAlreadyComplete() {
   // An iframe only counts as "open" (needing entry) if it's actually visible.
   // Nike preloads a hidden iframe.newCard even when a saved card is on file.
   const iframeEl = document.querySelector("iframe.newCard[src*='gs-payments'], iframe[src*='gs-payments']");
-  const iframeOpen = !!(iframeEl && iframeEl.offsetParent !== null);
-  if (iframeOpen) return false;
+  const iframeOpen = !!(iframeEl && isLogicallyVisible(iframeEl));
+  if (iframeOpen) {
+    log(`isPaymentAlreadyComplete: card iframe is open — not complete yet`);
+    return false;
+  }
 
   // Look for a masked card indicator near a PAYMENT label.
   const bodyText = (document.body.innerText || "");
@@ -394,12 +447,18 @@ async function runCheckoutFlow() {
 
   // Let Angular finish rendering
   await wait(2000);
+
+  const minimized = isWindowMinimized();
+  if (minimized) {
+    logBG(`⚠️${tag} Window is MINIMIZED — using DOM-order visibility checks (offsetParent bypass active)`);
+  }
   dumpPageState();
 
   // ── STEP 1: CONTINUE (delivery) ──────────────────────────────
   // Only click the delivery CONTINUE. If the payment form is already visible,
   // any visible CONTINUE is probably the payment-section CONTINUE and should be
   // clicked only AFTER the card fill is complete.
+  logBG(`🔍${tag} [1/3] Looking for delivery CONTINUE…`);
   const deliveryContinue = findDeliveryContinueOnly();
 
   if (deliveryContinue) {
@@ -407,7 +466,7 @@ async function runCheckoutFlow() {
     await nativeClick(deliveryContinue, "CONTINUE (delivery)");
     await wait(1500);
   } else {
-    log("Delivery CONTINUE not visible — already confirmed or payment form is open.");
+    logBG(`ℹ️${tag} [1/3] Delivery CONTINUE not found — already confirmed or payment form is open.`);
   }
 
   // ── STEP 2: Ensure the card is filled (then we go straight to SUBMIT) ──
@@ -418,11 +477,12 @@ async function runCheckoutFlow() {
   //   (C) gs-payments iframe → filled by gs-payments-content-script, which
   //       signals us via cardFillPromise.
   // We do NOT need a payment-CONTINUE step; SUBMIT ORDER places the order.
+  logBG(`🔍${tag} [2/3] Checking payment state…`);
   if (isPaymentAlreadyComplete()) {
-    logBG(`💳${tag} Payment already on file — no card entry needed.`);
+    logBG(`💳${tag} [2/3] Payment already on file — no card entry needed.`);
     cancelCardFillWait();
   } else if (isInlineCardFilled()) {
-    logBG(`💳${tag} Card details already filled — proceeding to SUBMIT.`);
+    logBG(`💳${tag} [2/3] Card details already filled inline — proceeding to SUBMIT.`);
     cancelCardFillWait();
   } else {
     // Card not yet filled. Make sure a card form is surfaced (expand PAYMENT if
@@ -430,11 +490,16 @@ async function runCheckoutFlow() {
     // become filled OR for SUBMIT to appear — whichever happens first.
     const iframe = document.querySelector("iframe.newCard[src*='gs-payments']");
     if (!iframe && !isInlineCardFilled()) {
+      logBG(`🔍${tag} [2/3] No payment iframe — looking for PAYMENT accordion to expand…`);
       const paymentRow = await waitFor(findPaymentAccordionRow, 6000, 150);
       if (paymentRow) {
-        logBG(`✅${tag} Expanding PAYMENT…`);
+        logBG(`✅${tag} [2/3] Expanding PAYMENT accordion…`);
         await nativeClick(paymentRow, "PAYMENT accordion row");
+      } else {
+        logBG(`⚠️${tag} [2/3] PAYMENT accordion not found after 6s — card iframe may already be loading`);
       }
+    } else {
+      logBG(`ℹ️${tag} [2/3] Payment iframe already present — waiting for fill signal…`);
     }
 
     logBG(`⏳${tag} Waiting for card details to be filled…`);
@@ -451,35 +516,32 @@ async function runCheckoutFlow() {
     ]);
     cancelCardFillWait();
 
+    logBG(`ℹ️${tag} [2/3] Fill race resolved: via=${filledSomehow.via} ok=${filledSomehow.ok} ` +
+      `| inlineFilled=${isInlineCardFilled()} | alreadyComplete=${isPaymentAlreadyComplete()} ` +
+      `| submitFound=${!!findSubmitOrderButton()}`);
     if (!filledSomehow.ok && !isInlineCardFilled() && !isPaymentAlreadyComplete() && !findSubmitOrderButton()) {
       logBG(`❌${tag} Card details could not be filled — ABORTING.`);
       dumpPageState();
       return;
     }
-    logBG(`✅${tag} Card details ready (${filledSomehow.via}) — confirming PAYMENT…`);
+    logBG(`✅${tag} [2/3] Card details ready (${filledSomehow.via}) — confirming PAYMENT…`);
 
     // Some Nike GS layouts keep a payment-section CONTINUE visible even though
     // SUBMIT ORDER is already present. Click it after card fill so the payment
     // accordion commits the card before final submit.
     const paymentContinue = findPaymentContinueOnly();
     if (paymentContinue) {
-      logBG(`✅${tag} Clicking CONTINUE (payment)…`);
+      logBG(`✅${tag} [2/3] Clicking CONTINUE (payment)…`);
       await nativeClick(paymentContinue, "CONTINUE (payment)");
       await wait(1200);
     } else {
+      logBG(`ℹ️${tag} [2/3] No payment-section CONTINUE found — going straight to SUBMIT`);
       await wait(400);
     }
   }
 
   // ── FINAL STEP: SUBMIT ORDER ──────────────────────────────────
-  // Per the real checkout flow: after delivery CONTINUE is clicked and the card
-  // details are filled, the order is placed by clicking SUBMIT ORDER. There is
-  // no separate payment-CONTINUE step required — SUBMIT ORDER is the action.
-  //
-  // We wait for SUBMIT ORDER to appear and become enabled, then click it.
-  // ONLY if SUBMIT never shows do we try a payment-section CONTINUE once (some
-  // layouts gate SUBMIT behind a CONTINUE), then wait for SUBMIT again.
-  logBG(`⏳${tag} Waiting for SUBMIT ORDER…`);
+  logBG(`⏳${tag} [3/3] Waiting for SUBMIT ORDER to be enabled…`);
   let submitBtn = await waitFor(findSubmitOrderButton, 12000, 100);
 
   if (!submitBtn) {
@@ -487,17 +549,20 @@ async function runCheckoutFlow() {
     // gating it. Click it once (never the delivery one), then wait again.
     const gatingContinue = findPaymentContinueOnly();
     if (gatingContinue) {
-      logBG(`⚠️${tag} SUBMIT not visible — clicking payment CONTINUE once to reveal it…`);
+      logBG(`⚠️${tag} [3/3] SUBMIT not enabled yet — clicking payment CONTINUE once to reveal it…`);
       await nativeClick(gatingContinue, "CONTINUE (payment, to reveal SUBMIT)");
       submitBtn = await waitFor(findSubmitOrderButton, 8000, 100);
+    } else {
+      logBG(`⚠️${tag} [3/3] SUBMIT not enabled after 12s and no payment CONTINUE to click`);
     }
   }
 
   if (!submitBtn) {
-    logBG(`❌${tag} SUBMIT ORDER not found.`);
+    logBG(`❌${tag} [3/3] SUBMIT ORDER not found or still disabled after waiting.`);
     dumpPageState();
     return;
   }
+  logBG(`✅${tag} [3/3] SUBMIT ORDER found and enabled.`);
 
   if (settings?.testMode) {
     logBG(`🧪${tag} TEST MODE — NOT clicking SUBMIT ORDER.`);
