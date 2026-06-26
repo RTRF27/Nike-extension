@@ -1362,7 +1362,10 @@ function buildAccountRow(acct) {
     registerStatus(acct.profileDir);
   });
 
-  autoEl.addEventListener("change", () => { acct.autoLaunch = autoEl.checked; });
+  autoEl.addEventListener("change", () => {
+    acct.autoLaunch = autoEl.checked;
+    saveAll(true); // re-arm the alarm immediately so ⏰ state is always in sync
+  });
   cardSel.addEventListener("change", () => {
     if (cardSel.value === "__new__") {
       // Jump to the card-profile form to create a new card.
@@ -1476,26 +1479,58 @@ async function saveAll(silent) {
 }
 
 function updateScheduleStatus(armResp) {
+  // ── DROP page inline status ──
   const el = $("scheduleStatus");
-  if (!el) return;
-  if (!armResp || !scheduleIsEnabled()) { el.style.display = "none"; return; }
+  if (el) {
+    if (!armResp || !scheduleIsEnabled()) {
+      el.style.display = "none";
+    } else if (armResp.armed) {
+      const d = new Date(armResp.when);
+      const hm = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+      const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      el.className = "schedule-status armed";
+      el.style.display = "";
+      el.textContent = `⏰ Scheduled — ${armResp.count} account(s) will auto-open on ${date} at ${hm}`;
+    } else if (armResp.reason === "time already passed — launching now") {
+      el.className = "schedule-status armed";
+      el.style.display = "";
+      el.textContent = "⏰ Time already passed — launching now…";
+    } else {
+      el.className = "schedule-status disarmed";
+      el.style.display = "";
+      el.textContent = armResp.reason
+        ? `Not scheduled (${armResp.reason})`
+        : "Not scheduled — set a time and toggle ⏰ auto on at least one account to arm.";
+    }
+  }
+
+  // ── PROFILES page banner ──
+  const banner = $("acctSchedBanner");
+  if (!banner) return;
+  if (!armResp) { banner.style.display = "none"; return; }
+
   if (armResp.armed) {
-    const d = new Date(armResp.when);
-    const hm = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
-    const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-    el.className = "schedule-status armed";
-    el.style.display = "";
-    el.textContent = `⏰ Scheduled — ${armResp.count} account(s) will auto-open on ${date} at ${hm}`;
+    const d   = new Date(armResp.when);
+    const hm  = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    const date = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    banner.className  = "sched-banner armed";
+    banner.style.display = "flex";
+    banner.innerHTML  = `<span class="sched-banner-dot"></span>` +
+      `<span>⏰ SCHEDULER ARMED &mdash; <strong>${armResp.count} account(s)</strong> will auto-open on <strong>${date} at ${hm}</strong></span>`;
   } else if (armResp.reason === "time already passed — launching now") {
-    el.className = "schedule-status armed";
-    el.style.display = "";
-    el.textContent = "⏰ Time already passed — launching now…";
+    banner.className  = "sched-banner armed";
+    banner.style.display = "flex";
+    banner.innerHTML  = `<span class="sched-banner-dot"></span><span>⏰ Time reached &mdash; launching now…</span>`;
   } else {
-    el.className = "schedule-status disarmed";
-    el.style.display = "";
-    el.textContent = armResp.reason
-      ? `Not scheduled (${armResp.reason})`
-      : "Not scheduled — set a time and toggle ⏰ auto on at least one account to arm.";
+    // Only show disarmed hint if scheduler toggle is on (user is actively configuring it)
+    if (scheduleIsEnabled()) {
+      banner.className  = "sched-banner disarmed";
+      banner.style.display = "flex";
+      const reason = armResp.reason || "enable schedule and toggle ⏰ on at least one account";
+      banner.innerHTML = `<span class="sched-banner-dot"></span><span>Not armed — ${reason}</span>`;
+    } else {
+      banner.style.display = "none";
+    }
   }
 }
 
@@ -1789,6 +1824,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   startCountdown();
   suggestProfileName();
 
+  // Refresh the schedule banner from current in-memory state without re-arming
+  // (just peeks at the existing alarm status so the banner shows on dashboard open).
+  chrome.runtime.sendMessage({ type: "arm_drop_launch", config: buildConfig() }, updateScheduleStatus);
+
   // ── Card profiles ──
   $("cpSaveBtn").addEventListener("click", saveCardProfile);
   $("cpCancelBtn").addEventListener("click", resetCardForm);
@@ -1821,6 +1860,19 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("addAccountBtn").addEventListener("click", () => {
     accounts.push({ id: uid(), label: "", profileDir: "", size: "", sizeType: "footwear", cardId: "" });
     renderAccounts();
+  });
+
+  // ── ARM ALL / UNARM ALL ──
+  $("armAllBtn").addEventListener("click", () => {
+    accounts.forEach(a => { a.autoLaunch = true; });
+    renderAccounts();
+    saveAll(true).then(cfg => flashTemp($("statusMsg"),
+      `⏰ Armed ${accounts.length} account(s) — save confirms the scheduler.`, "#1db954", 4000));
+  });
+  $("unarmAllBtn").addEventListener("click", () => {
+    accounts.forEach(a => { a.autoLaunch = false; });
+    renderAccounts();
+    saveAll(true).then(() => flashTemp($("statusMsg"), "Unarm All — scheduler cleared.", "#888", 3000));
   });
   $("scheduleEnabled").addEventListener("change", () => {
     const on = $("scheduleEnabled").checked;

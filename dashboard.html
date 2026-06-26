@@ -292,13 +292,21 @@
       <section class="card" style="margin-top:0;">
         <div class="card-head">
           <h2>ACCOUNTS</h2>
-          <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <button id="armAllBtn"   class="btn btn-mini btn-dark">⏰ ARM ALL</button>
+            <button id="unarmAllBtn" class="btn btn-mini btn-danger">✕ UNARM ALL</button>
+            <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
+          </div>
         </div>
         <p class="hint">
           Each account maps to one Chrome profile.
           Pick the profile, set size, assign a card, then launch.
           <span id="profileSourceNote"></span>
         </p>
+
+        <!-- Scheduler armed-state banner — visible when a time is set & ≥1 account has ⏰ on -->
+        <div id="acctSchedBanner" class="sched-banner" style="display:none;"></div>
+
         <div id="accountsList"></div>
         <button id="addAccountBtn" class="btn btn-ghost" style="margin-top:12px;">+ ADD ACCOUNT</button>
       </section>
