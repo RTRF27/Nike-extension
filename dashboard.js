@@ -1515,6 +1515,10 @@ function updateScheduleStatus(armResp) {
       el.className = "schedule-status armed";
       el.style.display = "";
       el.textContent = "⏰ Time already passed — launching now…";
+    } else if (armResp.reason === "drop time already passed — not auto-opening") {
+      el.className = "schedule-status disarmed";
+      el.style.display = "";
+      el.textContent = "⏰ Drop time has passed — accounts will NOT auto-open. Set a new time to re-arm.";
     } else {
       el.className = "schedule-status disarmed";
       el.style.display = "";
@@ -1541,6 +1545,11 @@ function updateScheduleStatus(armResp) {
     banner.className  = "sched-banner armed";
     banner.style.display = "flex";
     banner.innerHTML  = `<span class="sched-banner-dot"></span><span>⏰ Time reached &mdash; launching now…</span>`;
+  } else if (armResp.reason === "drop time already passed — not auto-opening") {
+    banner.className  = "sched-banner disarmed";
+    banner.style.display = "flex";
+    banner.innerHTML  = `<span class="sched-banner-dot"></span>` +
+      `<span>⏰ Drop time has passed &mdash; accounts will <strong>not</strong> auto-open. Set a new time to re-arm.</span>`;
   } else {
     // Only show disarmed hint if scheduler toggle is on (user is actively configuring it)
     if (scheduleIsEnabled()) {

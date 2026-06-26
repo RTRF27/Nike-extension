@@ -282,9 +282,17 @@ async function scheduleDropAlarm() {
   }
 
   if (when <= Date.now()) {
-    // Time already passed — open immediately rather than waiting.
-    sendLog("⏰ Configured drop time is in the past — opening tabs now.");
-    openDropTabs("time already passed");
+    // Time already passed. Only open immediately if it just passed (grace
+    // window). If it passed long ago, clear the stale schedule instead of
+    // re-opening the tabs every time the browser restarts.
+    if (Date.now() - when <= LAUNCH_GRACE_MS) {
+      sendLog("⏰ Configured drop time just passed — opening tabs now.");
+      openDropTabs("time just passed");
+    } else {
+      sendLog("⏰ Configured drop time already passed — schedule cleared, not opening tabs.");
+      const cleared = { ...settings, multiEnabled: false, dropTimeISO: "" };
+      await saveSettings(cleared);
+    }
     return;
   }
 
@@ -320,6 +328,14 @@ chrome.runtime.onInstalled.addListener(() => {
 const DASH_LAUNCH_ALARM  = "snkrsDashLaunchAlarm";
 const DASH_LAUNCH_STORE  = "snkrsDashLaunchConfig";
 
+// How long after a scheduled drop time we still honour a "launch now" when the
+// browser/dashboard is (re)opened. This covers the genuine case where the
+// browser was launched a few seconds late and we should still try to enter.
+// If the drop time passed longer ago than this, we treat the schedule as stale
+// and silently disarm — otherwise reopening the dashboard hours/days later
+// would re-open every account's tab again, which is exactly what the user hit.
+const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
+
 function buildBootUrlFromConfig(cfg, acct) {
   let url = (cfg.multiProduct && acct.url) ? acct.url : ((cfg.drop && cfg.drop.url) || "");
   if (!url) return null;
@@ -350,9 +366,22 @@ async function rescheduleDashLaunch() {
   const cfg = data[DASH_LAUNCH_STORE];
   if (!cfg) return;
   const when = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
-  if (isNaN(when) || when <= Date.now()) {
-    // Time already passed while browser was closed — launch immediately
-    autoDashLaunch();
+  if (isNaN(when)) {
+    // No valid time — clear the stale config so it can't keep firing.
+    await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+    return;
+  }
+  if (when <= Date.now()) {
+    // Drop time is in the past. Only auto-launch if we're still inside the
+    // grace window (browser reopened right around the drop). If it passed long
+    // ago, the schedule is stale — disarm silently instead of re-opening
+    // everything every time the browser/dashboard is reopened.
+    if (Date.now() - when <= LAUNCH_GRACE_MS) {
+      autoDashLaunch();
+    } else {
+      await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+      sendLog("⏰ Scheduled drop time already passed — auto-launch skipped (schedule cleared).");
+    }
     return;
   }
   chrome.alarms.create(DASH_LAUNCH_ALARM, { when });
@@ -597,10 +626,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       if (when <= Date.now()) {
-        // Time already passed — launch immediately
-        await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
-        autoDashLaunch();
-        sendResponse({ ok: true, armed: false, reason: "time already passed — launching now" });
+        // Time already passed. Only launch immediately if it just passed (grace
+        // window) — otherwise reopening the dashboard after the drop would
+        // re-open every account again. Past the grace window, disarm silently.
+        if (Date.now() - when <= LAUNCH_GRACE_MS) {
+          await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
+          autoDashLaunch();
+          sendResponse({ ok: true, armed: false, reason: "time already passed — launching now" });
+        } else {
+          await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+          sendResponse({ ok: true, armed: false, reason: "drop time already passed — not auto-opening" });
+        }
         return;
       }
       await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
