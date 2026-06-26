@@ -101,16 +101,36 @@ function renderLastDrop(hist) {
     if (tag) tag.textContent = "NO RUNS YET";
     return;
   }
-  const last = hist[hist.length - 1];
-  const d = new Date(last.ts || 0);
-  const wins = (last.results || []).filter(r => (r.status||"").toLowerCase().includes("won")).length;
-  if (tag) tag.textContent = `${wins > 0 ? "🏆 " + wins + " WIN" + (wins > 1 ? "S" : "") : "NO WINS"} · ${d.toLocaleDateString()}`;
+  // History is stored newest-first (unshift), so the latest run is index 0.
+  const last = hist[0];
+  const d = new Date(last.date || last.ts || 0);
+  const dateStr = isNaN(d.getTime()) ? "" : d.toLocaleDateString();
+
+  // results is a map { profileDir: code }, codes like "win"/"loss"/"entered".
+  const results = (last.results && typeof last.results === "object" && !Array.isArray(last.results))
+    ? last.results : {};
+  const entries = Object.entries(results);
+  const wins = entries.filter(([, code]) => (code || "").toLowerCase().includes("win")).length;
+
+  if (tag) tag.textContent =
+    `${wins > 0 ? "🏆 " + wins + " WIN" + (wins > 1 ? "S" : "") : "NO WINS"}${dateStr ? " · " + dateStr : ""}`;
+
+  // Resolve a profileDir to its friendly label from this run's account list.
+  const labelFor = (pd) => {
+    const a = (last.accounts || []).find(x => x.profileDir === pd);
+    return a ? (a.label || a.profileDir) : pd;
+  };
+
   let html = `<div class="home-drop-url">${last.url || "(no URL)"}</div>`;
-  (last.results || []).slice(0, 8).forEach(r => {
-    const won = (r.status || "").toLowerCase().includes("won");
-    const color = won ? "var(--green)" : (r.status||"").toLowerCase().includes("fail") ? "var(--red)" : "var(--grey)";
-    html += `<span class="home-drop-chip" style="color:${color}">${r.label || r.profileDir || "?"}: ${r.status || "?"}</span>`;
-  });
+  if (!entries.length) {
+    const n = (last.accounts || []).length;
+    html += `<p class="hint">Launched ${n} account(s) — no results in yet.</p>`;
+  } else {
+    entries.slice(0, 8).forEach(([pd, code]) => {
+      const meta = STATUS_META[code] || { text: code || "?", color: "var(--grey)" };
+      html += `<span class="home-drop-chip" style="color:${meta.color}">${labelFor(pd)}: ${meta.text}</span>`;
+    });
+  }
   div.innerHTML = html;
 }
 
