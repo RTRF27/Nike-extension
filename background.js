@@ -106,7 +106,12 @@ function _normaliseThread(obj) {
   const sku = merch.styleColor || "";
   // Entry/availability time: prefer the draw entry start, else commerce start.
   const dateISO = launch.startEntryDate || merch.commerceStartDate || launch.stopEntryDate || "";
-  const slug = content.slug || props.seo?.slug || "";
+  // SNKRS launch pages live at /launch/t/<seoSlug>, where seoSlug comes from
+  // the thread's publishedContent (e.g. "dunk-low-protro-draft-pack-charlotte-to-la").
+  // The merch productContent.slug is the commerce/PDP slug
+  // (e.g. "dunk-low-protro-draft-pack-shoes-BuduZU1m") which 404s on /launch/t/,
+  // so prefer the publishedContent SEO slug and only fall back to it.
+  const slug = props.seo?.slug || props.custom?.seoSlug || props.custom?.url || content.slug || "";
   const url = slug ? `https://www.nike.com/${SNKRS_MARKETPLACE.toLowerCase()}/launch/t/${slug}` : "";
   const method = launch.method || props.threadType || ""; // DRAW / LEO / etc.
 
