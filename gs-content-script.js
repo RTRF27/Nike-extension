@@ -440,7 +440,7 @@ function dumpPageState() {
 // ── Main checkout flow ────────────────────────────────────────
 async function runCheckoutFlow() {
   const tag = profileTag();
-  logBG(`@here 💳${tag} SNKRS checkout — starting…`);
+  logBG(`💳${tag} SNKRS checkout — starting…`);
 
   // ARM card fill listener FIRST — never miss the signal
   const cardFillPromise = armCardFillSignal(60000);
@@ -569,7 +569,7 @@ async function runCheckoutFlow() {
     return;
   }
 
-  logBG(`🚀${tag} Clicking SUBMIT ORDER…`);
+  logBG(`@here 🚀${tag} Clicking SUBMIT ORDER…`);
   await nativeClick(submitBtn, "SUBMIT ORDER", true);
   await wait(500);
   dumpPageState();
