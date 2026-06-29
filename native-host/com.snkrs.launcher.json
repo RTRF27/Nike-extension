@@ -1,7 +1,7 @@
 {
   "name": "com.snkrs.launcher",
   "description": "Nike SNKRS Bot profile launcher / shared-config host",
-  "path": "C:\\Users\\reaga\\OneDrive\\Desktop\\Nike-extension-Dashboard\\native-host\\snkrs-launcher.bat",
+  "path": "C:\\Users\\reaga\\OneDrive\\Desktop\\Nike-extension\\native-host\\snkrs-launcher.bat",
   "type": "stdio",
   "allowed_origins": [
     "chrome-extension://kopeofjmoelfkdcmfcenkedojhoaolfb/"

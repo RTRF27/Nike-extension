@@ -1,2 +1,2 @@
 @echo off
-node "C:\Users\reaga\OneDrive\Desktop\Nike-extension-Dashboard\native-host\snkrs-launcher.js" %*
+node "C:\Users\reaga\OneDrive\Desktop\Nike-extension\native-host\snkrs-launcher.js" %*
