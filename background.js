@@ -251,24 +251,44 @@ async function resolveLaunchData(sku, country) {
   const marketplace = country === "AU" ? "ASTLA" : country;
   const channels = ["SNKRS Web", "Nike.com", "SNKRS", "UNKNOWN"];
 
-  let product = null, usedChannel = "";
-  for (const ch of channels) {
-    const url =
-      `https://api.nike.com/product_feed/threads/v3/?` +
-      `filter=marketplace(${marketplace})` +
-      `&filter=language(${language})` +
-      `&filter=channelName(${encodeURIComponent(ch)})` +
-      `&filter=productInfo.merchProduct.styleColor(${encodeURIComponent(sku)})` +
-      `&filter=exclusiveAccess(true,false)`;
+  // Build the candidate query URLs. We try the v2 feed first (the same public
+  // endpoint the upcoming-drops poller already hits successfully in-browser),
+  // including a channel-less variant, then fall back to v3. Some Nike edges
+  // 403 the v3 path from a browser context, so v2 is the reliable one.
+  const base = (ver, channel) =>
+    `https://api.nike.com/product_feed/threads/${ver}/?` +
+    `filter=marketplace(${marketplace})` +
+    `&filter=language(${language})` +
+    (channel ? `&filter=channelName(${encodeURIComponent(channel)})` : ``) +
+    `&filter=productInfo.merchProduct.styleColor(${encodeURIComponent(sku)})` +
+    `&filter=exclusiveAccess(true,false)`;
+  const candidates = [
+    base("v2", null),
+    ...channels.map(c => base("v2", c)),
+    ...channels.map(c => base("v3", c)),
+  ];
+
+  let product = null, usedChannel = "", lastStatus = 0, sawAny = false, netErr = "";
+  for (const url of candidates) {
     let res;
     try { res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" }); }
-    catch (e) { continue; }
+    catch (e) { netErr = String(e && e.message || e); continue; }
+    lastStatus = res.status;
     if (!res.ok) continue;
-    const data = await res.json();
+    let data; try { data = await res.json(); } catch (e) { continue; }
     const obj = (data.objects || [])[0];
-    if (obj) { product = obj; usedChannel = ch; break; }
+    if (data.objects) sawAny = true;
+    if (obj) { product = obj; break; }
   }
-  if (!product) throw new Error(`Product ${sku} not found in ${country}`);
+  if (!product) {
+    if (lastStatus && lastStatus !== 200)
+      throw new Error(`Nike API blocked the lookup (HTTP ${lastStatus}). SKU ${sku}/${country}.`);
+    if (netErr)
+      throw new Error(`Network error reaching Nike: ${netErr}`);
+    if (sawAny)
+      throw new Error(`Product ${sku} not found in ${country} (no matching thread).`);
+    throw new Error(`Product ${sku} not found in ${country}.`);
+  }
 
   const piArr = product.productInfo || [];
   const pi = piArr.length === 1
@@ -286,6 +306,7 @@ async function resolveLaunchData(sku, country) {
   }));
   if (!launchId) throw new Error(`${sku} is not an upcoming launch product`);
   if (!slug)     throw new Error(`No launch slug found for ${sku}`);
+  if (!skus.length) throw new Error(`Feed returned no size list for ${sku} (try a different SKU/region).`);
 
   const name = (pi.productContent && pi.productContent.fullTitle) ||
                (product.publishedContent && product.publishedContent.properties &&
