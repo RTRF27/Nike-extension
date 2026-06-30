@@ -424,17 +424,53 @@ function watchForConfirmation(tag) {
 }
 
 // ── DOM debug dump ────────────────────────────────────────────
-function dumpPageState() {
-  log("=== PAGE STATE DUMP ===");
-  log("button-continue count:", document.querySelectorAll("button.button-continue").length);
-  log("button-submit count:", document.querySelectorAll("button.button-submit").length);
-  log("payment iframe:", !!findPaymentIframe());
-  log("PAYMENT accordion:", !!findPaymentAccordionRow());
+// Builds a compact snapshot of every relevant button + key page signals.
+// Pass toDiscord=true to also push it to the log webhook (so you can see
+// EXACTLY what the bot sees when it gets stuck, without opening DevTools).
+function dumpPageState(tag = "", toDiscord = false) {
+  const continues = document.querySelectorAll("button.button-continue").length;
+  const submits   = document.querySelectorAll("button.button-submit").length;
+  const iframeOpen = (() => {
+    const f = document.querySelector("iframe.newCard[src*='gs-payments'], iframe[src*='gs-payments']");
+    return f ? isLogicallyVisible(f) : false;
+  })();
 
+  log("=== PAGE STATE DUMP ===");
+  log("button-continue:", continues, "button-submit:", submits,
+      "iframeOpen:", iframeOpen, "minimized:", isWindowMinimized());
+
+  // Per-button detail. Log BOTH visibility signals so we can tell when the
+  // minimized-window offsetParent bug is in play (offVis=false but cssVis=true).
+  const btnLines = [];
   document.querySelectorAll("button").forEach((b, i) => {
-    log(`btn[${i}] class="${b.className}" text="${(b.textContent||"").trim().slice(0,40)}" disabled=${b.disabled} visible=${b.offsetParent!==null}`);
+    const txt = (b.textContent || "").trim().slice(0, 30);
+    const offVis = b.offsetParent !== null;
+    const cssVis = isLogicallyVisible(b);
+    log(`btn[${i}] class="${b.className}" text="${txt}" disabled=${b.disabled} offVis=${offVis} cssVis=${cssVis}`);
+    // Only the buttons that matter go to Discord (keep the message small).
+    if (/button-continue|button-submit/.test(b.className) ||
+        /continue|submit|order|pay/i.test(txt)) {
+      btnLines.push(`• "${txt || b.className}" dis=${b.disabled ? "Y" : "N"} vis=${cssVis ? "Y" : "N"}`);
+    }
   });
   log("=== END DUMP ===");
+
+  if (toDiscord) {
+    const finders = [
+      `deliveryCont=${!!findDeliveryContinueOnly()}`,
+      `paymentForm=${!!findPaymentFormEl()}`,
+      `paymentCont=${!!findPaymentContinueOnly()}`,
+      `submitBtn=${!!findSubmitOrderButton()}`,
+      `paymentDone=${isPaymentAlreadyComplete()}`,
+      `inlineCard=${isInlineCardFilled()}`,
+    ].join(" | ");
+    const msg =
+      `🔬${tag} PAGE STATE — minimized=${isWindowMinimized()} | ` +
+      `continues=${continues} submits=${submits} iframeOpen=${iframeOpen}\n` +
+      `Finders: ${finders}\n` +
+      (btnLines.length ? `Buttons:\n${btnLines.slice(0, 10).join("\n")}` : `Buttons: (none relevant found)`);
+    logBG(msg.slice(0, 1800)); // stay under Discord's message limit
+  }
 }
 
 // ── Main checkout flow ────────────────────────────────────────
@@ -452,7 +488,7 @@ async function runCheckoutFlow() {
   if (minimized) {
     logBG(`⚠️${tag} Window is MINIMIZED — using DOM-order visibility checks (offsetParent bypass active)`);
   }
-  dumpPageState();
+  dumpPageState(tag, true); // snapshot to Discord at the very start
 
   // ── STEP 1: CONTINUE (delivery) ──────────────────────────────
   // Only click the delivery CONTINUE. If the payment form is already visible,
@@ -521,7 +557,7 @@ async function runCheckoutFlow() {
       `| submitFound=${!!findSubmitOrderButton()}`);
     if (!filledSomehow.ok && !isInlineCardFilled() && !isPaymentAlreadyComplete() && !findSubmitOrderButton()) {
       logBG(`❌${tag} Card details could not be filled — ABORTING.`);
-      dumpPageState();
+      dumpPageState(tag, true);
       return;
     }
     logBG(`✅${tag} [2/3] Card details ready (${filledSomehow.via}) — confirming PAYMENT…`);
@@ -542,7 +578,21 @@ async function runCheckoutFlow() {
 
   // ── FINAL STEP: SUBMIT ORDER ──────────────────────────────────
   logBG(`⏳${tag} [3/3] Waiting for SUBMIT ORDER to be enabled…`);
+  // Heartbeat: every 3s while we wait, report what the page looks like so a
+  // stall is visible in Discord in real time instead of a silent 12s gap.
+  let hb = 0;
+  const heartbeat = setInterval(() => {
+    hb++;
+    const all = Array.from(document.querySelectorAll("button.button-submit"));
+    const present = all.length;
+    const enabled = all.filter(b => !b.disabled).length;
+    logBG(`💓${tag} [3/3] still waiting for SUBMIT (${hb*3}s) — ` +
+      `submitBtns=${present} enabled=${enabled} | ` +
+      `paymentForm=${!!findPaymentFormEl()} paymentCont=${!!findPaymentContinueOnly()} ` +
+      `paymentDone=${isPaymentAlreadyComplete()}`);
+  }, 3000);
   let submitBtn = await waitFor(findSubmitOrderButton, 12000, 100);
+  clearInterval(heartbeat);
 
   if (!submitBtn) {
     // SUBMIT not visible yet. As a fallback, a payment-section CONTINUE may be
@@ -558,8 +608,8 @@ async function runCheckoutFlow() {
   }
 
   if (!submitBtn) {
-    logBG(`❌${tag} [3/3] SUBMIT ORDER not found or still disabled after waiting.`);
-    dumpPageState();
+    logBG(`❌${tag} [3/3] SUBMIT ORDER not found or still disabled — STUCK HERE. Full page state:`);
+    dumpPageState(tag, true);
     return;
   }
   logBG(`✅${tag} [3/3] SUBMIT ORDER found and enabled.`);
@@ -578,10 +628,16 @@ async function runCheckoutFlow() {
 
 // ── Init ──────────────────────────────────────────────────────
 (async function init() {
-  if (checkHasRun()) return;
+  if (checkHasRun()) { log("Already ran on this page — skipping."); return; }
   markHasRun();
   await loadSettings();
-  if (!settings?.enabled) { log("Bot disabled."); return; }
+  // Proof-of-injection: if you DON'T see this line in Discord on a checkout
+  // page, the content script isn't running in that profile at all (extension
+  // not loaded there) — which is a force-install / profile issue, not a
+  // checkout-flow bug.
+  logBG(`🟢${profileTag()} GS checkout script injected on ${location.hostname}` +
+        ` (enabled=${settings?.enabled !== false}, testMode=${!!settings?.testMode})`);
+  if (!settings?.enabled) { logBG(`⏹️${profileTag()} Bot disabled in settings — not running checkout.`); return; }
   if (document.readyState !== "complete") {
     await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
   }
