@@ -139,9 +139,9 @@ function listProfiles() {
   })).sort((a, b) => (b.active || 0) - (a.active || 0));
 }
 
-// Extension folder is always the parent of this native-host directory.
-// Passing --load-extension ensures every launched profile has the bot
-// loaded, even brand-new profiles that have never seen it before.
+// Extension folder is the parent of this native-host directory. We expose it
+// in the ping response for diagnostics, but we deliberately DO NOT pass it via
+// --load-extension when launching profiles (see below).
 const EXTENSION_DIR = path.resolve(__dirname, "..");
 
 function launchProfile(profileDir, url, extensionDir) {
@@ -151,10 +151,14 @@ function launchProfile(profileDir, url, extensionDir) {
   }
   if (!profileDir) return { ok: false, error: "Missing profileDir." };
 
-  const extDir = extensionDir || EXTENSION_DIR;
+  // IMPORTANT: we intentionally do NOT pass --load-extension.
+  // Chrome 137+ treats any session started with --load-extension as untrusted
+  // and DISABLES all developer-mode (unpacked) extensions in it — including the
+  // copy the user installed manually. That made bot-launched profiles open with
+  // NO extension, even though manual launches worked. Launching without the flag
+  // lets each profile load its own already-installed extension normally.
   const args = [
     `--profile-directory=${profileDir}`,
-    `--load-extension=${extDir}`,
   ];
   if (url) args.push(url);
 
