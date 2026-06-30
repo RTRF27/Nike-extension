@@ -361,6 +361,7 @@ async function randomAssign() {
     renderAccounts();
     await saveAll(true);
     flashTemp(msg, `🎲 Assigned ${accounts.length} accounts across ${prods.length} products.`, "#1db954", 4000);
+    await assignCheckoutUrls(msg); // build direct checkout URLs for the new sizes
   } else {
     if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above.", "#fa5400"); return; }
     const sizes = dealFromPool(singleSizePool, accounts.length);
@@ -372,6 +373,7 @@ async function randomAssign() {
     renderAccounts();
     await saveAll(true);
     flashTemp(msg, `🎲 Dealt sizes to ${accounts.length} accounts from a pool of ${singleSizePool.length}.`, "#1db954", 4000);
+    await assignCheckoutUrls(msg); // build direct checkout URLs for the new sizes
   }
 }
 
@@ -1344,10 +1346,16 @@ function buildAccountRow(acct) {
   cardSel.dataset.acctId = acct.id;
   fillCardSelect(cardSel, acct.cardId);
 
-  // Show which product this account is assigned to (multi-product mode)
+  // Show which product this account is assigned to (multi-product mode), and a
+  // ⚡ marker when a direct checkout URL is ready (skips the size screen).
+  const directTag = acct.checkoutUrl ? "⚡ direct checkout" : "";
   if (multiProduct && acct.url) {
     assignedEl.style.display = "";
-    assignedEl.textContent = `→ ${acct.keyword ? acct.keyword + " · " : ""}${shortUrl(acct.url)}`;
+    assignedEl.textContent = `→ ${acct.keyword ? acct.keyword + " · " : ""}${shortUrl(acct.url)}` +
+      (directTag ? `  ·  ${directTag}` : "");
+  } else if (directTag) {
+    assignedEl.style.display = "";
+    assignedEl.textContent = directTag;
   } else {
     assignedEl.style.display = "none";
   }
@@ -1366,6 +1374,9 @@ function buildAccountRow(acct) {
   sizeEl.addEventListener("change", () => {
     const { size, sizeType } = parseSizeValue(sizeEl.value);
     acct.size = size; acct.sizeType = sizeType;
+    // The direct checkout URL is size-specific — a manual size change makes it
+    // stale, so drop it (re-run ⚡ DIRECT URLS to rebuild).
+    if (acct.checkoutUrl) { acct.checkoutUrl = ""; renderAccounts(); }
   });
   profileEl.addEventListener("change", () => {
     if (profileEl.value === "__manual__") {
@@ -1469,6 +1480,7 @@ function buildConfig() {
       sizeType: a.sizeType || "footwear",
       url: a.url || "",
       keyword: a.keyword || "",
+      checkoutUrl: a.checkoutUrl || "",   // pre-built direct checkout URL (may be "")
       autoLaunch: !!a.autoLaunch,
       cardId: a.cardId || "",
       card: resolveCard(a.cardId),   // resolved card object the bot fills
@@ -1563,6 +1575,73 @@ function updateScheduleStatus(armResp) {
   }
 }
 
+// ── Direct checkout URLs (skip launch page + size selection) ──
+// Marketplace for the direct checkout path. (SNKRS SG.)
+const DIRECT_COUNTRY = "SG";
+let launchCache = {}; // sku -> resolved launch data (per assign run)
+
+// The SKU that applies to an account: its own in multi-product mode, else the
+// central Drop SKU/keyword field.
+function skuForAccount(acct) {
+  const s = (multiProduct && acct.keyword) ? acct.keyword : ($("dropKeyword").value || "");
+  return s.trim().toUpperCase();
+}
+
+function buildDirectCheckoutUrl(d, skuId) {
+  const cid = (window.crypto && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : (Date.now() + "-" + Math.random().toString(16).slice(2));
+  const cc = (d.country || "SG").toLowerCase();
+  return `https://gs.nike.com/?checkoutId=${cid}` +
+         `&launchId=${encodeURIComponent(d.launchId)}` +
+         `&skuId=${encodeURIComponent(skuId)}` +
+         `&country=${d.country}&locale=${d.language}` +
+         `&appId=com.nike.commerce.snkrs.web` +
+         `&returnUrl=https://www.nike.com/${cc}/launch/t/${d.slug}/`;
+}
+
+async function resolveLaunch(sku) {
+  if (launchCache[sku]) return launchCache[sku];
+  const d = await new Promise(res =>
+    chrome.runtime.sendMessage({ type: "resolve_launch", sku, country: DIRECT_COUNTRY }, res));
+  if (d && d.ok) launchCache[sku] = d;
+  return d;
+}
+
+// Build a unique, size-specific direct checkout URL for every account that has
+// a size + SKU. Accounts that can't be resolved keep an empty checkoutUrl and
+// fall back to the normal launch-page + size-selection flow at launch time.
+async function assignCheckoutUrls(msgEl) {
+  launchCache = {};
+  const eligible = accounts.filter(a => a.size && skuForAccount(a));
+  if (!eligible.length) {
+    if (msgEl) flashTemp(msgEl, "Assign sizes and set a SKU first to build direct URLs.", "#fa5400");
+    return;
+  }
+  if (msgEl) flash(msgEl, "Resolving launch from Nike…", "#888");
+
+  let ok = 0, fail = 0; const errs = new Set();
+  for (const acct of accounts) {
+    acct.checkoutUrl = "";
+    const sku = skuForAccount(acct);
+    if (!acct.size || !sku) continue;
+    let d;
+    try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
+    if (!d || !d.ok) { fail++; if (d && d.error) errs.add(d.error); continue; }
+    const match = (d.skus || []).find(s => String(s.nikeSize) === String(acct.size));
+    if (!match) { fail++; errs.add(`size ${acct.size} not offered for ${sku}`); continue; }
+    acct.checkoutUrl = buildDirectCheckoutUrl(d, match.id);
+    ok++;
+  }
+  renderAccounts();
+  await saveAll(true);
+  if (msgEl) {
+    if (ok && !fail)      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches will skip the size screen.`, "#1db954", 6000);
+    else if (ok)          flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the launch-page fallback. (${[...errs][0] || ""})`, "#f0c070", 7000);
+    else                  flashTemp(msgEl, `Couldn't build direct URLs — using launch-page fallback. (${[...errs][0] || ""})`, "#fa5400", 7000);
+  }
+}
+
 // ── Launch a single account into its Chrome profile ───────────
 // In multi-product mode each account carries its own assigned URL; in
 // single-product mode they all share the central Drop URL.
@@ -1571,11 +1650,22 @@ function resolvedUrl(acct) {
 }
 
 function bootUrlFor(acct) {
-  let url = resolvedUrl(acct);
+  // Prefer the pre-built direct checkout URL (skips launch page + size pick).
+  let url = (acct.checkoutUrl && acct.checkoutUrl.trim()) ? acct.checkoutUrl.trim() : "";
+  const isDirect = !!url;
+  if (!url) url = resolvedUrl(acct);
   if (!url) return null;
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
+  // For direct checkout, pass the drop time so the gs bootstrap holds the page
+  // and submits at go-live instead of immediately.
+  if (isDirect) {
+    const iso = dropTimeISO();
+    const t = iso ? Date.parse(iso) : NaN;
+    if (!isNaN(t)) params.push(`snkrsDrop=${t}`);
+  }
   const sep = url.includes("#") ? "&" : "#";
-  return `${url}${sep}snkrsBoot=${encodeURIComponent(acct.profileDir)}`;
+  return `${url}${sep}${params.join("&")}`;
 }
 
 function validateForLaunch(acct, msgEl) {
@@ -1740,6 +1830,7 @@ function applyConfigToUI(cfg) {
     sizeType: a.sizeType || "footwear",
     url: a.url || "",
     keyword: a.keyword || "",
+    checkoutUrl: a.checkoutUrl || "",
     autoLaunch: !!a.autoLaunch,
     cardId: a.cardId || "",
   }));
@@ -1925,6 +2016,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderProducts();
   });
   $("randomAssignBtn").addEventListener("click", randomAssign);
+  $("directUrlsBtn").addEventListener("click", () => assignCheckoutUrls($("assignMsg")));
   $("saveBtn").addEventListener("click", () => saveAll(false));
   $("launchAllBtn").addEventListener("click", launchAll);
   $("testHostBtn").addEventListener("click", async () => {

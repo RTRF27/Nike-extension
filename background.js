@@ -227,6 +227,73 @@ async function runUpcomingPoll() {
   if (newOnes.length) await chrome.storage.local.set({ [UPCOMING_SEEN_KEY]: seen });
 }
 
+// ── Direct SNKRS checkout-URL resolver ────────────────────────
+// Nike's launch products can be entered directly at
+//   https://gs.nike.com/?checkoutId=..&launchId=..&skuId=..&country=..&locale=..
+// which skips the launch page AND the size picker. To build that URL per size
+// we need the launchView.id, the SEO slug, and the size→skuId map for a SKU.
+// We pull all three from the public product-feed v3 threads API.
+const NIKE_LANG_MAP = {
+  PT:"en-GB", GB:"en-GB", ZA:"en-GB", CZ:"en-GB", PH:"en-GB", SK:"en-GB", SI:"en-GB",
+  SG:"en-GB", SE:"en-GB", CH:"en-GB", SA:"en-GB", LU:"en-GB", FI:"en-GB", IN:"en-GB",
+  IL:"en-GB", CA:"en-GB", IE:"en-GB", ID:"en-GB", RO:"en-GB", HR:"en-GB", BG:"en-GB",
+  NZ:"en-GB", BE:"en-GB", NO:"en-GB", NL:"en-GB", AU:"en-GB", AT:"en-GB", MY:"en-GB",
+  DK:"en-GB", AE:"en-GB", PL:"pl", FR:"fr", IT:"it", US:"en", JP:"ja", ES:"es-ES",
+  HU:"hu", KR:"ko", TW:"zh-Hant", TR:"tr", TH:"th", GR:"el", MX:"es-419", DE:"de",
+};
+function nikeLanguageFor(country) { return NIKE_LANG_MAP[country] || "en-GB"; }
+
+async function resolveLaunchData(sku, country) {
+  country = (country || "SG").toUpperCase();
+  sku = (sku || "").toUpperCase().trim();
+  if (!sku) throw new Error("Missing SKU");
+  const language = nikeLanguageFor(country);
+  const marketplace = country === "AU" ? "ASTLA" : country;
+  const channels = ["SNKRS Web", "Nike.com", "SNKRS", "UNKNOWN"];
+
+  let product = null, usedChannel = "";
+  for (const ch of channels) {
+    const url =
+      `https://api.nike.com/product_feed/threads/v3/?` +
+      `filter=marketplace(${marketplace})` +
+      `&filter=language(${language})` +
+      `&filter=channelName(${encodeURIComponent(ch)})` +
+      `&filter=productInfo.merchProduct.styleColor(${encodeURIComponent(sku)})` +
+      `&filter=exclusiveAccess(true,false)`;
+    let res;
+    try { res = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" }); }
+    catch (e) { continue; }
+    if (!res.ok) continue;
+    const data = await res.json();
+    const obj = (data.objects || [])[0];
+    if (obj) { product = obj; usedChannel = ch; break; }
+  }
+  if (!product) throw new Error(`Product ${sku} not found in ${country}`);
+
+  const piArr = product.productInfo || [];
+  const pi = piArr.length === 1
+    ? piArr[0]
+    : (piArr.find(p => p.merchProduct && p.merchProduct.styleColor === sku) || piArr[0]);
+  if (!pi) throw new Error(`No product info for ${sku}`);
+
+  const launchId = pi.launchView && pi.launchView.id;
+  const slug = product.publishedContent &&
+               product.publishedContent.properties &&
+               product.publishedContent.properties.seo &&
+               product.publishedContent.properties.seo.slug;
+  const skus = (pi.skus || []).map(s => ({
+    nikeSize: s.nikeSize, id: s.id, localizedSize: s.localizedSize,
+  }));
+  if (!launchId) throw new Error(`${sku} is not an upcoming launch product`);
+  if (!slug)     throw new Error(`No launch slug found for ${sku}`);
+
+  const name = (pi.productContent && pi.productContent.fullTitle) ||
+               (product.publishedContent && product.publishedContent.properties &&
+                product.publishedContent.properties.title) || sku;
+
+  return { ok: true, sku, country, language, launchId, slug, skus, name, channel: usedChannel };
+}
+
 // ── Multi-product drop scheduler ──────────────────────────────
 // Opens each configured slot in its own tab, tagging the URL with
 // #snkrsSlot=N so the content script knows which product/size to use.
@@ -337,11 +404,20 @@ const DASH_LAUNCH_STORE  = "snkrsDashLaunchConfig";
 const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
 
 function buildBootUrlFromConfig(cfg, acct) {
-  let url = (cfg.multiProduct && acct.url) ? acct.url : ((cfg.drop && cfg.drop.url) || "");
+  const dropMs = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
+  // Prefer a pre-generated DIRECT checkout URL — it lands straight on
+  // gs.nike.com checkout, skipping the launch page and size picker.
+  let url = (acct.checkoutUrl && acct.checkoutUrl.trim()) ? acct.checkoutUrl.trim() : null;
+  const isDirect = !!url;
+  if (!url) url = (cfg.multiProduct && acct.url) ? acct.url : ((cfg.drop && cfg.drop.url) || "");
   if (!url) return null;
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+  const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
+  // Tell the gs.nike.com bootstrap when the drop is so it can hold the page and
+  // submit at the right moment. Only meaningful for the direct checkout path.
+  if (isDirect && !isNaN(dropMs)) params.push(`snkrsDrop=${dropMs}`);
   const sep = url.includes("#") ? "&" : "#";
-  return `${url}${sep}snkrsBoot=${encodeURIComponent(acct.profileDir)}`;
+  return `${url}${sep}${params.join("&")}`;
 }
 
 async function autoDashLaunch() {
@@ -583,6 +659,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === "get_settings") {
     getSettings().then(s => sendResponse({ settings: s }));
+    return true;
+  }
+
+  // Dashboard asks us to resolve a SKU into launch data (launchId + slug +
+  // size→skuId map) so it can build direct gs.nike.com checkout URLs.
+  if (msg.type === "resolve_launch") {
+    resolveLaunchData(msg.sku, msg.country)
+      .then(d => sendResponse(d))
+      .catch(e => sendResponse({ ok: false, error: String(e && e.message || e) }));
     return true;
   }
 
