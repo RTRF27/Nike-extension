@@ -79,7 +79,7 @@ The native host runs on Node. Check with `node --version`. Get it from
 ### 2. Load the extension
 `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select
 this folder. The extension ID is pinned to
-`kopeofjmoelfkdcmfcenkedojhoaolfb` (via the `key` in `manifest.json`) so the
+`gkfbgibdipccnmamfeflgpahoehpbebf` (via the `key` in `manifest.json`) so the
 native host manifest can trust it on every machine.
 
 ### 3. Install the native launcher (one time)
@@ -90,7 +90,7 @@ See `native-host/README.md` for details and troubleshooting.
 
 ### 4. Open the dashboard
 Click the extension icon → **⊞ OPEN DROP DASHBOARD**, or open
-`chrome-extension://kopeofjmoelfkdcmfcenkedojhoaolfb/dashboard.html`.
+`chrome-extension://gkfbgibdipccnmamfeflgpahoehpbebf/dashboard.html`.
 Click **Test launcher connection** — it should go green.
 
 ## Using the dashboard

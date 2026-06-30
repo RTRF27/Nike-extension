@@ -1,0 +1,11 @@
+# Signing key for the .crx — NEVER commit this. Keep it backed up privately.
+.keys/
+
+# Build / tooling
+node_modules/
+package-lock.json
+snkrs-bot.zip
+pack-tmp.cjs
+
+# Generated at install time on each machine
+force-install/update.xml

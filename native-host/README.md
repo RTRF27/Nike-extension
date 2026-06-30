@@ -49,7 +49,7 @@ Windows, or your shell profile on macOS/Linux).
 
 - **Pill stays red / “Launcher offline”** — the manifest isn’t registered, or
   the extension ID doesn’t match. The host manifest trusts
-  `chrome-extension://kopeofjmoelfkdcmfcenkedojhoaolfb/`. That ID is pinned by
+  `chrome-extension://gkfbgibdipccnmamfeflgpahoehpbebf/`. That ID is pinned by
   the `key` in the extension’s `manifest.json`, so it should match as long as
   you load *this* extension folder. Re-run the installer after moving the
   folder (the manifest stores an absolute path to the script).
