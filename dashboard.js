@@ -1620,14 +1620,20 @@ async function assignCheckoutUrls(msgEl) {
   }
   if (msgEl) flash(msgEl, "Resolving launch from Nike…", "#888");
 
-  let ok = 0, fail = 0; const errs = new Set();
+  let ok = 0, fail = 0, notLaunch = 0; const errs = new Set();
   for (const acct of accounts) {
     acct.checkoutUrl = "";
     const sku = skuForAccount(acct);
     if (!acct.size || !sku) continue;
     let d;
     try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
-    if (!d || !d.ok) { fail++; if (d && d.error) errs.add(d.error); continue; }
+    if (!d || !d.ok) {
+      fail++;
+      const er = (d && d.error) || "";
+      if (er) errs.add(er);
+      if (/not an upcoming launch/i.test(er)) notLaunch++;
+      continue;
+    }
     const match = (d.skus || []).find(s => String(s.nikeSize) === String(acct.size));
     if (!match) { fail++; errs.add(`size ${acct.size} not offered for ${sku}`); continue; }
     acct.checkoutUrl = buildDirectCheckoutUrl(d, match.id);
@@ -1636,9 +1642,16 @@ async function assignCheckoutUrls(msgEl) {
   renderAccounts();
   await saveAll(true);
   if (msgEl) {
-    if (ok && !fail)      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches will skip the size screen.`, "#1db954", 6000);
-    else if (ok)          flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the launch-page fallback. (${[...errs][0] || ""})`, "#f0c070", 7000);
-    else                  flashTemp(msgEl, `Couldn't build direct URLs — using launch-page fallback. (${[...errs][0] || ""})`, "#fa5400", 7000);
+    if (ok && !fail) {
+      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches will skip the size screen.`, "#1db954", 6000);
+    } else if (ok) {
+      flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
+    } else if (notLaunch) {
+      // Most common, non-alarming case: the product simply isn't a SNKRS draw.
+      flashTemp(msgEl, `Sizes assigned ✓ — direct checkout skipped: this isn't a SNKRS draw/launch product, so accounts will use the normal launch page + size selection (works fine).`, "#f0c070", 9000);
+    } else {
+      flashTemp(msgEl, `Sizes assigned ✓ — couldn't build direct URLs, using launch-page fallback. (${[...errs][0] || ""})`, "#fa5400", 9000);
+    }
   }
 }
 
