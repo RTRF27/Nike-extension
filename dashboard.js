@@ -1592,12 +1592,14 @@ function buildDirectCheckoutUrl(d, skuId) {
     ? crypto.randomUUID()
     : (Date.now() + "-" + Math.random().toString(16).slice(2));
   const cc = (d.country || "SG").toLowerCase();
+  // Matches Nike's real checkout link exactly (returnUrl is URL-encoded).
+  const returnUrl = `https://www.nike.com/${cc}/launch/t/${d.slug}/`;
   return `https://gs.nike.com/?checkoutId=${cid}` +
          `&launchId=${encodeURIComponent(d.launchId)}` +
          `&skuId=${encodeURIComponent(skuId)}` +
          `&country=${d.country}&locale=${d.language}` +
          `&appId=com.nike.commerce.snkrs.web` +
-         `&returnUrl=https://www.nike.com/${cc}/launch/t/${d.slug}/`;
+         `&returnUrl=${encodeURIComponent(returnUrl)}`;
 }
 
 async function resolveLaunch(sku) {
