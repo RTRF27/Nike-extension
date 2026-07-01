@@ -1927,20 +1927,16 @@ async function launchAccount(acct, msgEl) {
   if (!validateForLaunch(acct, msgEl)) return;
   await saveAll(true); // make sure the shared file is current before boot
   const targets = launchTargetsFor(acct);
-  flash(msgEl, `Opening ${targets.length} tab(s)…`, "#888");
-  let okN = 0, lastErr = "";
-  for (const target of targets) {
-    const url = bootUrlForTarget(acct, target);
-    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
-    if (resp.ok) okN++; else { lastErr = resp.error || (resp.hostMissing ? "launcher offline" : "unknown"); }
-    await new Promise(r => setTimeout(r, 350)); // stagger tabs in the same profile
-  }
-  if (okN === targets.length) {
-    flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${okN} tab(s).`, "#1db954");
-  } else if (okN > 0) {
-    flashTemp(msgEl, `Opened ${okN}/${targets.length} tab(s). Last error: ${lastErr}`, "#f0c070", 5000);
+  const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
+  flash(msgEl, `Opening ${urls.length} tab(s)…`, "#888");
+  // All tabs in ONE chrome command so they reliably open together.
+  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+  if (resp.ok) {
+    flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${urls.length} tab(s).`, "#1db954");
+  } else if (resp.hostMissing) {
+    flashTemp(msgEl, "Launcher offline — use ⌘ copy cmd, or install the host.", "#fa5400", 5000);
   } else {
-    flashTemp(msgEl, "Launch failed: " + lastErr, "#e03131", 5000);
+    flashTemp(msgEl, "Launch failed: " + (resp.error || "unknown"), "#e03131", 5000);
   }
 }
 
@@ -1969,13 +1965,11 @@ async function launchAll() {
       await new Promise(r => setTimeout(r, 400));
       continue;
     }
-    let anyOk = false;
-    for (const target of targets) {
-      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: bootUrlForTarget(acct, target) });
-      if (resp.ok) { tabOk++; anyOk = true; } else lastErr = resp.error || "unknown";
-      await new Promise(r => setTimeout(r, 350)); // stagger tabs in the same profile
-    }
-    if (anyOk) profOk++;
+    const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
+    // All of this account's product tabs open in ONE chrome command.
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+    if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 450)); // stagger BETWEEN profiles
   }
 
   if (profOk === all.length) {

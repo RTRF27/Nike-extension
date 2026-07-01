@@ -181,7 +181,11 @@ function listProfiles() {
 // --load-extension when launching profiles (see below).
 const EXTENSION_DIR = path.resolve(__dirname, "..");
 
-function launchProfile(profileDir, url, extensionDir) {
+// Accepts a single url (string) OR many (array). Passing multiple URLs to one
+// chrome invocation opens them all as tabs in that profile — reliably, even
+// when the profile's Chrome is cold-starting (separate rapid launches can race
+// and get dropped, which is why multi-product only opened one tab).
+function launchProfile(profileDir, urlOrUrls, extensionDir) {
   const chrome = findChrome();
   if (!chrome) {
     return { ok: false, error: "Chrome executable not found. Set SNKRS_CHROME_PATH." };
@@ -194,15 +198,14 @@ function launchProfile(profileDir, url, extensionDir) {
   // copy the user installed manually. That made bot-launched profiles open with
   // NO extension, even though manual launches worked. Launching without the flag
   // lets each profile load its own already-installed extension normally.
-  const args = [
-    `--profile-directory=${profileDir}`,
-  ];
-  if (url) args.push(url);
+  const args = [`--profile-directory=${profileDir}`];
+  const urls = Array.isArray(urlOrUrls) ? urlOrUrls : (urlOrUrls ? [urlOrUrls] : []);
+  for (const u of urls) if (u) args.push(u);
 
   try {
     const child = spawn(chrome, args, { detached: true, stdio: "ignore" });
     child.unref();
-    return { ok: true, pid: child.pid, chrome };
+    return { ok: true, pid: child.pid, chrome, tabs: urls.length };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -234,7 +237,7 @@ function handle(msg) {
         return { ok: false, error: String(e && e.message || e) };
       }
     case "launch":
-      return launchProfile(msg.profileDir, msg.url, msg.extensionDir);
+      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir);
     case "getOrders":
       return { ok: true, orders: readOrders() };
     case "setOrders":

@@ -474,10 +474,10 @@ async function autoDashLaunch() {
   sendLog(`⏰ Auto-launch time reached — opening ${autoAccts.length} account(s).`);
   for (const acct of autoAccts) {
     const urls = buildBootUrlsFromConfig(cfg, acct);
-    for (const url of urls) {
-      await nativeSend({ cmd: "launch", profileDir: acct.profileDir, url });
-      await new Promise(r => setTimeout(r, 400)); // stagger tabs in the same profile
-    }
+    if (!urls.length) continue;
+    // All of this account's product tabs in ONE chrome command.
+    await nativeSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+    await new Promise(r => setTimeout(r, 450)); // stagger BETWEEN profiles
   }
 }
 
