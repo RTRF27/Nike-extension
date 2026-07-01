@@ -426,6 +426,13 @@ const DASH_LAUNCH_STORE  = "snkrsDashLaunchConfig";
 // would re-open every account's tab again, which is exactly what the user hit.
 const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
 
+// Open each account this long BEFORE the drop so the checkout page loads fresh
+// (fresh Kasada/anti-bot token), delivery + card get filled, and everything is
+// primed to SUBMIT the instant the drop goes live. The content scripts hold the
+// actual SUBMIT click until the real drop time (never before → no
+// LAUNCH_NOT_ACTIVE). Long enough to fill, short enough that Kasada stays valid.
+const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds
+
 function buildBootUrlFromConfig(cfg, acct) {
   const dropMs = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
   // Prefer a pre-generated DIRECT checkout URL — it lands straight on
@@ -464,26 +471,27 @@ async function rescheduleDashLaunch() {
   const data = await chrome.storage.local.get(DASH_LAUNCH_STORE);
   const cfg = data[DASH_LAUNCH_STORE];
   if (!cfg) return;
-  const when = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
-  if (isNaN(when)) {
+  const dropMs = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
+  if (isNaN(dropMs)) {
     // No valid time — clear the stale config so it can't keep firing.
     await chrome.storage.local.remove(DASH_LAUNCH_STORE);
     return;
   }
-  if (when <= Date.now()) {
-    // Drop time is in the past. Only auto-launch if we're still inside the
-    // grace window (browser reopened right around the drop). If it passed long
-    // ago, the schedule is stale — disarm silently instead of re-opening
-    // everything every time the browser/dashboard is reopened.
-    if (Date.now() - when <= LAUNCH_GRACE_MS) {
-      autoDashLaunch();
-    } else {
-      await chrome.storage.local.remove(DASH_LAUNCH_STORE);
-      sendLog("⏰ Scheduled drop time already passed — auto-launch skipped (schedule cleared).");
-    }
+  // Open PREP seconds before the drop so the page is primed; the content scripts
+  // hold SUBMIT until the real drop time.
+  const openAt = dropMs - DASH_PREP_LEAD_MS;
+  if (dropMs <= Date.now() - LAUNCH_GRACE_MS) {
+    // Drop passed long ago — stale. Disarm silently.
+    await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+    sendLog("⏰ Scheduled drop time already passed — auto-launch skipped (schedule cleared).");
     return;
   }
-  chrome.alarms.create(DASH_LAUNCH_ALARM, { when });
+  if (openAt <= Date.now()) {
+    // Already inside the prep window (or just past drop, within grace) — open now.
+    autoDashLaunch();
+    return;
+  }
+  chrome.alarms.create(DASH_LAUNCH_ALARM, { when: openAt });
 }
 
 // ── Native messaging host bridge ──────────────────────────────
@@ -771,28 +779,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true, armed: false });
         return;
       }
-      const when = Date.parse(timeISO);
-      if (isNaN(when)) {
+      const dropMs = Date.parse(timeISO);
+      if (isNaN(dropMs)) {
         sendResponse({ ok: true, armed: false, reason: "invalid date" });
         return;
       }
-      if (when <= Date.now()) {
-        // Time already passed. Only launch immediately if it just passed (grace
-        // window) — otherwise reopening the dashboard after the drop would
-        // re-open every account again. Past the grace window, disarm silently.
-        if (Date.now() - when <= LAUNCH_GRACE_MS) {
-          await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
-          autoDashLaunch();
-          sendResponse({ ok: true, armed: false, reason: "time already passed — launching now" });
-        } else {
-          await chrome.storage.local.remove(DASH_LAUNCH_STORE);
-          sendResponse({ ok: true, armed: false, reason: "drop time already passed — not auto-opening" });
-        }
+      // Open PREP seconds before the drop (fresh page/Kasada + time to fill);
+      // the content scripts hold SUBMIT until the real drop time.
+      const openAt = dropMs - DASH_PREP_LEAD_MS;
+      if (dropMs <= Date.now() - LAUNCH_GRACE_MS) {
+        // Drop passed long ago → stale. Disarm silently.
+        await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+        sendResponse({ ok: true, armed: false, reason: "drop time already passed — not auto-opening" });
+        return;
+      }
+      if (openAt <= Date.now()) {
+        // Inside the prep window (or just past drop, within grace) — open now.
+        await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
+        autoDashLaunch();
+        sendResponse({ ok: true, armed: false, reason: "time already passed — launching now" });
         return;
       }
       await chrome.storage.local.set({ [DASH_LAUNCH_STORE]: cfg });
-      chrome.alarms.create(DASH_LAUNCH_ALARM, { when });
-      sendResponse({ ok: true, armed: true, when, count: autoAccts.length });
+      chrome.alarms.create(DASH_LAUNCH_ALARM, { when: openAt });
+      // Report the actual DROP time to the dashboard banner (not the prep time).
+      sendResponse({ ok: true, armed: true, when: dropMs, count: autoAccts.length });
     });
     return true;
   }

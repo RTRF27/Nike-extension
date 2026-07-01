@@ -22,10 +22,12 @@
 
 (function () {
   const SETTINGS_KEY = "snkrsBotSettings";
-  // Start the checkout flow this long BEFORE the drop, so delivery + card are
-  // filled and SUBMIT ORDER is clicked the moment it becomes enabled at drop.
-  // Must stay within gs-content-script's own submit-wait window.
-  const LEAD_MS = 8000;
+  // Load the checkout page fresh this long BEFORE the drop, so the page + Kasada
+  // token are fresh and delivery + card get filled in time. gs-content-script
+  // then HOLDS the SUBMIT click until the exact drop time (never before, so
+  // Nike never returns LAUNCH_NOT_ACTIVE). Kept short enough that Kasada stays
+  // valid through to submit.
+  const PREP_LEAD_MS = 30000;
 
   function readParam(name) {
     const hay = (location.hash || "") + "&" + (location.search || "");
@@ -64,13 +66,27 @@
     logBG(`❌ gs.nike.com/error — checkout hit Nike's error page (needs attention).`);
     const bootUrl = sessionStorage.getItem("snkrsBootUrl");
     let tries = parseInt(sessionStorage.getItem("snkrsErrTries") || "0", 10);
+    // Recover the drop time from the saved boot URL (the /error page dropped our
+    // hash markers). If the drop is still ahead, time the retry to land a fresh
+    // checkout right at drop rather than hammering /error before the launch is
+    // active (which just errors again).
+    const dropFromUrl = (u) => { const m = (u || "").match(/snkrsDrop=(\d+)/); return m ? parseInt(m[1], 10) : NaN; };
     const retryWith = (url) => {
       if (!url) { logBG(`⚠️ No saved checkout URL to retry — fix this profile manually.`); return; }
       if (tries >= 5) { logBG(`⚠️ Retried ${tries}× and still erroring — needs manual attention (click it in the dashboard).`); return; }
       tries++; sessionStorage.setItem("snkrsErrTries", String(tries));
+      const dMs = dropFromUrl(url);
       const backoff = 1500 + tries * 2000;
-      logBG(`🔁 Retrying checkout (attempt ${tries}) in ${Math.round(backoff / 1000)}s…`);
-      setTimeout(() => { location.href = freshCheckoutId(url); }, backoff);
+      // If drop is in the future, retry at ~PREP before drop (fresh Kasada);
+      // otherwise back off and retry now.
+      let delay = backoff;
+      if (!isNaN(dMs) && Date.now() < dMs - PREP_LEAD_MS) {
+        delay = Math.max(backoff, (dMs - PREP_LEAD_MS) - Date.now());
+        logBG(`🕒 Launch not active yet — will re-try a fresh checkout ~${PREP_LEAD_MS / 1000}s before drop.`);
+      } else {
+        logBG(`🔁 Retrying checkout (attempt ${tries}) in ${Math.round(delay / 1000)}s…`);
+      }
+      setTimeout(() => { location.href = freshCheckoutId(url); }, delay);
     };
     if (bootUrl) {
       retryWith(bootUrl);
@@ -95,6 +111,8 @@
   function release() { try { delete document.documentElement.dataset.snkrsBotRan; } catch (e) {} }
 
   // Fetch this profile's central settings and write them so the checkout works.
+  // We also stamp in dropAtMs so gs-content-script knows when it's allowed to
+  // click SUBMIT — the actual drop time, never before.
   function applySettings(cb) {
     if (!profileDir) { if (cb) cb(); return; }
     chrome.runtime.sendMessage({ type: "boot_fetch_settings", profileDir }, (resp) => {
@@ -105,35 +123,39 @@
       }
       chrome.storage.sync.get(SETTINGS_KEY, (saved) => {
         const merged = { ...(saved[SETTINGS_KEY] || {}), ...resp.settings };
+        if (!isNaN(dropMs)) merged.dropAtMs = dropMs; else delete merged.dropAtMs;
         chrome.storage.sync.set({ [SETTINGS_KEY]: merged }, () => {
-          log("central settings applied for", profileDir, "size", merged.preferredSize);
+          log("central settings applied for", profileDir, "dropAtMs", merged.dropAtMs);
           if (cb) cb();
         });
       });
     });
   }
 
-  const gating = profileDir && !isNaN(dropMs) && now < (dropMs - LEAD_MS);
+  const bootUrl = (() => { try { return sessionStorage.getItem("snkrsBootUrl"); } catch (e) { return null; } })();
 
-  if (gating) {
-    // Too early — hold the checkout script back, settle settings, then reload
-    // just before the drop so the flow runs fresh and submits at go-live.
+  if (profileDir && !isNaN(dropMs) && now < dropMs - PREP_LEAD_MS) {
+    // Launched EARLY. Don't sit on a stale checkout page (Kasada goes stale, and
+    // Nike may bounce an early checkout). Hold the checkout script, then at
+    // PREP-before-drop do a FRESH navigation (new checkoutId → fresh Kasada).
     hold();
     applySettings();
-    const wait = dropMs - LEAD_MS - now;
-    logBG(`🕒 Direct checkout armed for "${profileDir}" — holding ${Math.round(wait / 1000)}s until the drop window.`);
-    // Keep the guard fresh in case of a very long wait, then fire at the window.
-    const keep = setInterval(hold, 60000);
+    const wait = dropMs - PREP_LEAD_MS - now;
+    logBG(`🕒 Direct checkout armed for "${profileDir}" — holding ${Math.round(wait / 1000)}s, then a fresh load ~${PREP_LEAD_MS / 1000}s before drop.`);
+    const keep = setInterval(hold, 60000); // keep gs-content held during the wait
     setTimeout(() => {
       clearInterval(keep);
-      logBG(`⚡ Drop window reached for "${profileDir}" — starting checkout now.`);
-      release();
-      location.reload();
+      logBG(`⚡ Prep window for "${profileDir}" — fresh checkout load (fresh Kasada), will submit at drop.`);
+      const target = bootUrl ? freshCheckoutId(bootUrl) : freshCheckoutId(location.href);
+      location.href = target;
     }, wait);
   } else {
-    // Drop window is here (scheduled at/just before drop) or no drop time set —
-    // make sure settings exist, then let gs-content-script run normally.
+    // We're inside the prep window (or at/after drop, or no drop time) — this is
+    // a fresh page. Fill now; gs-content-script holds SUBMIT until dropAtMs.
     applySettings();
-    if (profileDir) logBG(`⚡ Direct checkout starting for "${profileDir}".`);
+    if (profileDir) {
+      const secs = !isNaN(dropMs) ? Math.max(0, Math.round((dropMs - now) / 1000)) : 0;
+      logBG(`⚡ Direct checkout priming for "${profileDir}" — filling now, submit gated to drop${secs ? ` (${secs}s away)` : ""}.`);
+    }
   }
 })();

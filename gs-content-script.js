@@ -635,6 +635,31 @@ async function runCheckoutFlow() {
     return;
   }
 
+  // ── DROP-TIME GATE ────────────────────────────────────────────
+  // Everything above is PREP: delivery confirmed, card filled, payment committed,
+  // SUBMIT ready. We must NOT place the order before the launch is active —
+  // submitting early returns LAUNCH_NOT_ACTIVE and bounces the page. So hold here
+  // until the real drop time, then click the instant it opens. dropAtMs is
+  // stamped in by the gs bootstrap from the schedule; if it's absent we submit
+  // immediately (manual/no-schedule behaviour unchanged).
+  try {
+    const sres = await chrome.storage.sync.get(SETTINGS_KEY);
+    const dropAt = Number((sres[SETTINGS_KEY] || {}).dropAtMs) || 0;
+    if (dropAt && Date.now() < dropAt) {
+      logBG(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.`);
+      while (Date.now() < dropAt) {
+        const left = dropAt - Date.now();
+        if (left > 5000) {
+          logBG(`⏳${tag} [3/3] ${Math.ceil(left / 1000)}s to drop — SUBMIT held…`);
+          await wait(Math.min(3000, left - 1500));
+        } else {
+          await wait(120); // fine-grained as we approach drop for a precise click
+        }
+      }
+      logBG(`🟢${tag} [3/3] DROP TIME — submitting now!`);
+    }
+  } catch (e) { /* if the gate errors, fall through and submit */ }
+
   // 3) Click SUBMIT and VERIFY it took effect. Nike can ignore the first click
   //    or re-open the payment section — so verify the page actually advanced and
   //    retry a few times (re-committing payment if it reappeared).
