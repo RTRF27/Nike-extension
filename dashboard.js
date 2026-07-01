@@ -379,14 +379,27 @@ async function randomAssign() {
 
 // ── Status badge metadata ─────────────────────────────────────
 const STATUS_META = {
-  win:     { text: "🏆 WON",     color: "#1db954" },
-  loss:    { text: "😔 LOSS",    color: "#e03131" },
-  entered: { text: "✓ ENTERED",  color: "#4a90e2" },
-  pending: { text: "⏳ PENDING", color: "#fa8c00" },
-  polling: { text: "🔄 POLLING", color: "#888888" },
-  closed:  { text: "⛔ CLOSED",  color: "#666666" },
-  limit:   { text: "⚠ LIMIT",   color: "#fa5400" },
+  win:        { text: "🏆 WON",       color: "#1db954" },
+  success:    { text: "✅ SUBMITTED", color: "#1db954" },
+  loss:       { text: "😔 LOSS",      color: "#e03131" },
+  entered:    { text: "✓ ENTERED",    color: "#4a90e2" },
+  // Live checkout stages
+  waiting:    { text: "🕒 WAITING",   color: "#8b5cf6" },
+  checkout:   { text: "🛒 CHECKOUT",  color: "#8b5cf6" },
+  delivery:   { text: "📦 DELIVERY",  color: "#6366f1" },
+  payment:    { text: "💳 PAYMENT",   color: "#4a90e2" },
+  submitting: { text: "🚀 SUBMITTING",color: "#a855f7" },
+  // Poller / draw
+  pending:    { text: "⏳ PENDING",   color: "#fa8c00" },
+  polling:    { text: "🔄 POLLING",   color: "#888888" },
+  closed:     { text: "⛔ CLOSED",    color: "#666666" },
+  limit:      { text: "⚠ LIMIT",     color: "#fa5400" },
+  // Needs manual attention — clickable
+  error:      { text: "❗ ERROR — CLICK TO FIX", color: "#e03131" },
 };
+// Codes that mean "this account needs you" — the row becomes clickable to jump
+// straight to that Chrome profile.
+const ATTENTION_CODES = new Set(["error"]);
 
 function updateStatusBadge(profileDir) {
   const entry = statusElMap.get(profileDir);
@@ -394,21 +407,80 @@ function updateStatusBadge(profileDir) {
   const s = liveStatuses[profileDir];
   if (!s) { entry.rowEl.classList.add("hidden"); return; }
   const meta = STATUS_META[s.code] || { text: s.code, color: "#888" };
+  const attention = ATTENTION_CODES.has(s.code);
+
   entry.rowEl.classList.remove("hidden");
   entry.badgeEl.textContent = meta.text;
   entry.badgeEl.style.color = meta.color;
   entry.badgeEl.style.borderColor = meta.color + "66";
   entry.badgeEl.style.background  = meta.color + "1a";
-  entry.textEl.textContent  = (s.message || "").replace(/\*\*/g, "").slice(0, 90);
+  // Strip the **[label]** markup and step prefixes for a clean, readable line.
+  entry.textEl.textContent  = (s.message || "").replace(/\*\*/g, "").slice(0, 110);
   entry.textEl.title        = s.message || "";
   if (s.time) {
     const d = new Date(s.time);
-    entry.timeEl.textContent = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+    entry.timeEl.textContent = `${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`;
   }
+
+  // Attention rows glow red and become a click-to-jump control.
+  entry.rowEl.classList.toggle("status-attention", attention);
+  entry.rowEl.style.cursor = attention ? "pointer" : "";
+  entry.rowEl.title = attention ? "Click to open this Chrome profile and fix it" : "";
+  entry.rowEl.onclick = attention ? () => jumpToProfile(profileDir) : null;
+}
+
+// Open / focus the Chrome profile that needs attention, reopening its direct
+// checkout URL with a FRESH checkoutId (a clean retry) so you land right where
+// the fix is needed. Falls back to just focusing the profile.
+async function jumpToProfile(profileDir) {
+  const acct = accounts.find(a => a.profileDir === profileDir);
+  let url = acct && acct.checkoutUrl ? freshCheckoutId(acct.checkoutUrl) : "";
+  flashTemp($("statusMsg"), `Opening “${profileDir}”…`, "#8b5cf6", 3000);
+  const resp = await hostSend({ cmd: "launch", profileDir, url: url || undefined });
+  if (resp && resp.ok) flashTemp($("statusMsg"), `🡒 Opened “${profileDir}” — fix it there.`, "#1db954", 4000);
+  else flashTemp($("statusMsg"), `Couldn't open “${profileDir}”: ${resp && resp.error || "launcher offline"}`, "#e03131", 5000);
+}
+
+// Swap the checkoutId in a gs.nike.com URL for a new UUID (avoids reusing a
+// spent/invalid checkout session that may have caused the error page).
+function freshCheckoutId(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has("checkoutId") && window.crypto && crypto.randomUUID) {
+      u.searchParams.set("checkoutId", crypto.randomUUID());
+    }
+    return u.toString();
+  } catch { return url; }
 }
 
 function refreshAllBadges() {
   accounts.forEach(a => { if (a.profileDir) updateStatusBadge(a.profileDir); });
+}
+
+// Poll the shared status.json (via the native host) and merge into liveStatuses.
+// This is what makes the board show accounts running in OTHER Chrome profiles.
+let statusPollTimer = null;
+function startStatusPolling() {
+  if (statusPollTimer) clearInterval(statusPollTimer);
+  const tick = async () => {
+    const resp = await hostSend({ cmd: "getStatus" });
+    if (!resp || !resp.ok || !resp.status) return;
+    let changed = false;
+    for (const [dir, entry] of Object.entries(resp.status)) {
+      const cur = liveStatuses[dir];
+      if (!cur || cur.time !== entry.time || cur.code !== entry.code) {
+        liveStatuses[dir] = entry;
+        changed = true;
+        // Feed resolved outcomes into the current history run too.
+        if (entry && ["win", "loss", "entered", "limit", "success"].includes(entry.code)) {
+          if (!cur || cur.code !== entry.code) updateHistoryResult(dir, entry.code === "success" ? "entered" : entry.code);
+        }
+      }
+    }
+    if (changed) refreshAllBadges();
+  };
+  tick();
+  statusPollTimer = setInterval(tick, 2500);
 }
 
 // ── Storage change listener (live status + history sync) ─
@@ -1936,6 +2008,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadCardProfiles();
   const storedStatus = await chrome.storage.local.get(STATUS_KEY);
   liveStatuses = storedStatus[STATUS_KEY] || {};
+
+  // Cross-profile live status: launched accounts live in OTHER Chrome profiles,
+  // so their status arrives via the shared status.json (through the host), not
+  // this profile's chrome.storage. Poll it so the board shows every account's
+  // live checkout step in near-real-time.
+  startStatusPolling();
 
   // 2) Load the local mirror first (instant UI even if host is offline).
   const local = await chrome.storage.local.get(DASH_KEY);

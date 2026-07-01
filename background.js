@@ -544,6 +544,9 @@ function buildSettingsForProfile(config, profileDir) {
     statusPollerEnabled: opts.statusPollerEnabled ?? true,
     pollerIntervalMin:   opts.pollerIntervalMin ?? 3,
     multiEnabled:        false,
+    // The account's pre-built direct checkout URL, so the gs bootstrap can
+    // recover/retry if the checkout page bounces to gs.nike.com/error.
+    checkoutUrl:         account.checkoutUrl || "",
   };
 }
 
@@ -558,15 +561,53 @@ const cardFillCache = {};
 const tabProfileMap = {};
 chrome.tabs.onRemoved.addListener((tabId) => { delete tabProfileMap[tabId]; });
 
+// Throttle shared-file status writes: each write spawns a native-host process,
+// so we don't want one per heartbeat line. Important states flush immediately.
+const _lastStatusPush = {};
+const _IMPORTANT_CODES = new Set(["error", "success", "win", "loss", "submitting", "entered", "limit"]);
+function pushStatusToShared(profileDir, entry) {
+  const now = Date.now();
+  const important = _IMPORTANT_CODES.has(entry.code);
+  if (!important && now - (_lastStatusPush[profileDir] || 0) < 1200) return;
+  _lastStatusPush[profileDir] = now;
+  nativeSend({ cmd: "setStatus", profileDir, entry }).catch(() => {});
+}
+
 function parseStatusFromLog(message) {
   if (!message) return null;
   const m = message.toLowerCase();
+
+  // ── Terminal / draw outcomes (highest priority) ──
   if (m.includes("got 'em") || m.includes("got em") || m.includes("you won the draw"))
     return "win";
   if (m.includes("better luck next time") || m.includes("not selected") || m.includes("unsuccessful") && m.includes("result"))
     return "loss";
+  if (m.includes("order submitted") || m.includes("order confirmed") || m.includes("entry complete") || m.includes("you're in"))
+    return "success";
   if (m.includes("entry confirmed") || (m.includes("📋") && m.includes("draw entered")))
     return "entered";
+
+  // ── Error / needs-attention ──
+  if (m.includes("gs.nike.com/error") || m.includes("something went wrong") ||
+      m.includes("❌") || m.includes("aborting") || m.includes("stuck here") ||
+      m.includes("could not") || m.includes("not found or still disabled") ||
+      m.includes("no confirmation after"))
+    return "error";
+
+  // ── Live checkout steps (so the dashboard shows exactly where each account is) ──
+  if (m.includes("clicking submit order") || m.includes("submit order found") ||
+      m.includes("submit order click") || m.includes("submit registered"))
+    return "submitting";
+  if (m.includes("[2/3]") || m.includes("payments:") || m.includes("continue (payment") ||
+      m.includes("filling card") || m.includes("confirming payment") || m.includes("committing payment"))
+    return "payment";
+  if (m.includes("[1/3]") || m.includes("continue (delivery"))
+    return "delivery";
+  if (m.includes("checkout — starting") || m.includes("checkout - starting") ||
+      m.includes("direct checkout") || m.includes("checkout script injected"))
+    return "checkout";
+
+  // ── Draw poller states ──
   if (m.includes("entry is pending") || m.includes("you're in line") || m.includes("pending / you"))
     return "pending";
   if (m.includes("polling every") || m.includes("still pending") || m.includes("check #"))
@@ -575,6 +616,8 @@ function parseStatusFromLog(message) {
     return "closed";
   if (m.includes("entry_limit_exceeded") || (m.includes("limit") && m.includes("exceeded")))
     return "limit";
+  if (m.includes("holding") && m.includes("drop window"))
+    return "waiting";
   return null;
 }
 
@@ -756,18 +799,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === "log") {
     sendLog(msg.message);
-    // Live status board: parse and store per-profile status for the dashboard
+    // Live status board: attribute the log line to a profile and store it both
+    // locally AND in the shared status.json (via the host) so the dashboard —
+    // which runs in a DIFFERENT Chrome profile — can see every account's live
+    // step, not just accounts launched in the dashboard's own profile.
     const tabId = sender?.tab?.id;
     const profileDir = tabId ? tabProfileMap[tabId] : null;
     if (profileDir) {
       const code = parseStatusFromLog(msg.message);
-      if (code) {
-        chrome.storage.local.get("snkrsStatus", (data) => {
-          const s = data.snkrsStatus || {};
-          s[profileDir] = { code, message: msg.message, time: Date.now() };
-          chrome.storage.local.set({ snkrsStatus: s });
-        });
-      }
+      chrome.storage.local.get("snkrsStatus", (data) => {
+        const s = data.snkrsStatus || {};
+        const prev = s[profileDir] || {};
+        const entry = {
+          code: code || prev.code || "checkout", // keep last known stage if this line has none
+          message: msg.message,
+          time: Date.now(),
+        };
+        s[profileDir] = entry;
+        chrome.storage.local.set({ snkrsStatus: s });
+        // Mirror to the shared on-disk file for the dashboard (best-effort, throttled).
+        pushStatusToShared(profileDir, entry);
+      });
     }
     return false;
   }

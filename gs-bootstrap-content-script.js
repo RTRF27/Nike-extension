@@ -41,6 +41,54 @@
   function log(...a) { console.log("[SNKRSBot gs-boot]", ...a); }
   function logBG(msg) { try { chrome.runtime.sendMessage({ type: "log", message: msg }); } catch (e) {} }
 
+  // Swap the checkoutId for a fresh UUID — reusing a spent/invalid checkout
+  // session is a common cause of the gs.nike.com/error page.
+  function freshCheckoutId(u) {
+    try {
+      const url = new URL(u, location.origin);
+      if (url.searchParams.has("checkoutId") && window.crypto && crypto.randomUUID) {
+        url.searchParams.set("checkoutId", crypto.randomUUID());
+      }
+      return url.toString();
+    } catch (e) { return u; }
+  }
+
+  // ── gs.nike.com/error handling ────────────────────────────────
+  // If the checkout bounced to the error page, report it (so the dashboard
+  // flags this account for attention) and auto-retry a few times with a fresh
+  // checkoutId — the original URL (with our #snkrsBoot/#snkrsDrop markers) is
+  // saved in sessionStorage on the first load, so retries keep drop-time gating.
+  const isErrorPage = /\/error/i.test(location.pathname) ||
+                      /something went wrong|an error has occurred/i.test(document.body ? document.body.innerText : "");
+  if (isErrorPage) {
+    logBG(`❌ gs.nike.com/error — checkout hit Nike's error page (needs attention).`);
+    const bootUrl = sessionStorage.getItem("snkrsBootUrl");
+    let tries = parseInt(sessionStorage.getItem("snkrsErrTries") || "0", 10);
+    const retryWith = (url) => {
+      if (!url) { logBG(`⚠️ No saved checkout URL to retry — fix this profile manually.`); return; }
+      if (tries >= 5) { logBG(`⚠️ Retried ${tries}× and still erroring — needs manual attention (click it in the dashboard).`); return; }
+      tries++; sessionStorage.setItem("snkrsErrTries", String(tries));
+      const backoff = 1500 + tries * 2000;
+      logBG(`🔁 Retrying checkout (attempt ${tries}) in ${Math.round(backoff / 1000)}s…`);
+      setTimeout(() => { location.href = freshCheckoutId(url); }, backoff);
+    };
+    if (bootUrl) {
+      retryWith(bootUrl);
+    } else {
+      // No sessionStorage URL (server-side redirect before we ran) — fall back
+      // to this profile's stored checkout URL from settings.
+      chrome.storage.sync.get(SETTINGS_KEY, (saved) => {
+        retryWith((saved[SETTINGS_KEY] || {}).checkoutUrl);
+      });
+    }
+    return; // don't run the normal gate/flow on the error page
+  }
+
+  // Save the full boot URL (with markers) so an error-page retry can restore it.
+  if (readParam("snkrsBoot")) {
+    try { sessionStorage.setItem("snkrsBootUrl", location.href); } catch (e) {}
+  }
+
   // gs-content-script runs ONCE at document_idle and bails if its run-guard
   // dataset is set. We set it here (document_start) to hold it back until ready.
   function hold()    { try { document.documentElement.dataset.snkrsBotRan = String(Date.now()); } catch (e) {} }

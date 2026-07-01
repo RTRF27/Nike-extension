@@ -38,6 +38,15 @@ const CONFIG_PATH = path.join(CONFIG_DIR, "config.json");
 // cannot see. So scraped orders are routed here, on disk, where any profile
 // can read them — the same cross-profile trick the config uses.
 const ORDERS_PATH = path.join(CONFIG_DIR, "orders.json");
+// Shared LIVE STATUS — one small file PER PROFILE under ~/.snkrs-bot/status/.
+// Per-profile files avoid the read-modify-write races you'd get if every
+// profile hammered a single shared status.json (last writer would clobber the
+// others). The dashboard aggregates them by reading the folder.
+const STATUS_DIR = path.join(CONFIG_DIR, "status");
+function statusFileFor(profileDir) {
+  const safe = String(profileDir).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  return path.join(STATUS_DIR, `s_${safe}.json`);
+}
 
 function readJsonFile(p) {
   try {
@@ -48,7 +57,7 @@ function readJsonFile(p) {
 }
 
 function writeJsonFile(p, obj) {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(p), { recursive: true });
   const tmp = p + ".tmp";
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, p);
@@ -67,6 +76,34 @@ function setOrdersEntry(profileDir, entry) {
   map[profileDir] = entry;
   writeJsonFile(ORDERS_PATH, map);
   return map;
+}
+
+function setStatusEntry(profileDir, entry) {
+  // Store profileDir inside the record so the aggregator can key by it
+  // regardless of how the filename was sanitised.
+  writeJsonFile(statusFileFor(profileDir), Object.assign({}, entry, { profileDir }));
+}
+function readStatus() {
+  const map = {};
+  try {
+    for (const f of fs.readdirSync(STATUS_DIR)) {
+      if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
+      const rec = readJsonFile(path.join(STATUS_DIR, f));
+      if (rec && rec.profileDir) map[rec.profileDir] = rec;
+    }
+  } catch (e) { /* dir not created yet */ }
+  return map;
+}
+function clearStatus(profileDir) {
+  if (profileDir) {
+    try { fs.unlinkSync(statusFileFor(profileDir)); } catch (e) {}
+  } else {
+    try {
+      for (const f of fs.readdirSync(STATUS_DIR)) {
+        if (f.endsWith(".json")) { try { fs.unlinkSync(path.join(STATUS_DIR, f)); } catch (e) {} }
+      }
+    } catch (e) {}
+  }
 }
 
 // ── Locate Chrome ─────────────────────────────────────────────
@@ -217,6 +254,23 @@ function handle(msg) {
         } else {
           writeJsonFile(ORDERS_PATH, {});
         }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "getStatus":
+      return { ok: true, status: readStatus() };
+    case "setStatus":
+      if (!msg.profileDir) return { ok: false, error: "Missing profileDir." };
+      try {
+        setStatusEntry(msg.profileDir, msg.entry || {});
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "clearStatus":
+      try {
+        clearStatus(msg.profileDir);
         return { ok: true };
       } catch (e) {
         return { ok: false, error: String(e && e.message || e) };
