@@ -167,10 +167,27 @@ async function armCardFillSignal(timeoutMs = 60000) {
 // ── Native click ──────────────────────────────────────────────
 async function nativeClick(el, label, fast = false) {
   if (!el) { log(`nativeClick: null for "${label}"`); return; }
-  el.scrollIntoView({ behavior: "smooth", block: "center" });
+  el.scrollIntoView({ behavior: fast ? "auto" : "smooth", block: "center" });
   if (!fast) await wait(randInt(150, 300));
-  el.click();
-  log(`nativeClick: "${label}"`);
+
+  // Nike's checkout buttons are Angular components that often ignore a bare
+  // el.click() — they listen on the real pointer/mouse event sequence. Dispatch
+  // the full sequence (with coordinates when the window isn't minimized), then
+  // fall back to el.click() for any handler bound directly to click.
+  const r = el.getBoundingClientRect();
+  const minimized = (r.width === 0 && r.height === 0) || isWindowMinimized();
+  const cx = minimized ? 0 : r.left + r.width / 2;
+  const cy = minimized ? 0 : r.top + r.height / 2;
+  const opt = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy };
+
+  try { el.focus(); } catch (e) {}
+  for (const type of ["pointerover", "mouseover", "pointerenter",
+                       "pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    try { el.dispatchEvent(new MouseEvent(type, opt)); } catch (e) {}
+    await wait(randInt(4, 12));
+  }
+  try { el.click(); } catch (e) {} // belt-and-suspenders fallback
+  log(`nativeClick: "${label}" (sequence${minimized ? ", minimized" : ""})`);
 }
 
 // ── Selector helpers (based on confirmed live HTML) ───────────
@@ -576,39 +593,38 @@ async function runCheckoutFlow() {
     }
   }
 
-  // ── FINAL STEP: SUBMIT ORDER ──────────────────────────────────
-  logBG(`⏳${tag} [3/3] Waiting for SUBMIT ORDER to be enabled…`);
-  // Heartbeat: every 3s while we wait, report what the page looks like so a
-  // stall is visible in Discord in real time instead of a silent 12s gap.
+  // ── FINAL STEP: commit PAYMENT, then SUBMIT ORDER ─────────────
+  // A `button.button-submit` is pre-rendered on the page even before checkout is
+  // ready, so merely "finding" it isn't enough — clicking SUBMIT while the
+  // PAYMENT section is still open (its CONTINUE visible) does nothing (this was
+  // the stall: card filled, but the order never went through). So first make
+  // sure the payment CONTINUE is gone (payment committed), THEN submit.
+  logBG(`⏳${tag} [3/3] Finalising — committing payment, then submitting…`);
+
+  // 1) Click the payment CONTINUE until it disappears. Angular sometimes drops
+  //    the first synthetic click; the new pointer-sequence click + retries fix
+  //    that. Bounded so we never loop forever.
+  for (let i = 0; i < 4; i++) {
+    const pc = findPaymentContinueOnly();
+    if (!pc) break;
+    logBG(`✅${tag} [3/3] Clicking CONTINUE (payment) to commit it (try ${i + 1})…`);
+    await nativeClick(pc, "CONTINUE (payment)");
+    await wait(1600);
+  }
+
+  // 2) Wait for a SUBMIT ORDER button, with a live heartbeat.
   let hb = 0;
   const heartbeat = setInterval(() => {
     hb++;
     const all = Array.from(document.querySelectorAll("button.button-submit"));
-    const present = all.length;
-    const enabled = all.filter(b => !b.disabled).length;
-    logBG(`💓${tag} [3/3] still waiting for SUBMIT (${hb*3}s) — ` +
-      `submitBtns=${present} enabled=${enabled} | ` +
-      `paymentForm=${!!findPaymentFormEl()} paymentCont=${!!findPaymentContinueOnly()} ` +
-      `paymentDone=${isPaymentAlreadyComplete()}`);
+    logBG(`💓${tag} [3/3] waiting for SUBMIT (${hb * 3}s) — submitBtns=${all.length} ` +
+      `enabled=${all.filter(b => !b.disabled).length} | paymentCont=${!!findPaymentContinueOnly()}`);
   }, 3000);
   let submitBtn = await waitFor(findSubmitOrderButton, 12000, 100);
   clearInterval(heartbeat);
 
   if (!submitBtn) {
-    // SUBMIT not visible yet. As a fallback, a payment-section CONTINUE may be
-    // gating it. Click it once (never the delivery one), then wait again.
-    const gatingContinue = findPaymentContinueOnly();
-    if (gatingContinue) {
-      logBG(`⚠️${tag} [3/3] SUBMIT not enabled yet — clicking payment CONTINUE once to reveal it…`);
-      await nativeClick(gatingContinue, "CONTINUE (payment, to reveal SUBMIT)");
-      submitBtn = await waitFor(findSubmitOrderButton, 8000, 100);
-    } else {
-      logBG(`⚠️${tag} [3/3] SUBMIT not enabled after 12s and no payment CONTINUE to click`);
-    }
-  }
-
-  if (!submitBtn) {
-    logBG(`❌${tag} [3/3] SUBMIT ORDER not found or still disabled — STUCK HERE. Full page state:`);
+    logBG(`❌${tag} [3/3] SUBMIT ORDER not found — STUCK HERE. Full page state:`);
     dumpPageState(tag, true);
     return;
   }
@@ -619,8 +635,49 @@ async function runCheckoutFlow() {
     return;
   }
 
+  // 3) Click SUBMIT and VERIFY it took effect. Nike can ignore the first click
+  //    or re-open the payment section — so verify the page actually advanced and
+  //    retry a few times (re-committing payment if it reappeared).
   logBG(`@here 🚀${tag} Clicking SUBMIT ORDER…`);
-  await nativeClick(submitBtn, "SUBMIT ORDER", true);
+  const startUrl = location.href;
+  const advanced = () => {
+    const t = (document.body.innerText || "").toUpperCase();
+    if (!location.hostname.includes("gs.nike.com")) return true;
+    if (location.href !== startUrl) return true;
+    return /PROCESSING|JUST A MINUTE|ORDER CONFIRMED|THANK YOU|YOU'RE IN|ENTRY CONFIRMED/.test(t);
+  };
+
+  let submitted = false;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    // If the payment section re-opened, re-commit it before submitting.
+    const pc = findPaymentContinueOnly();
+    if (pc) {
+      logBG(`⚠️${tag} [3/3] payment CONTINUE reappeared — re-committing before submit…`);
+      await nativeClick(pc, "CONTINUE (payment) re-commit");
+      await wait(1500);
+    }
+    const sb = findSubmitOrderButton();
+    if (!sb) {
+      if (advanced()) { submitted = true; break; } // already progressing
+      await wait(800);
+      continue;
+    }
+    logBG(`🚀${tag} [3/3] SUBMIT ORDER click attempt ${attempt}…`);
+    await nativeClick(sb, "SUBMIT ORDER", true);
+    submitted = true;
+    // Give the page up to ~5s to react before deciding to retry.
+    if (await waitFor(advanced, 5000, 250)) {
+      logBG(`✅${tag} [3/3] Submit registered — order is processing.`);
+      break;
+    }
+    logBG(`🔁${tag} [3/3] Submit didn't advance yet (attempt ${attempt}) — retrying…`);
+  }
+
+  if (!submitted) {
+    logBG(`❌${tag} [3/3] Could not click SUBMIT ORDER.`);
+    dumpPageState(tag, true);
+    return;
+  }
   await wait(500);
   dumpPageState();
   watchForConfirmation(tag);
