@@ -89,21 +89,24 @@ function readStatus() {
     for (const f of fs.readdirSync(STATUS_DIR)) {
       if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
       const rec = readJsonFile(path.join(STATUS_DIR, f));
-      if (rec && rec.profileDir) map[rec.profileDir] = rec;
+      // Key by the per-tab composite key when present (profile#tabId), else the
+      // profile — so multiple tabs of one profile each keep their own entry.
+      const k = rec && (rec.key || rec.profileDir);
+      if (rec && k) map[k] = rec;
     }
   } catch (e) { /* dir not created yet */ }
   return map;
 }
 function clearStatus(profileDir) {
-  if (profileDir) {
-    try { fs.unlinkSync(statusFileFor(profileDir)); } catch (e) {}
-  } else {
-    try {
-      for (const f of fs.readdirSync(STATUS_DIR)) {
-        if (f.endsWith(".json")) { try { fs.unlinkSync(path.join(STATUS_DIR, f)); } catch (e) {} }
-      }
-    } catch (e) {}
-  }
+  try {
+    for (const f of fs.readdirSync(STATUS_DIR)) {
+      if (!f.endsWith(".json")) continue;
+      if (!profileDir) { try { fs.unlinkSync(path.join(STATUS_DIR, f)); } catch (e) {} continue; }
+      // Remove every tab-file that belongs to this profile.
+      const rec = readJsonFile(path.join(STATUS_DIR, f));
+      if (rec && rec.profileDir === profileDir) { try { fs.unlinkSync(path.join(STATUS_DIR, f)); } catch (e) {} }
+    }
+  } catch (e) {}
 }
 
 // ── Locate Chrome ─────────────────────────────────────────────

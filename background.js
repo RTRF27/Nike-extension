@@ -589,6 +589,19 @@ const cardFillCache = {};
 const tabProfileMap = {};
 chrome.tabs.onRemoved.addListener((tabId) => { delete tabProfileMap[tabId]; });
 
+// A short human label for a tab (the product it's on) for the live monitor.
+function tabLabel(tab) {
+  if (!tab) return "";
+  try {
+    const u = new URL(tab.url || "");
+    // SNKRS launch slug or gs checkout — derive the product slug.
+    const m = (u.pathname + u.search + u.hash).match(/launch\/t\/([^/?#&]+)/);
+    if (m && m[1]) return m[1].replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()).slice(0, 42);
+  } catch (e) {}
+  const t = (tab.title || "").replace(/\s*[|\-–].*$/i, "").trim();
+  return t.slice(0, 42);
+}
+
 // Throttle shared-file status writes: each write spawns a native-host process,
 // so we don't want one per heartbeat line. Important states flush immediately.
 const _lastStatusPush = {};
@@ -835,26 +848,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === "log") {
     sendLog(msg.message);
-    // Live status board: attribute the log line to a profile and store it both
-    // locally AND in the shared status.json (via the host) so the dashboard —
-    // which runs in a DIFFERENT Chrome profile — can see every account's live
-    // step, not just accounts launched in the dashboard's own profile.
+    // Live status board: attribute the log line to a specific TAB (profile + tab
+    // id) so the command-center monitor can show every product tab in every
+    // browser — not just the last one per profile. Stored locally AND mirrored
+    // to the shared status folder so the dashboard (a different Chrome profile)
+    // can see them all.
     const tabId = sender?.tab?.id;
-    const profileDir = tabId ? tabProfileMap[tabId] : null;
-    if (profileDir) {
+    const profileDir = tabId != null ? tabProfileMap[tabId] : null;
+    if (profileDir != null && tabId != null) {
       const code = parseStatusFromLog(msg.message);
+      const key = `${profileDir}#${tabId}`;
+      const label = tabLabel(sender && sender.tab);
       chrome.storage.local.get("snkrsStatus", (data) => {
         const s = data.snkrsStatus || {};
-        const prev = s[profileDir] || {};
+        const prev = s[key] || {};
         const entry = {
-          code: code || prev.code || "checkout", // keep last known stage if this line has none
+          key, profileDir, tabId,
+          label: label || prev.label || "",
+          code: code || prev.code || "checkout", // keep last known stage if none
           message: msg.message,
           time: Date.now(),
         };
-        s[profileDir] = entry;
+        s[key] = entry;
         chrome.storage.local.set({ snkrsStatus: s });
-        // Mirror to the shared on-disk file for the dashboard (best-effort, throttled).
-        pushStatusToShared(profileDir, entry);
+        pushStatusToShared(key, entry); // throttled, best-effort
       });
     }
     return false;

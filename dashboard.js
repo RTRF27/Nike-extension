@@ -54,13 +54,13 @@ function renderHomeStats() {
   // Live status board
   const list = document.getElementById("homeStatusList");
   if (list) {
-    const acctStatuses = accounts.filter(a => a.profileDir && liveStatuses[a.profileDir]);
+    const acctStatuses = accounts.filter(a => a.profileDir && bestStatusFor(a.profileDir));
     if (!acctStatuses.length) {
       list.innerHTML = "<p class='hint'>No accounts running. Launch from the DROP tab.</p>";
     } else {
       list.innerHTML = "";
       acctStatuses.forEach(a => {
-        const s = liveStatuses[a.profileDir] || {};
+        const s = bestStatusFor(a.profileDir) || {};
         const row = document.createElement("div");
         row.className = "home-status-row";
         const lbl = document.createElement("span");
@@ -400,10 +400,23 @@ const STATUS_META = {
 // straight to that Chrome profile.
 const ATTENTION_CODES = new Set(["error"]);
 
+// liveStatuses is keyed per TAB ("profile#tabId"). These aggregate by profile.
+const STALE_MS = 15 * 60 * 1000;
+function profileEntries(profileDir) {
+  return Object.values(liveStatuses).filter(e => e && e.profileDir === profileDir);
+}
+function bestStatusFor(profileDir) {
+  const es = profileEntries(profileDir);
+  if (!es.length) return null;
+  const err = es.find(e => e.code === "error");
+  if (err) return err;
+  return es.slice().sort((a, b) => (b.time || 0) - (a.time || 0))[0];
+}
+
 function updateStatusBadge(profileDir) {
   const entry = statusElMap.get(profileDir);
   if (!entry) return;
-  const s = liveStatuses[profileDir];
+  const s = bestStatusFor(profileDir);
   if (!s) { entry.rowEl.classList.add("hidden"); return; }
   const meta = STATUS_META[s.code] || { text: s.code, color: "#888" };
   const attention = ATTENTION_CODES.has(s.code);
@@ -457,65 +470,103 @@ function refreshAllBadges() {
   renderLivePage();
 }
 
-// ── LIVE MONITOR page ─────────────────────────────────────────
-// A dedicated grid of every account's real-time checkout status. Fed by the
-// same liveStatuses that the per-row badges use, refreshed on every poll.
+// ── LIVE MONITOR (cyber command center) ───────────────────────
+// One panel per browser/profile; inside it a tile per live TAB, so you oversee
+// every product tab in every Chrome at once. Fed by the per-tab liveStatuses.
+function liveGroupOf(code) {
+  if (code === "error") return "error";
+  if (code === "win" || code === "success") return "done";
+  if (code === "waiting") return "waiting";
+  if (["checkout", "delivery", "payment", "submitting", "pending", "polling"].includes(code)) return "active";
+  return "idle";
+}
+function fmtClock(ts) {
+  if (!ts) return "";
+  const d = new Date(ts); const p = n => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 function renderLivePage() {
   const grid = $("liveGrid");
   if (!grid) return;
-  const rows = accounts.filter(a => a.profileDir);
   const empty = $("liveEmpty");
+  const now = Date.now();
 
-  // Summary counts by coarse group.
-  const counts = { active: 0, waiting: 0, error: 0, done: 0, idle: 0 };
-  const groupOf = (code) => {
-    if (code === "error") return "error";
-    if (code === "win" || code === "success") return "done";
-    if (code === "waiting") return "waiting";
-    if (["checkout", "delivery", "payment", "submitting", "pending", "polling"].includes(code)) return "active";
-    return "idle";
-  };
+  // Group non-stale tab entries by profile.
+  const byProfile = {};
+  for (const e of Object.values(liveStatuses)) {
+    if (!e || !e.profileDir) continue;
+    if (e.time && now - e.time > STALE_MS) continue; // drop dead tabs
+    (byProfile[e.profileDir] = byProfile[e.profileDir] || []).push(e);
+  }
 
+  // Every account with a profile gets a panel (even if idle / not launched).
+  const profiles = [];
+  const seen = new Set();
+  accounts.forEach(a => {
+    if (!a.profileDir || seen.has(a.profileDir)) return;
+    seen.add(a.profileDir);
+    profiles.push({ dir: a.profileDir, label: (a.label && a.label.trim()) || a.profileDir });
+  });
+  // Include any profile reporting status that isn't in the accounts list.
+  Object.keys(byProfile).forEach(dir => { if (!seen.has(dir)) { seen.add(dir); profiles.push({ dir, label: dir }); } });
+
+  const counts = { active: 0, waiting: 0, error: 0, done: 0, idle: 0, tabs: 0 };
   let html = "";
-  let anyStatus = false;
-  rows.forEach(a => {
-    const s = liveStatuses[a.profileDir];
-    const code = s ? s.code : "";
-    const meta = STATUS_META[code] || { text: code ? code.toUpperCase() : "IDLE", color: "#6b6b7b" };
-    const attention = ATTENTION_CODES.has(code);
-    const name = (a.label && a.label.trim()) || a.profileDir;
-    if (s) { anyStatus = true; counts[groupOf(code)]++; } else { counts.idle++; }
-    const msg = s ? (s.message || "").replace(/\*\*/g, "") : "Not launched yet.";
-    let timeStr = "";
-    if (s && s.time) { const d = new Date(s.time); const p = n => String(n).padStart(2, "0"); timeStr = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
-    html += `<div class="live-card${attention ? " attn" : ""}" style="color:${meta.color}" data-dir="${escapeHtml(a.profileDir)}">
-      <div class="lc-bar"></div>
-      <div class="lc-head">
-        <span class="lc-name" style="color:#fff">${escapeHtml(name)}</span>
-        <span class="lc-badge">${meta.text}</span>
+
+  profiles.forEach(p => {
+    const tabs = (byProfile[p.dir] || []).slice().sort((a, b) => (a.tabId || 0) - (b.tabId || 0));
+    const hasErr = tabs.some(t => t.code === "error");
+    counts.tabs += tabs.length;
+
+    let tiles = "";
+    if (!tabs.length) {
+      counts.idle++;
+      tiles = `<div class="cy-tile idle"><div class="cy-tile-stage">— IDLE —</div><div class="cy-tile-msg">not launched</div></div>`;
+    } else {
+      tabs.forEach(t => {
+        counts[liveGroupOf(t.code)]++;
+        const meta = STATUS_META[t.code] || { text: (t.code || "IDLE").toUpperCase(), color: "#6b6b7b" };
+        const attn = ATTENTION_CODES.has(t.code);
+        const prod = t.label || "Nike";
+        const msg = (t.message || "").replace(/\*\*/g, "");
+        tiles += `<div class="cy-tile${attn ? " attn" : ""}" style="--st:${meta.color}" data-dir="${escapeHtml(p.dir)}">
+          <div class="cy-tile-top">
+            <span class="cy-prod">${escapeHtml(prod)}</span>
+            <span class="cy-stage">${meta.text}</span>
+          </div>
+          <div class="cy-tile-msg">${escapeHtml(msg)}</div>
+          <div class="cy-tile-foot"><span class="cy-dot"></span>${fmtClock(t.time)}${attn ? " · CLICK TO FIX" : ""}</div>
+        </div>`;
+      });
+    }
+
+    html += `<section class="cy-panel${hasErr ? " err" : ""}">
+      <div class="cy-panel-head">
+        <span class="cy-led"></span>
+        <span class="cy-browser">${escapeHtml(p.label)}</span>
+        <span class="cy-count">${tabs.length} TAB${tabs.length === 1 ? "" : "S"}</span>
       </div>
-      <div class="lc-msg" style="color:var(--grey)">${escapeHtml(msg)}</div>
-      <div class="lc-time">${timeStr}${attention ? " · click to fix →" : ""}</div>
-    </div>`;
+      <div class="cy-tiles">${tiles}</div>
+    </section>`;
   });
 
   grid.innerHTML = html;
-  if (empty) empty.style.display = rows.length && anyStatus ? "none" : "";
+  if (empty) empty.style.display = counts.tabs ? "none" : "";
 
-  // Wire clicks on error cards to jump to that profile.
-  grid.querySelectorAll(".live-card.attn").forEach(card => {
-    card.addEventListener("click", () => jumpToProfile(card.dataset.dir));
+  grid.querySelectorAll(".cy-tile.attn").forEach(el => {
+    el.addEventListener("click", () => jumpToProfile(el.dataset.dir));
   });
 
-  // Summary chips.
   const sum = $("liveSummary");
   if (sum) {
     const chip = (n, label, color) => `<div class="live-chip" style="color:${color}"><span class="n">${n}</span><span class="l">${label}</span></div>`;
     sum.innerHTML =
+      `<div class="live-chip live-pulse" style="color:#22d3ee"><span class="n">●</span><span class="l">LIVE · ${counts.tabs} TABS</span></div>` +
       chip(counts.active, "RUNNING", "#8b5cf6") +
       chip(counts.waiting, "WAITING", "#a855f7") +
       chip(counts.done, "DONE", "#1db954") +
-      chip(counts.error, "NEEDS FIX", "#e03131") +
+      chip(counts.error, "NEEDS FIX", "#ff2d55") +
       chip(counts.idle, "IDLE", "#6b6b7b");
   }
 }
@@ -535,14 +586,14 @@ function startStatusPolling() {
     const resp = await hostSend({ cmd: "getStatus" });
     if (!resp || !resp.ok || !resp.status) return;
     let changed = false;
-    for (const [dir, entry] of Object.entries(resp.status)) {
-      const cur = liveStatuses[dir];
+    for (const [key, entry] of Object.entries(resp.status)) {
+      const cur = liveStatuses[key];
       if (!cur || cur.time !== entry.time || cur.code !== entry.code) {
-        liveStatuses[dir] = entry;
+        liveStatuses[key] = entry;
         changed = true;
-        // Feed resolved outcomes into the current history run too.
+        // Feed resolved outcomes into the current history run (by profile).
         if (entry && ["win", "loss", "entered", "limit", "success"].includes(entry.code)) {
-          if (!cur || cur.code !== entry.code) updateHistoryResult(dir, entry.code === "success" ? "entered" : entry.code);
+          if (!cur || cur.code !== entry.code) updateHistoryResult(entry.profileDir || key, entry.code === "success" ? "entered" : entry.code);
         }
       }
     }
@@ -558,14 +609,15 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes[STATUS_KEY]) {
     const newStatuses = changes[STATUS_KEY].newValue || {};
-    // Propagate newly resolved statuses into the current history run
-    Object.entries(newStatuses).forEach(([profileDir, info]) => {
-      if (info && ["win", "loss", "entered", "limit"].includes(info.code)) {
-        const old = liveStatuses[profileDir];
-        if (!old || old.code !== info.code) updateHistoryResult(profileDir, info.code);
+    // Propagate newly resolved statuses into the current history run (by profile).
+    Object.entries(newStatuses).forEach(([key, info]) => {
+      if (info && ["win", "loss", "entered", "limit", "success"].includes(info.code)) {
+        const old = liveStatuses[key];
+        if (!old || old.code !== info.code) updateHistoryResult(info.profileDir || key, info.code === "success" ? "entered" : info.code);
       }
     });
-    liveStatuses = newStatuses;
+    // Merge (don't replace) so cross-profile entries from the poll aren't lost.
+    liveStatuses = { ...liveStatuses, ...newStatuses };
     refreshAllBadges();
   }
   if (changes[HISTORY_KEY]) {
@@ -2255,6 +2307,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("dropTime").addEventListener("change", () => { startCountdown(); saveAll(true); });
   const _fdt = $("fetchDropTimeBtn");
   if (_fdt) _fdt.addEventListener("click", fetchDropTimeFromNike);
+  const _lc = $("liveClearBtn");
+  if (_lc) _lc.addEventListener("click", async () => {
+    await hostSend({ cmd: "clearStatus" });         // clear shared per-tab files
+    await chrome.storage.local.set({ snkrsStatus: {} }); // clear local mirror
+    liveStatuses = {};
+    refreshAllBadges();
+  });
   $("multiProductToggle").addEventListener("change", () => {
     multiProduct = $("multiProductToggle").checked;
     applyMultiUI();
