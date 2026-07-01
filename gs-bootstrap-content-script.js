@@ -123,7 +123,9 @@
       }
       chrome.storage.sync.get(SETTINGS_KEY, (saved) => {
         const merged = { ...(saved[SETTINGS_KEY] || {}), ...resp.settings };
-        if (!isNaN(dropMs)) merged.dropAtMs = dropMs; else delete merged.dropAtMs;
+        // URL marker wins if present; otherwise KEEP the config-provided dropAtMs
+        // (resp.settings.dropAtMs) so the SUBMIT gate always has a time.
+        if (!isNaN(dropMs)) merged.dropAtMs = dropMs;
         chrome.storage.sync.set({ [SETTINGS_KEY]: merged }, () => {
           log("central settings applied for", profileDir, "dropAtMs", merged.dropAtMs);
           if (cb) cb();

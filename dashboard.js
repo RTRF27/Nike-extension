@@ -1572,6 +1572,7 @@ function buildConfig() {
       url: a.url || "",
       keyword: a.keyword || "",
       checkoutUrl: a.checkoutUrl || "",   // pre-built direct checkout URL (may be "")
+      dropAtMs: a.dropAtMs || 0,          // this account's product drop time (ms)
       autoLaunch: !!a.autoLaunch,
       cardId: a.cardId || "",
       card: resolveCard(a.cardId),   // resolved card object the bot fills
@@ -1735,6 +1736,7 @@ async function assignCheckoutUrls(msgEl) {
   let nikeDropISO = "";
   for (const acct of accounts) {
     acct.checkoutUrl = "";
+    acct.dropAtMs = 0;
     const sku = skuForAccount(acct);
     if (!acct.size || !sku) continue;
     let d;
@@ -1747,6 +1749,8 @@ async function assignCheckoutUrls(msgEl) {
       continue;
     }
     if (d.dropTimeISO && !nikeDropISO) nikeDropISO = d.dropTimeISO;
+    // Per-account drop time (each product in a multi-product drop can differ).
+    if (d.dropTimeISO) { const t = Date.parse(d.dropTimeISO); if (!isNaN(t)) acct.dropAtMs = t; }
     const match = (d.skus || []).find(s => String(s.nikeSize) === String(acct.size));
     if (!match) { fail++; errs.add(`size ${acct.size} not offered for ${sku}`); continue; }
     acct.checkoutUrl = buildDirectCheckoutUrl(d, match.id);
@@ -1789,11 +1793,11 @@ function bootUrlFor(acct) {
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
   // Carry the drop time so the account holds SUBMIT until go-live — on EVERY
-  // launch (manual included), independent of the auto-open toggle. Works for the
-  // direct checkout path AND the launch-page fallback.
-  const iso = dropTimeFieldISO();
-  const t = iso ? Date.parse(iso) : NaN;
-  if (!isNaN(t)) params.push(`snkrsDrop=${t}`);
+  // launch (manual included), independent of the auto-open toggle. Prefer this
+  // account's own product drop time (multi-product), else the global field.
+  let t = acct.dropAtMs || 0;
+  if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
+  if (t) params.push(`snkrsDrop=${t}`);
   const sep = url.includes("#") ? "&" : "#";
   return `${url}${sep}${params.join("&")}`;
 }
@@ -1960,6 +1964,7 @@ function applyConfigToUI(cfg) {
     url: a.url || "",
     keyword: a.keyword || "",
     checkoutUrl: a.checkoutUrl || "",
+    dropAtMs: a.dropAtMs || 0,
     autoLaunch: !!a.autoLaunch,
     cardId: a.cardId || "",
   }));

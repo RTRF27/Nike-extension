@@ -440,7 +440,9 @@ const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
 const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds
 
 function buildBootUrlFromConfig(cfg, acct) {
-  const dropMs = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
+  // Prefer this account's own product drop time (multi-product), else global.
+  const dropMs = acct.dropAtMs ||
+                 (cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN);
   // Prefer a pre-generated DIRECT checkout URL — it lands straight on
   // gs.nike.com checkout, skipping the launch page and size picker.
   let url = (acct.checkoutUrl && acct.checkoutUrl.trim()) ? acct.checkoutUrl.trim() : null;
@@ -561,6 +563,12 @@ function buildSettingsForProfile(config, profileDir) {
     // The account's pre-built direct checkout URL, so the gs bootstrap can
     // recover/retry if the checkout page bounces to gs.nike.com/error.
     checkoutUrl:         account.checkoutUrl || "",
+    // The exact drop time this account must hold SUBMIT until. Prefer the
+    // account's own product time (multi-product), else the global drop time.
+    // Carried in settings so the gate ALWAYS works, even if the URL marker is
+    // missing.
+    dropAtMs:            account.dropAtMs ||
+                         (drop.dropTimeISO ? Date.parse(drop.dropTimeISO) : 0) || 0,
   };
 }
 
