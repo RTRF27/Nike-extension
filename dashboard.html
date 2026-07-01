@@ -39,6 +39,7 @@
     <nav class="nav-tabs" id="navTabs">
       <button class="nav-tab active" data-nav="home">HOME</button>
       <button class="nav-tab" data-nav="drop">DROP</button>
+      <button class="nav-tab" data-nav="live">LIVE</button>
       <button class="nav-tab" data-nav="profiles">PROFILES</button>
       <button class="nav-tab" data-nav="cards">CARDS</button>
       <button class="nav-tab" data-nav="orders">ORDERS</button>
@@ -248,6 +249,19 @@
             <div id="statusMsg" class="status-msg"></div>
           </section>
         </div>
+      </div>
+    </div>
+
+    <!-- ─────────────────── LIVE MONITOR ─────────────────── -->
+    <div class="page-section" id="page-live">
+      <div class="section-header">
+        <h1 class="section-title">LIVE MONITOR</h1>
+        <span class="section-sub">Real-time status of every account during a drop</span>
+      </div>
+      <div id="liveSummary" class="live-summary"></div>
+      <div id="liveGrid" class="live-grid"></div>
+      <div id="liveEmpty" class="live-empty" style="display:none;">
+        No activity yet. Launch your accounts — each one's live checkout step appears here.
       </div>
     </div>
 

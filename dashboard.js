@@ -29,6 +29,7 @@ function navigateTo(name) {
     renderHomeStats();
     if (!_upcomingLoaded) loadUpcoming(false);
   }
+  if (name === "live") renderLivePage();
 }
 
 function renderHomeStats() {
@@ -453,6 +454,76 @@ function freshCheckoutId(url) {
 
 function refreshAllBadges() {
   accounts.forEach(a => { if (a.profileDir) updateStatusBadge(a.profileDir); });
+  renderLivePage();
+}
+
+// ── LIVE MONITOR page ─────────────────────────────────────────
+// A dedicated grid of every account's real-time checkout status. Fed by the
+// same liveStatuses that the per-row badges use, refreshed on every poll.
+function renderLivePage() {
+  const grid = $("liveGrid");
+  if (!grid) return;
+  const rows = accounts.filter(a => a.profileDir);
+  const empty = $("liveEmpty");
+
+  // Summary counts by coarse group.
+  const counts = { active: 0, waiting: 0, error: 0, done: 0, idle: 0 };
+  const groupOf = (code) => {
+    if (code === "error") return "error";
+    if (code === "win" || code === "success") return "done";
+    if (code === "waiting") return "waiting";
+    if (["checkout", "delivery", "payment", "submitting", "pending", "polling"].includes(code)) return "active";
+    return "idle";
+  };
+
+  let html = "";
+  let anyStatus = false;
+  rows.forEach(a => {
+    const s = liveStatuses[a.profileDir];
+    const code = s ? s.code : "";
+    const meta = STATUS_META[code] || { text: code ? code.toUpperCase() : "IDLE", color: "#6b6b7b" };
+    const attention = ATTENTION_CODES.has(code);
+    const name = (a.label && a.label.trim()) || a.profileDir;
+    if (s) { anyStatus = true; counts[groupOf(code)]++; } else { counts.idle++; }
+    const msg = s ? (s.message || "").replace(/\*\*/g, "") : "Not launched yet.";
+    let timeStr = "";
+    if (s && s.time) { const d = new Date(s.time); const p = n => String(n).padStart(2, "0"); timeStr = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`; }
+    html += `<div class="live-card${attention ? " attn" : ""}" style="color:${meta.color}" data-dir="${escapeHtml(a.profileDir)}">
+      <div class="lc-bar"></div>
+      <div class="lc-head">
+        <span class="lc-name" style="color:#fff">${escapeHtml(name)}</span>
+        <span class="lc-badge">${meta.text}</span>
+      </div>
+      <div class="lc-msg" style="color:var(--grey)">${escapeHtml(msg)}</div>
+      <div class="lc-time">${timeStr}${attention ? " · click to fix →" : ""}</div>
+    </div>`;
+  });
+
+  grid.innerHTML = html;
+  if (empty) empty.style.display = rows.length && anyStatus ? "none" : "";
+
+  // Wire clicks on error cards to jump to that profile.
+  grid.querySelectorAll(".live-card.attn").forEach(card => {
+    card.addEventListener("click", () => jumpToProfile(card.dataset.dir));
+  });
+
+  // Summary chips.
+  const sum = $("liveSummary");
+  if (sum) {
+    const chip = (n, label, color) => `<div class="live-chip" style="color:${color}"><span class="n">${n}</span><span class="l">${label}</span></div>`;
+    sum.innerHTML =
+      chip(counts.active, "RUNNING", "#8b5cf6") +
+      chip(counts.waiting, "WAITING", "#a855f7") +
+      chip(counts.done, "DONE", "#1db954") +
+      chip(counts.error, "NEEDS FIX", "#e03131") +
+      chip(counts.idle, "IDLE", "#6b6b7b");
+  }
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // Poll the shared status.json (via the native host) and merge into liveStatuses.
@@ -476,6 +547,7 @@ function startStatusPolling() {
       }
     }
     if (changed) refreshAllBadges();
+    else if (_currentPage === "live") renderLivePage(); // keep the monitor fresh
   };
   tick();
   statusPollTimer = setInterval(tick, 2500);
