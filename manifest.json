@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nike SNKRS Bot SG",
-  "version": "2.2",
+  "version": "2.3",
   "description": "Auto-selects size and submits SNKRS raffle entries on nike.com/sg. Multi-account dashboard launches each Chrome profile for the same drop.",
 
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyQ/0wvkw3roP0WQUPlySAxi1shygs758zBYr2843IyADFQLFafPzcyV9OfVjW8u4aB+DDl6Kf/NyegCVFPhKQWCAo3hHphRraEBoBCIh+efD5JvBhyMCU+VcnV2fqpauradDERiA/0PUslK1flp38KCn3m0ipj/LzuU8MKljjJImNPETUfUJB/ZL17GRT8WFMefb9gfwq3e4bpxz3RsX1BfE8GPHKp5YTysWA1g7MbyQGvGRMKXapFcxhw8OMDPXvbk3LD68KRnB34MEAmILV2usPXnaxVY2GG8UfgNQOPP6K1HFJ2D+sWiE63Pq5ok/JIoTLw/JbpB91UGQdDkF+QIDAQAB",

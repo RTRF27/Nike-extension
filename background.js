@@ -439,39 +439,45 @@ const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
 // LAUNCH_NOT_ACTIVE). Long enough to fill, short enough that Kasada stays valid.
 const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds
 
-function buildBootUrlFromConfig(cfg, acct) {
-  // Prefer this account's own product drop time (multi-product), else global.
-  const dropMs = acct.dropAtMs ||
-                 (cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN);
-  // Prefer a pre-generated DIRECT checkout URL — it lands straight on
-  // gs.nike.com checkout, skipping the launch page and size picker.
-  let url = (acct.checkoutUrl && acct.checkoutUrl.trim()) ? acct.checkoutUrl.trim() : null;
-  const isDirect = !!url;
-  if (!url) url = (cfg.multiProduct && acct.url) ? acct.url : ((cfg.drop && cfg.drop.url) || "");
-  if (!url) return null;
-  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-  const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
-  // Tell the gs.nike.com bootstrap when the drop is so it can hold the page and
-  // submit at the right moment. Only meaningful for the direct checkout path.
-  if (isDirect && !isNaN(dropMs)) params.push(`snkrsDrop=${dropMs}`);
-  const sep = url.includes("#") ? "&" : "#";
-  return `${url}${sep}${params.join("&")}`;
+// Returns the list of boot URLs to open for an account. Multi-product: one per
+// product target (each its own checkout URL + drop time). Single: one.
+function buildBootUrlsFromConfig(cfg, acct) {
+  const globalDrop = cfg.drop && cfg.drop.dropTimeISO ? Date.parse(cfg.drop.dropTimeISO) : NaN;
+  const mk = (rawUrl, dropMs) => {
+    if (!rawUrl) return null;
+    let url = rawUrl.trim();
+    if (!/^https?:\/\//i.test(url)) url = "https://" + url;
+    const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
+    const t = dropMs || (isNaN(globalDrop) ? 0 : globalDrop);
+    if (t) params.push(`snkrsDrop=${t}`);
+    const sep = url.includes("#") ? "&" : "#";
+    return `${url}${sep}${params.join("&")}`;
+  };
+  if (cfg.multiProduct && Array.isArray(acct.targets) && acct.targets.length) {
+    return acct.targets
+      .map(tg => mk((tg.checkoutUrl && tg.checkoutUrl.trim()) || tg.url, tg.dropAtMs || 0))
+      .filter(Boolean);
+  }
+  const one = mk((acct.checkoutUrl && acct.checkoutUrl.trim()) || (cfg.drop && cfg.drop.url) || "", acct.dropAtMs || 0);
+  return one ? [one] : [];
 }
 
 async function autoDashLaunch() {
   const data = await chrome.storage.local.get(DASH_LAUNCH_STORE);
   const cfg = data[DASH_LAUNCH_STORE];
   if (!cfg) return;
-  const autoAccts = (cfg.accounts || []).filter(a => a.autoLaunch && a.profileDir && a.size);
+  const autoAccts = (cfg.accounts || []).filter(a =>
+    a.autoLaunch && a.profileDir && (a.size || (a.targets || []).length));
   if (!autoAccts.length) return;
   // One-shot — clear so it doesn't refire on restart
   await chrome.storage.local.remove(DASH_LAUNCH_STORE);
   sendLog(`⏰ Auto-launch time reached — opening ${autoAccts.length} account(s).`);
   for (const acct of autoAccts) {
-    const url = buildBootUrlFromConfig(cfg, acct);
-    if (!url) continue;
-    await nativeSend({ cmd: "launch", profileDir: acct.profileDir, url });
-    await new Promise(r => setTimeout(r, 500));
+    const urls = buildBootUrlsFromConfig(cfg, acct);
+    for (const url of urls) {
+      await nativeSend({ cmd: "launch", profileDir: acct.profileDir, url });
+      await new Promise(r => setTimeout(r, 400)); // stagger tabs in the same profile
+    }
   }
 }
 
@@ -786,7 +792,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "arm_drop_launch") {
     const cfg = msg.config;
     chrome.alarms.clear(DASH_LAUNCH_ALARM, async () => {
-      const autoAccts = (cfg?.accounts || []).filter(a => a.autoLaunch && a.profileDir && a.size);
+      const autoAccts = (cfg?.accounts || []).filter(a =>
+        a.autoLaunch && a.profileDir && (a.size || (a.targets || []).length));
       const timeISO   = cfg?.drop?.dropTimeISO;
       // Only auto-OPEN when the user opted in. With auto-open off (the default),
       // the user launches the pages themselves — the drop time still gates SUBMIT

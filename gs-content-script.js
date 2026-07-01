@@ -643,8 +643,15 @@ async function runCheckoutFlow() {
   // stamped in by the gs bootstrap from the schedule; if it's absent we submit
   // immediately (manual/no-schedule behaviour unchanged).
   try {
-    const sres = await chrome.storage.sync.get(SETTINGS_KEY);
-    const dropAt = Number((sres[SETTINGS_KEY] || {}).dropAtMs) || 0;
+    // Per-TAB drop time (multi-product: each tab in a profile has its own),
+    // written to sessionStorage by the gs bootstrap; fall back to the shared
+    // per-profile setting for the single-product case.
+    let dropAt = 0;
+    try { dropAt = Number(sessionStorage.getItem("snkrsDropAt")) || 0; } catch (e) {}
+    if (!dropAt) {
+      const sres = await chrome.storage.sync.get(SETTINGS_KEY);
+      dropAt = Number((sres[SETTINGS_KEY] || {}).dropAtMs) || 0;
+    }
     if (dropAt && Date.now() < dropAt) {
       logBG(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.`);
       while (Date.now() < dropAt) {

@@ -343,30 +343,28 @@ async function randomAssign() {
     if (prods.some(p => !(p.sizePool || []).length)) {
       flashTemp(msg, "Every product needs at least one size in its range.", "#fa5400"); return;
     }
-    // Spread accounts evenly across products, in random order.
-    const order = shuffle(accounts.map((_, i) => i));
-    const groups = prods.map(() => []);
-    order.forEach((acctIdx, k) => groups[k % prods.length].push(acctIdx));
-    groups.forEach((acctIdxs, pIdx) => {
-      const p = prods[pIdx];
-      const sizes = dealFromPool(p.sizePool, acctIdxs.length);
-      acctIdxs.forEach((ai, k) => {
-        const acct = accounts[ai];
-        acct.url = (p.url || "").trim();
-        acct.keyword = (p.keyword || "").trim();
-        const { size, sizeType } = parseSizeValue(sizes[k]);
-        acct.size = size; acct.sizeType = sizeType;
+    // EVERY account cops EVERY product — one checkout tab per product, each with
+    // its own size dealt from that product's pool (no repeats across accounts).
+    accounts.forEach(a => { a.targets = []; });
+    prods.forEach(p => {
+      const sizes = dealFromPool(p.sizePool, accounts.length);
+      accounts.forEach((acct, i) => {
+        const { size, sizeType } = parseSizeValue(sizes[i]);
+        acct.targets.push({
+          productId: p.id, url: (p.url || "").trim(), keyword: (p.keyword || "").trim(),
+          size, sizeType, checkoutUrl: "", dropAtMs: 0,
+        });
       });
     });
     renderAccounts();
     await saveAll(true);
-    flashTemp(msg, `🎲 Assigned ${accounts.length} accounts across ${prods.length} products.`, "#1db954", 4000);
-    await assignCheckoutUrls(msg); // build direct checkout URLs for the new sizes
+    flashTemp(msg, `🎲 Each account will cop all ${prods.length} products (${prods.length} tabs each).`, "#1db954", 4000);
+    await assignCheckoutUrls(msg); // build a direct checkout URL per product
   } else {
     if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above.", "#fa5400"); return; }
     const sizes = dealFromPool(singleSizePool, accounts.length);
     accounts.forEach((acct, i) => {
-      acct.url = ""; acct.keyword = "";
+      acct.url = ""; acct.keyword = ""; acct.targets = [];
       const { size, sizeType } = parseSizeValue(sizes[i]);
       acct.size = size; acct.sizeType = sizeType;
     });
@@ -1417,16 +1415,17 @@ function buildAccountRow(acct) {
   cardSel.dataset.acctId = acct.id;
   fillCardSelect(cardSel, acct.cardId);
 
-  // Show which product this account is assigned to (multi-product mode), and a
-  // ⚡ marker when a direct checkout URL is ready (skips the size screen).
-  const directTag = acct.checkoutUrl ? "⚡ direct checkout" : "";
-  if (multiProduct && acct.url) {
+  // Show what this account will open. Multi-product: one tab per product with
+  // its size; single-product: a ⚡ marker when a direct checkout URL is ready.
+  if (multiProduct && Array.isArray(acct.targets) && acct.targets.length) {
+    const built = acct.targets.filter(t => t.checkoutUrl).length;
+    const parts = acct.targets.map(t => `${t.keyword || shortUrl(t.url)}${t.size ? " " + t.size : ""}`);
     assignedEl.style.display = "";
-    assignedEl.textContent = `→ ${acct.keyword ? acct.keyword + " · " : ""}${shortUrl(acct.url)}` +
-      (directTag ? `  ·  ${directTag}` : "");
-  } else if (directTag) {
+    assignedEl.textContent = `→ ${acct.targets.length} tab(s): ${parts.join(", ")}` +
+      (built ? `  ·  ⚡ ${built} direct` : "");
+  } else if (acct.checkoutUrl) {
     assignedEl.style.display = "";
-    assignedEl.textContent = directTag;
+    assignedEl.textContent = "⚡ direct checkout";
   } else {
     assignedEl.style.display = "none";
   }
@@ -1573,6 +1572,12 @@ function buildConfig() {
       keyword: a.keyword || "",
       checkoutUrl: a.checkoutUrl || "",   // pre-built direct checkout URL (may be "")
       dropAtMs: a.dropAtMs || 0,          // this account's product drop time (ms)
+      // Multi-product: one launch target per product (checkoutUrl + size + time).
+      targets: Array.isArray(a.targets) ? a.targets.map(t => ({
+        productId: t.productId || "", url: t.url || "", keyword: t.keyword || "",
+        size: t.size || "", sizeType: t.sizeType || "footwear",
+        checkoutUrl: t.checkoutUrl || "", dropAtMs: t.dropAtMs || 0,
+      })) : [],
       autoLaunch: !!a.autoLaunch,
       cardId: a.cardId || "",
       card: resolveCard(a.cardId),   // resolved card object the bot fills
@@ -1725,37 +1730,54 @@ async function fetchDropTimeFromNike() {
 // fall back to the normal launch-page + size-selection flow at launch time.
 async function assignCheckoutUrls(msgEl) {
   launchCache = {};
-  const eligible = accounts.filter(a => a.size && skuForAccount(a));
-  if (!eligible.length) {
-    if (msgEl) flashTemp(msgEl, "Assign sizes and set a SKU first to build direct URLs.", "#fa5400");
-    return;
-  }
-  if (msgEl) flash(msgEl, "Resolving launch from Nike…", "#888");
+  if (msgEl) flash(msgEl, "Resolving launch(es) from Nike…", "#888");
 
   let ok = 0, fail = 0, notLaunch = 0; const errs = new Set();
   let nikeDropISO = "";
-  for (const acct of accounts) {
-    acct.checkoutUrl = "";
-    acct.dropAtMs = 0;
-    const sku = skuForAccount(acct);
-    if (!acct.size || !sku) continue;
+
+  // Resolve one product SKU into a checkout URL + drop time for a given size.
+  // Returns { checkoutUrl, dropAtMs, dropISO } or null (records the error).
+  async function resolveOne(sku, size) {
+    if (!sku || !size) return null;
     let d;
     try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
     if (!d || !d.ok) {
-      fail++;
       const er = (d && d.error) || "";
       if (er) errs.add(er);
       if (/not an upcoming launch/i.test(er)) notLaunch++;
-      continue;
+      return null;
     }
-    if (d.dropTimeISO && !nikeDropISO) nikeDropISO = d.dropTimeISO;
-    // Per-account drop time (each product in a multi-product drop can differ).
-    if (d.dropTimeISO) { const t = Date.parse(d.dropTimeISO); if (!isNaN(t)) acct.dropAtMs = t; }
-    const match = (d.skus || []).find(s => String(s.nikeSize) === String(acct.size));
-    if (!match) { fail++; errs.add(`size ${acct.size} not offered for ${sku}`); continue; }
-    acct.checkoutUrl = buildDirectCheckoutUrl(d, match.id);
-    ok++;
+    const match = (d.skus || []).find(s => String(s.nikeSize) === String(size));
+    if (!match) { errs.add(`size ${size} not offered for ${sku}`); return null; }
+    const dropAtMs = d.dropTimeISO ? Date.parse(d.dropTimeISO) : 0;
+    return { checkoutUrl: buildDirectCheckoutUrl(d, match.id), dropAtMs: isNaN(dropAtMs) ? 0 : dropAtMs, dropISO: d.dropTimeISO || "" };
   }
+
+  if (multiProduct) {
+    // Each account has a target per product — build a checkout URL for each.
+    for (const acct of accounts) {
+      for (const t of (acct.targets || [])) {
+        t.checkoutUrl = ""; t.dropAtMs = 0;
+        const r = await resolveOne((t.keyword || "").toUpperCase(), t.size);
+        if (!r) { fail++; continue; }
+        t.checkoutUrl = r.checkoutUrl; t.dropAtMs = r.dropAtMs;
+        if (r.dropISO && !nikeDropISO) nikeDropISO = r.dropISO;
+        ok++;
+      }
+    }
+  } else {
+    for (const acct of accounts) {
+      acct.checkoutUrl = ""; acct.dropAtMs = 0; acct.targets = [];
+      const sku = skuForAccount(acct);
+      if (!acct.size || !sku) continue;
+      const r = await resolveOne(sku, acct.size);
+      if (!r) { fail++; continue; }
+      acct.checkoutUrl = r.checkoutUrl; acct.dropAtMs = r.dropAtMs;
+      if (r.dropISO && !nikeDropISO) nikeDropISO = r.dropISO;
+      ok++;
+    }
+  }
+
   // Auto-fill the DROP TIME from Nike so SUBMIT fires exactly when the site says.
   if (nikeDropISO && setDropTimeField(nikeDropISO)) {
     const dtEl = $("dropTimeMsg");
@@ -1765,12 +1787,11 @@ async function assignCheckoutUrls(msgEl) {
   await saveAll(true);
   if (msgEl) {
     if (ok && !fail) {
-      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches will skip the size screen.`, "#1db954", 6000);
+      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches skip the size screen.`, "#1db954", 6000);
     } else if (ok) {
       flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
     } else if (notLaunch) {
-      // Most common, non-alarming case: the product simply isn't a SNKRS draw.
-      flashTemp(msgEl, `Sizes assigned ✓ — direct checkout skipped: this isn't a SNKRS draw/launch product, so accounts will use the normal launch page + size selection (works fine).`, "#f0c070", 9000);
+      flashTemp(msgEl, `Sizes assigned ✓ — direct checkout skipped: not a SNKRS draw/launch product, so the normal launch page + size selection is used.`, "#f0c070", 9000);
     } else {
       flashTemp(msgEl, `Sizes assigned ✓ — couldn't build direct URLs, using launch-page fallback. (${[...errs][0] || ""})`, "#fa5400", 9000);
     }
@@ -1784,18 +1805,32 @@ function resolvedUrl(acct) {
   return (multiProduct && acct.url) ? acct.url.trim() : $("dropUrl").value.trim();
 }
 
-function bootUrlFor(acct) {
-  // Prefer the pre-built direct checkout URL (skips launch page + size pick).
-  let url = (acct.checkoutUrl && acct.checkoutUrl.trim()) ? acct.checkoutUrl.trim() : "";
-  const isDirect = !!url;
-  if (!url) url = resolvedUrl(acct);
+// The list of pages to open for an account. Multi-product: one per product
+// (each its own checkout URL + size + drop time). Single: one.
+function launchTargetsFor(acct) {
+  if (multiProduct && Array.isArray(acct.targets) && acct.targets.length) {
+    return acct.targets
+      .filter(t => (t.checkoutUrl && t.checkoutUrl.trim()) || (t.url && t.url.trim()))
+      .map(t => ({
+        checkoutUrl: (t.checkoutUrl || "").trim(),
+        url: (t.url || "").trim(),
+        dropAtMs: t.dropAtMs || 0,
+        size: t.size || "",
+      }));
+  }
+  // Single-product: one target from the account fields.
+  const url = (acct.checkoutUrl && acct.checkoutUrl.trim()) || resolvedUrl(acct);
+  if (!url) return [];
+  return [{ checkoutUrl: (acct.checkoutUrl || "").trim(), url: resolvedUrl(acct), dropAtMs: acct.dropAtMs || 0, size: acct.size || "" }];
+}
+
+// Build the boot URL for one launch target.
+function bootUrlForTarget(acct, target) {
+  let url = target.checkoutUrl || target.url || "";
   if (!url) return null;
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
-  // Carry the drop time so the account holds SUBMIT until go-live — on EVERY
-  // launch (manual included), independent of the auto-open toggle. Prefer this
-  // account's own product drop time (multi-product), else the global field.
-  let t = acct.dropAtMs || 0;
+  let t = target.dropAtMs || 0;
   if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
   if (t) params.push(`snkrsDrop=${t}`);
   const sep = url.includes("#") ? "&" : "#";
@@ -1803,18 +1838,14 @@ function bootUrlFor(acct) {
 }
 
 function validateForLaunch(acct, msgEl) {
-  if (!resolvedUrl(acct)) {
-    flashTemp(msgEl, multiProduct
-      ? "This account has no product URL — run 🎲 assign, or set one."
-      : "Set the Drop URL first (left panel).", "#fa5400");
-    return false;
-  }
   if (!acct.profileDir) {
     flashTemp(msgEl, "Pick a Chrome profile for this account.", "#fa5400");
     return false;
   }
-  if (!acct.size) {
-    flashTemp(msgEl, "Pick a size for this account.", "#fa5400");
+  if (!launchTargetsFor(acct).length) {
+    flashTemp(msgEl, multiProduct
+      ? "No products assigned — run 🎲 RANDOMLY ASSIGN then ⚡ BUILD DIRECT URLS."
+      : "Set the Drop URL / size first.", "#fa5400");
     return false;
   }
   return true;
@@ -1823,15 +1854,21 @@ function validateForLaunch(acct, msgEl) {
 async function launchAccount(acct, msgEl) {
   if (!validateForLaunch(acct, msgEl)) return;
   await saveAll(true); // make sure the shared file is current before boot
-  const url = bootUrlFor(acct);
-  flash(msgEl, "Opening profile…", "#888");
-  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
-  if (resp.ok) {
-    flashTemp(msgEl, `🚀 Launched “${acct.profileDir}”.`, "#1db954");
-  } else if (resp.hostMissing) {
-    flashTemp(msgEl, "Launcher offline — use ⌘ copy cmd, or install the host.", "#fa5400", 5000);
+  const targets = launchTargetsFor(acct);
+  flash(msgEl, `Opening ${targets.length} tab(s)…`, "#888");
+  let okN = 0, lastErr = "";
+  for (const target of targets) {
+    const url = bootUrlForTarget(acct, target);
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
+    if (resp.ok) okN++; else { lastErr = resp.error || (resp.hostMissing ? "launcher offline" : "unknown"); }
+    await new Promise(r => setTimeout(r, 350)); // stagger tabs in the same profile
+  }
+  if (okN === targets.length) {
+    flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${okN} tab(s).`, "#1db954");
+  } else if (okN > 0) {
+    flashTemp(msgEl, `Opened ${okN}/${targets.length} tab(s). Last error: ${lastErr}`, "#f0c070", 5000);
   } else {
-    flashTemp(msgEl, "Launch failed: " + resp.error, "#e03131", 5000);
+    flashTemp(msgEl, "Launch failed: " + lastErr, "#e03131", 5000);
   }
 }
 
@@ -1849,27 +1886,31 @@ async function launchAll() {
   const config = await saveAll(true);
   await appendHistory(config);
 
-  const isConfigured = (a) => a.size && resolvedUrl(a);
-  const configured   = all.filter(isConfigured);
-  const warmCount    = all.length - configured.length;
-
   flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
-  let okCount = 0, lastErr = "";
+  let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
   for (const acct of all) {
-    const url = isConfigured(acct) ? bootUrlFor(acct) : WARMUP_URL;
-    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url });
-    if (resp.ok) okCount++;
-    else lastErr = resp.error || "unknown";
-    await new Promise(r => setTimeout(r, 400)); // stagger so Chrome keeps up
+    const targets = launchTargetsFor(acct);
+    if (!targets.length) {
+      // Not configured — open a warm-up tab (idle, just warms Kasada/cookies).
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL });
+      if (resp.ok) { profOk++; warmCount++; } else lastErr = resp.error || "unknown";
+      await new Promise(r => setTimeout(r, 400));
+      continue;
+    }
+    let anyOk = false;
+    for (const target of targets) {
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: bootUrlForTarget(acct, target) });
+      if (resp.ok) { tabOk++; anyOk = true; } else lastErr = resp.error || "unknown";
+      await new Promise(r => setTimeout(r, 350)); // stagger tabs in the same profile
+    }
+    if (anyOk) profOk++;
   }
 
-  if (okCount === all.length) {
-    const tail = warmCount
-      ? ` ${configured.length} went to the drop; ${warmCount} opened to warm up (add their size/URL to run the bot).`
-      : " All went straight to the drop.";
-    flashTemp($("statusMsg"), `🚀 Launched ${okCount} profiles.${tail}`, "#1db954", 8000);
-  } else if (okCount > 0) {
-    flashTemp($("statusMsg"), `Launched ${okCount}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
+  if (profOk === all.length) {
+    const tail = warmCount ? ` (${warmCount} warm-up)` : "";
+    flashTemp($("statusMsg"), `🚀 Launched ${profOk} profiles · ${tabOk} product tab(s)${tail}. Each holds SUBMIT until drop.`, "#1db954", 8000);
+  } else if (profOk > 0) {
+    flashTemp($("statusMsg"), `Launched ${profOk}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
   } else {
     flashTemp($("statusMsg"), `Couldn't launch. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
   }
@@ -1878,10 +1919,13 @@ async function launchAll() {
 // Fallback when the host isn't installed: copy a paste-ready command.
 function copyLaunchCommand(acct, msgEl) {
   if (!acct.profileDir) { flashTemp(msgEl, "Pick a profile first.", "#fa5400"); return; }
-  const url = bootUrlFor(acct) || "https://www.nike.com/sg/launch/";
-  const cmd = `chrome --profile-directory="${acct.profileDir}" "${url}"`;
+  const targets = launchTargetsFor(acct);
+  const urls = targets.length
+    ? targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean)
+    : ["https://www.nike.com/sg/launch/"];
+  const cmd = urls.map(u => `chrome --profile-directory="${acct.profileDir}" "${u}"`).join(" && ");
   navigator.clipboard.writeText(cmd).then(
-    () => flashTemp(msgEl, "📋 Command copied — paste into a terminal.", "#1db954"),
+    () => flashTemp(msgEl, `📋 ${urls.length} command(s) copied — paste into a terminal.`, "#1db954"),
     () => flashTemp(msgEl, "Copy failed.", "#e03131")
   );
 }
@@ -1965,6 +2009,7 @@ function applyConfigToUI(cfg) {
     keyword: a.keyword || "",
     checkoutUrl: a.checkoutUrl || "",
     dropAtMs: a.dropAtMs || 0,
+    targets: Array.isArray(a.targets) ? a.targets.map(t => ({ ...t })) : [],
     autoLaunch: !!a.autoLaunch,
     cardId: a.cardId || "",
   }));

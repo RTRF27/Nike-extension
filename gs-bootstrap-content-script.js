@@ -100,6 +100,11 @@
     return; // don't run the normal gate/flow on the error page
   }
 
+  // Per-TAB drop time (multi-product opens several tabs in one profile, each
+  // with its own drop time — sessionStorage is isolated per tab, unlike the
+  // shared chrome.storage settings). gs-content-script reads this first.
+  if (!isNaN(dropMs)) { try { sessionStorage.setItem("snkrsDropAt", String(dropMs)); } catch (e) {} }
+
   // Save the full boot URL (with markers) so an error-page retry can restore it.
   if (readParam("snkrsBoot")) {
     try { sessionStorage.setItem("snkrsBootUrl", location.href); } catch (e) {}
