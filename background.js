@@ -283,7 +283,13 @@ async function resolveLaunchData(sku, country) {
     const name = (pi.productContent && pi.productContent.fullTitle) ||
                  (obj.publishedContent && obj.publishedContent.properties &&
                   obj.publishedContent.properties.title) || sku;
-    return { launchId, slug, skus, name };
+    // Nike's authoritative drop time: the launch entry-open date (draws) or the
+    // commerce start (LEO/buy). This is what the website shows as "Available …".
+    const lv = pi.launchView || {};
+    const dropTimeISO = lv.startEntryDate ||
+                        (pi.merchProduct && pi.merchProduct.commerceStartDate) ||
+                        lv.stopEntryDate || "";
+    return { launchId, slug, skus, name, dropTimeISO };
   }
 
   let lastStatus = 0, netErr = "", partial = null;
@@ -301,7 +307,7 @@ async function resolveLaunchData(sku, country) {
     // Accept only a COMPLETE record. If an endpoint returns the product but
     // without launch fields (e.g. v2), remember it and keep trying others (v3).
     if (ex.launchId && ex.slug && ex.skus.length) {
-      return { ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug, skus: ex.skus, name: ex.name };
+      return { ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug, skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO };
     }
     partial = partial || ex;
   }
@@ -774,9 +780,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.alarms.clear(DASH_LAUNCH_ALARM, async () => {
       const autoAccts = (cfg?.accounts || []).filter(a => a.autoLaunch && a.profileDir && a.size);
       const timeISO   = cfg?.drop?.dropTimeISO;
-      if (!timeISO || !autoAccts.length) {
+      // Only auto-OPEN when the user opted in. With auto-open off (the default),
+      // the user launches the pages themselves — the drop time still gates SUBMIT
+      // via the URL marker, so we simply don't arm the open-alarm here.
+      const autoOpen  = cfg?.drop?.autoOpen ?? cfg?.drop?.scheduleEnabled ?? false;
+      if (!autoOpen || !timeISO || !autoAccts.length) {
         await chrome.storage.local.remove(DASH_LAUNCH_STORE);
-        sendResponse({ ok: true, armed: false });
+        sendResponse({ ok: true, armed: false, reason: autoOpen ? undefined : "auto-open off — launch manually" });
         return;
       }
       const dropMs = Date.parse(timeISO);

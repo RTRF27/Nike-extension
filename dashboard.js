@@ -1131,7 +1131,6 @@ function startCountdown() {
   function tick() {
     const el = $("dropCountdown");
     if (!el) return;
-    if (!scheduleIsEnabled()) { el.style.display = "none"; return; }
     const v = $("dropTime") && $("dropTime").value;
     if (!v) { el.style.display = "none"; return; }
     const target = new Date(v).getTime();
@@ -1510,12 +1509,29 @@ function updateProfileSourceNote() {
 // ── Build config object from the UI ───────────────────────────
 function scheduleIsEnabled() { return !!($("scheduleEnabled") && $("scheduleEnabled").checked); }
 
-function dropTimeISO() {
-  if (!scheduleIsEnabled()) return "";
+// The DROP TIME field value as ISO — ALWAYS, regardless of the auto-open toggle.
+// This is the moment accounts submit; it's carried on every launch (manual too).
+function dropTimeFieldISO() {
   const v = $("dropTime") && $("dropTime").value;
   if (!v) return "";
   const d = new Date(v);
   return isNaN(d.getTime()) ? "" : d.toISOString();
+}
+// Only returns a time when AUTO-OPEN is enabled — used to arm the auto-open alarm.
+function dropTimeISO() {
+  return scheduleIsEnabled() ? dropTimeFieldISO() : "";
+}
+
+// Set the DROP TIME field from an ISO string (converts to the datetime-local
+// format the input expects, in local time).
+function setDropTimeField(iso) {
+  if (!iso) return false;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return false;
+  const p = n => String(n).padStart(2, "0");
+  const local = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  if ($("dropTime")) { $("dropTime").value = local; startCountdown(); }
+  return true;
 }
 
 function buildConfig() {
@@ -1523,7 +1539,10 @@ function buildConfig() {
     drop: {
       url: $("dropUrl").value.trim(),
       keyword: $("dropKeyword").value.trim(),
-      dropTimeISO: dropTimeISO(),
+      // Submit-gate time — always the field value (persists even with auto-open off).
+      dropTimeISO: dropTimeFieldISO(),
+      // Whether to ALSO auto-open accounts before the drop (the ⏰ toggle).
+      autoOpen: scheduleIsEnabled(),
       scheduleEnabled: scheduleIsEnabled(),
       sizePool: singleSizePool.slice(),
     },
@@ -1682,6 +1701,24 @@ async function resolveLaunch(sku) {
   return d;
 }
 
+// Look up the drop/release time from Nike for the current SKU and fill the
+// DROP TIME field, so SUBMIT fires exactly when the website says.
+async function fetchDropTimeFromNike() {
+  const msg = $("dropTimeMsg");
+  const sku = ($("dropKeyword").value || "").trim().toUpperCase() ||
+              (accounts.map(skuForAccount).find(Boolean) || "");
+  if (!sku) { if (msg) { msg.style.color = "#fa5400"; msg.textContent = "Set the SKU first."; } return; }
+  if (msg) { msg.style.color = "#888"; msg.textContent = "Fetching drop time from Nike…"; }
+  let d;
+  try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
+  if (!d || !d.ok) { if (msg) { msg.style.color = "#fa5400"; msg.textContent = `Couldn't fetch: ${(d && d.error) || "unknown"}`; } return; }
+  if (!d.dropTimeISO) { if (msg) { msg.style.color = "#fa5400"; msg.textContent = "Nike didn't return a drop time for this SKU."; } return; }
+  if (setDropTimeField(d.dropTimeISO)) {
+    if (msg) { msg.style.color = "var(--green)"; msg.textContent = `⏱ Drop time set: ${new Date(d.dropTimeISO).toLocaleString()}`; }
+    saveAll(true);
+  }
+}
+
 // Build a unique, size-specific direct checkout URL for every account that has
 // a size + SKU. Accounts that can't be resolved keep an empty checkoutUrl and
 // fall back to the normal launch-page + size-selection flow at launch time.
@@ -1695,6 +1732,7 @@ async function assignCheckoutUrls(msgEl) {
   if (msgEl) flash(msgEl, "Resolving launch from Nike…", "#888");
 
   let ok = 0, fail = 0, notLaunch = 0; const errs = new Set();
+  let nikeDropISO = "";
   for (const acct of accounts) {
     acct.checkoutUrl = "";
     const sku = skuForAccount(acct);
@@ -1708,10 +1746,16 @@ async function assignCheckoutUrls(msgEl) {
       if (/not an upcoming launch/i.test(er)) notLaunch++;
       continue;
     }
+    if (d.dropTimeISO && !nikeDropISO) nikeDropISO = d.dropTimeISO;
     const match = (d.skus || []).find(s => String(s.nikeSize) === String(acct.size));
     if (!match) { fail++; errs.add(`size ${acct.size} not offered for ${sku}`); continue; }
     acct.checkoutUrl = buildDirectCheckoutUrl(d, match.id);
     ok++;
+  }
+  // Auto-fill the DROP TIME from Nike so SUBMIT fires exactly when the site says.
+  if (nikeDropISO && setDropTimeField(nikeDropISO)) {
+    const dtEl = $("dropTimeMsg");
+    if (dtEl) { dtEl.style.color = "var(--green)"; dtEl.textContent = `⏱ Drop time set from Nike: ${new Date(nikeDropISO).toLocaleString()}`; }
   }
   renderAccounts();
   await saveAll(true);
@@ -1744,13 +1788,12 @@ function bootUrlFor(acct) {
   if (!url) return null;
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
-  // For direct checkout, pass the drop time so the gs bootstrap holds the page
-  // and submits at go-live instead of immediately.
-  if (isDirect) {
-    const iso = dropTimeISO();
-    const t = iso ? Date.parse(iso) : NaN;
-    if (!isNaN(t)) params.push(`snkrsDrop=${t}`);
-  }
+  // Carry the drop time so the account holds SUBMIT until go-live — on EVERY
+  // launch (manual included), independent of the auto-open toggle. Works for the
+  // direct checkout path AND the launch-page fallback.
+  const iso = dropTimeFieldISO();
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!isNaN(t)) params.push(`snkrsDrop=${t}`);
   const sep = url.includes("#") ? "&" : "#";
   return `${url}${sep}${params.join("&")}`;
 }
@@ -1870,14 +1913,13 @@ function applyConfigToUI(cfg) {
   const drop = cfg.drop || {}, opts = cfg.options || {};
   $("dropUrl").value = drop.url || "";
   $("dropKeyword").value = drop.keyword || "";
-  const schedOn = !!drop.scheduleEnabled;
-  $("scheduleEnabled").checked = schedOn;
-  $("schedulePanel").style.display = schedOn ? "" : "none";
+  // Auto-open toggle (schedulePanel is now the toggle row itself — always visible).
+  $("scheduleEnabled").checked = !!(drop.autoOpen ?? drop.scheduleEnabled);
   if (drop.dropTimeISO) {
     const d = new Date(drop.dropTimeISO);
     if (!isNaN(d.getTime())) {
       const pad = (n) => String(n).padStart(2, "0");
-      $("dropTime").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      $("dropTime").value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
   }
   // Card profiles (only replace from config if it actually carries them,
@@ -2088,17 +2130,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveAll(true).then(() => flashTemp($("statusMsg"), "Unarm All — scheduler cleared.", "#888", 3000));
   });
   $("scheduleEnabled").addEventListener("change", () => {
-    const on = $("scheduleEnabled").checked;
-    $("schedulePanel").style.display = on ? "" : "none";
-    if (on) {
-      startCountdown();
-    } else {
-      // Hide countdown and disarm alarm immediately
-      const el = $("dropCountdown"); if (el) el.style.display = "none";
-      chrome.runtime.sendMessage({ type: "arm_drop_launch", config: buildConfig() }, updateScheduleStatus);
-    }
+    // Toggle only controls AUTO-OPEN; the drop time + countdown stay either way.
+    startCountdown();
+    chrome.runtime.sendMessage({ type: "arm_drop_launch", config: buildConfig() }, updateScheduleStatus);
+    saveAll(true);
   });
-  $("dropTime").addEventListener("input", startCountdown);
+  $("dropTime").addEventListener("input", () => { startCountdown(); saveAll(true); });
+  $("dropTime").addEventListener("change", () => { startCountdown(); saveAll(true); });
+  const _fdt = $("fetchDropTimeBtn");
+  if (_fdt) _fdt.addEventListener("click", fetchDropTimeFromNike);
   $("multiProductToggle").addEventListener("change", () => {
     multiProduct = $("multiProductToggle").checked;
     applyMultiUI();

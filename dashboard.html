@@ -215,22 +215,24 @@
         <div class="col">
           <section class="card">
             <div class="card-head">
-              <h2>SCHEDULE</h2>
-              <span class="card-tag">OPTIONAL</span>
+              <h2>DROP TIME</h2>
+              <span class="card-tag">SUBMIT TIMING</span>
             </div>
-            <div class="toggle" style="border:none; padding:0;">
+            <label class="lbl" for="dropTime">Release time <span class="muted">— accounts SUBMIT exactly at this moment</span></label>
+            <input type="datetime-local" id="dropTime" class="inp" step="1">
+            <button id="fetchDropTimeBtn" class="btn btn-dark" style="width:100%; margin-top:8px;">🔄 GET DROP TIME FROM NIKE</button>
+            <p class="hint" style="margin:6px 0 0;">Open the pages yourself early (LAUNCH ALL) and let them sit — each account waits and clicks SUBMIT ORDER right on this time. Times auto-fill when you build direct URLs.</p>
+            <div id="dropTimeMsg" class="hint" style="margin-top:6px;"></div>
+            <div id="dropCountdown" class="drop-countdown" style="display:none; margin-top:8px;"></div>
+
+            <div id="schedulePanel" class="toggle" style="margin-top:14px;">
               <div>
-                <div class="t-label">⏰ Scheduled auto-launch</div>
-                <div class="t-hint">Opens ⏰-marked accounts automatically at drop time. Leave off to launch manually.</div>
+                <div class="t-label">⏰ Also auto-open accounts</div>
+                <div class="t-hint">Optional. Auto-opens ⏰-armed accounts ~30s before drop. Leave OFF to open them yourself.</div>
               </div>
               <label class="switch"><input type="checkbox" id="scheduleEnabled"><span class="track"></span></label>
             </div>
-            <div id="schedulePanel" style="display:none; margin-top:12px;">
-              <label class="lbl" for="dropTime">Open tabs at</label>
-              <input type="datetime-local" id="dropTime" class="inp">
-              <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
-              <div id="dropCountdown" class="drop-countdown" style="display:none;"></div>
-            </div>
+            <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
           </section>
 
           <section class="card">
