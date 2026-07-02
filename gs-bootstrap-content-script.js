@@ -139,33 +139,14 @@
     });
   }
 
-  const bootUrl = (() => { try { return sessionStorage.getItem("snkrsBootUrl"); } catch (e) { return null; } })();
-
-  if (profileDir && !isNaN(dropMs) && now < dropMs - PREP_LEAD_MS) {
-    // Launched EARLY. Don't sit on a stale checkout page (Kasada goes stale, and
-    // Nike may bounce an early checkout). Hold the checkout script, and ask the
-    // background to reload this tab (fresh checkoutId → fresh Kasada) ~PREP
-    // before the drop. We use a BACKGROUND ALARM rather than an in-page timer so
-    // it survives Chrome's Memory Saver discarding the idle tab over a long wait.
-    hold();
-    applySettings();
-    const bootUrlNow = bootUrl || location.href;
-    const wait = dropMs - PREP_LEAD_MS - now;
-    logBG(`🕒 Direct checkout armed for "${profileDir}" — holding ${Math.round(wait / 1000)}s; background alarm will reload it ~${PREP_LEAD_MS / 1000}s before drop (survives the tab being put to sleep).`);
-    const keep = setInterval(hold, 60000); // keep gs-content held while the tab is alive
-    try {
-      chrome.runtime.sendMessage({ type: "arm_reload", dropAtMs: dropMs, prepMs: PREP_LEAD_MS, bootUrl: bootUrlNow });
-    } catch (e) {
-      // Background unreachable — fall back to an in-page timer (works if the tab stays awake).
-      setTimeout(() => { clearInterval(keep); release(); location.href = freshCheckoutId(bootUrlNow); }, wait);
-    }
-  } else {
-    // We're inside the prep window (or at/after drop, or no drop time) — this is
-    // a fresh page. Fill now; gs-content-script holds SUBMIT until dropAtMs.
-    applySettings();
-    if (profileDir) {
-      const secs = !isNaN(dropMs) ? Math.max(0, Math.round((dropMs - now) / 1000)) : 0;
-      logBG(`⚡ Direct checkout priming for "${profileDir}" — filling now, submit gated to drop${secs ? ` (${secs}s away)` : ""}.`);
-    }
+  // Fill EVERYTHING now: gs-content-script confirms DELIVERY and PAYMENT (each
+  // gets Nike's green tick) and gets SUBMIT ready — then it HOLDS the SUBMIT
+  // click until the drop time. So you can visually see both sections ticked and
+  // the order primed, just waiting to fire at go-live. We do NOT suppress or
+  // reload the tab; the drop-time gate lives in gs-content-script.
+  applySettings();
+  if (profileDir) {
+    const secs = !isNaN(dropMs) ? Math.max(0, Math.round((dropMs - now) / 1000)) : 0;
+    logBG(`⚡ Priming checkout for "${profileDir}" — filling delivery + card now (green ticks); SUBMIT held until drop${secs ? ` (${secs}s away)` : ""}.`);
   }
 })();
