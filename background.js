@@ -859,6 +859,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // Manual LAUNCH ALL was used — DISARM every automatic opener so nothing
+  // opens a second set of tabs at drop time (which caused duplicate submits).
+  if (msg.type === "cancel_dash_launch") {
+    (async () => {
+      await chrome.alarms.clear(DASH_LAUNCH_ALARM);
+      await chrome.storage.local.remove(DASH_LAUNCH_STORE);
+      // Clear any armed per-tab reload alarms too.
+      const d = await chrome.storage.local.get(RELOAD_STORE);
+      const m = d[RELOAD_STORE] || {};
+      for (const tabId of Object.keys(m)) await chrome.alarms.clear(`snkrsReload#${tabId}`);
+      await chrome.storage.local.remove(RELOAD_STORE);
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
   // Dashboard arms (or cancels) the auto-launch alarm for per-account scheduled opens.
   if (msg.type === "arm_drop_launch") {
     const cfg = msg.config;

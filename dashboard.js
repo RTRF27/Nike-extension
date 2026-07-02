@@ -2027,9 +2027,13 @@ async function launchAll() {
     await new Promise(r => setTimeout(r, 450)); // stagger BETWEEN profiles
   }
 
+  // You launched manually — disarm any auto-open scheduler so it can't open a
+  // SECOND set of tabs at drop time (that caused duplicate submits + lag).
+  await new Promise(res => chrome.runtime.sendMessage({ type: "cancel_dash_launch" }, res));
+
   if (profOk === all.length) {
     const tail = warmCount ? ` (${warmCount} warm-up)` : "";
-    flashTemp($("statusMsg"), `🚀 Launched ${profOk} profiles · ${tabOk} product tab(s)${tail}. Each holds SUBMIT until drop.`, "#1db954", 8000);
+    flashTemp($("statusMsg"), `🚀 Launched ${profOk} profiles · ${tabOk} product tab(s)${tail}. Auto-open disarmed. Each holds SUBMIT until drop.`, "#1db954", 8000);
   } else if (profOk > 0) {
     flashTemp($("statusMsg"), `Launched ${profOk}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
   } else {

@@ -31,9 +31,15 @@ function resetRunGuard() {
 window.snkrsReset = resetRunGuard;
 
 function log(...args) { console.log("[SNKRSBot GS]", ...args); }
+// True while THIS content script's extension context is still valid. When the
+// extension is reloaded/updated with the tab still open, the old script is
+// orphaned and chrome.runtime.id becomes undefined — we then stop quietly
+// instead of throwing "Extension context invalidated" over and over.
+function extAlive() { try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; } }
 function logBG(msg) {
+  if (!extAlive()) return; // orphaned tab — the extension was reloaded; stop quietly
   try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
-  catch (e) { console.warn("[SNKRSBot GS] logBG:", e); }
+  catch (e) { /* context invalidated mid-call — ignore */ }
 }
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
@@ -759,6 +765,7 @@ async function runCheckoutFlow() {
   await drive(); // initial run
 
   const watchdog = setInterval(() => {
+    if (!extAlive()) { clearInterval(watchdog); return; } // extension reloaded — orphaned tab, stop
     if (isConfirmed()) { clearInterval(watchdog); return; }
     if (redrives >= 4) { clearInterval(watchdog); return; }
     if (flowRunning) return;            // busy (incl. holding for drop) — leave it
