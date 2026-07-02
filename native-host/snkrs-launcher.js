@@ -89,10 +89,13 @@ function readStatus() {
     for (const f of fs.readdirSync(STATUS_DIR)) {
       if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
       const rec = readJsonFile(path.join(STATUS_DIR, f));
-      // Key by the per-tab composite key when present (profile#tabId), else the
-      // profile — so multiple tabs of one profile each keep their own entry.
-      const k = rec && (rec.key || rec.profileDir);
-      if (rec && k) map[k] = rec;
+      if (!rec) continue;
+      // Derive an id from the filename so entries from OLDER extension builds
+      // (which didn't stamp key/profileDir into the record) still show up.
+      const derived = f.replace(/^s_/, "").replace(/\.json$/, "");
+      if (!rec.profileDir) rec.profileDir = derived; // lets the dashboard group it
+      const k = rec.key || rec.profileDir || derived;
+      map[k] = rec;
     }
   } catch (e) { /* dir not created yet */ }
   return map;
