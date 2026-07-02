@@ -403,7 +403,7 @@ const ATTENTION_CODES = new Set(["error"]);
 // liveStatuses is keyed per TAB ("profile#tabId"). These aggregate by profile.
 const STALE_MS = 15 * 60 * 1000;
 function profileEntries(profileDir) {
-  return Object.values(liveStatuses).filter(e => e && e.profileDir === profileDir);
+  return Object.values(liveStatuses).filter(e => e && String(e.profileDir).split("#")[0] === profileDir);
 }
 function bestStatusFor(profileDir) {
   const es = profileEntries(profileDir);
@@ -492,12 +492,15 @@ function renderLivePage() {
   const empty = $("liveEmpty");
   const now = Date.now();
 
-  // Group non-stale tab entries by profile.
+  // Group non-stale tab entries by profile. Normalise the profile id defensively
+  // (strip any accidental "#tabId" suffix from older builds) so tabs always
+  // group under their account instead of leaking the internal key as a panel.
   const byProfile = {};
   for (const e of Object.values(liveStatuses)) {
     if (!e || !e.profileDir) continue;
     if (e.time && now - e.time > STALE_MS) continue; // drop dead tabs
-    (byProfile[e.profileDir] = byProfile[e.profileDir] || []).push(e);
+    const pdir = String(e.profileDir).split("#")[0];
+    (byProfile[pdir] = byProfile[pdir] || []).push(e);
   }
 
   // Every account with a profile gets a panel (even if idle / not launched).
