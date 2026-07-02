@@ -407,6 +407,9 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === UPCOMING_POLL_ALARM) {
     runUpcomingPoll();
   }
+  if (alarm.name.startsWith("snkrsReload#")) {
+    fireTabReload(alarm.name.slice("snkrsReload#".length));
+  }
 });
 
 // Re-arm the alarm when the service worker starts (e.g. browser restart).
@@ -414,10 +417,65 @@ chrome.runtime.onStartup.addListener(() => {
   scheduleDropAlarm();
   rescheduleDashLaunch();
   armUpcomingPoll();
+  rearmTabReloads();
 });
 chrome.runtime.onInstalled.addListener(() => {
   scheduleDropAlarm();
   armUpcomingPoll();
+  rearmTabReloads();
+});
+
+// ── Drop-time tab reload (survives Memory Saver / SW sleep) ────
+// When a profile is launched early, its checkout tab HOLDS until ~PREP before
+// the drop. A plain in-page timer dies if Chrome discards the idle tab, so we
+// arm a background alarm here to reload the tab (fresh checkoutId → fresh
+// Kasada) right before the drop — this wakes the SW and reloads even a
+// discarded tab.
+const RELOAD_STORE = "snkrsTabReloads"; // { [tabId]: { when, bootUrl } }
+
+function bgFreshCheckoutId(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.has("checkoutId")) {
+      u.searchParams.set("checkoutId", (self.crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()));
+    }
+    return u.toString();
+  } catch (e) { return url; }
+}
+
+async function armTabReload(tabId, when, bootUrl) {
+  const d = await chrome.storage.local.get(RELOAD_STORE);
+  const m = d[RELOAD_STORE] || {};
+  m[tabId] = { when, bootUrl };
+  await chrome.storage.local.set({ [RELOAD_STORE]: m });
+  chrome.alarms.create(`snkrsReload#${tabId}`, { when: Math.max(when, Date.now() + 1000) });
+}
+
+async function fireTabReload(tabIdStr) {
+  const tabId = Number(tabIdStr);
+  const d = await chrome.storage.local.get(RELOAD_STORE);
+  const m = d[RELOAD_STORE] || {};
+  const rec = m[tabId];
+  if (rec) { delete m[tabId]; await chrome.storage.local.set({ [RELOAD_STORE]: m }); }
+  const url = bgFreshCheckoutId((rec && rec.bootUrl) || "");
+  if (!url) return;
+  // Reload the (possibly discarded) tab to the fresh checkout URL.
+  chrome.tabs.update(tabId, { url }, () => { if (chrome.runtime.lastError) { /* tab gone */ } });
+}
+
+async function rearmTabReloads() {
+  const d = await chrome.storage.local.get(RELOAD_STORE);
+  const m = d[RELOAD_STORE] || {};
+  for (const [tabId, rec] of Object.entries(m)) {
+    chrome.alarms.create(`snkrsReload#${tabId}`, { when: Math.max(rec.when, Date.now() + 1000) });
+  }
+}
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  const d = await chrome.storage.local.get(RELOAD_STORE);
+  const m = d[RELOAD_STORE] || {};
+  if (m[tabId] != null) { delete m[tabId]; await chrome.storage.local.set({ [RELOAD_STORE]: m }); }
+  chrome.alarms.clear(`snkrsReload#${tabId}`);
 });
 
 // ── Dashboard auto-launch (per-account scheduled open) ────────
@@ -844,6 +902,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true, armed: true, when: dropMs, count: autoAccts.length });
     });
     return true;
+  }
+
+  // A held direct-checkout tab asks us to reload it just before the drop, via a
+  // background alarm that survives Chrome discarding the idle tab.
+  if (msg.type === "arm_reload") {
+    const tabId = sender && sender.tab && sender.tab.id;
+    if (tabId != null && msg.dropAtMs) {
+      const when = Number(msg.dropAtMs) - (Number(msg.prepMs) || 30000);
+      armTabReload(tabId, when, msg.bootUrl || (sender.tab && sender.tab.url) || "");
+    }
+    return false;
   }
 
   if (msg.type === "log") {

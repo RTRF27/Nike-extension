@@ -143,19 +143,22 @@
 
   if (profileDir && !isNaN(dropMs) && now < dropMs - PREP_LEAD_MS) {
     // Launched EARLY. Don't sit on a stale checkout page (Kasada goes stale, and
-    // Nike may bounce an early checkout). Hold the checkout script, then at
-    // PREP-before-drop do a FRESH navigation (new checkoutId → fresh Kasada).
+    // Nike may bounce an early checkout). Hold the checkout script, and ask the
+    // background to reload this tab (fresh checkoutId → fresh Kasada) ~PREP
+    // before the drop. We use a BACKGROUND ALARM rather than an in-page timer so
+    // it survives Chrome's Memory Saver discarding the idle tab over a long wait.
     hold();
     applySettings();
+    const bootUrlNow = bootUrl || location.href;
     const wait = dropMs - PREP_LEAD_MS - now;
-    logBG(`🕒 Direct checkout armed for "${profileDir}" — holding ${Math.round(wait / 1000)}s, then a fresh load ~${PREP_LEAD_MS / 1000}s before drop.`);
-    const keep = setInterval(hold, 60000); // keep gs-content held during the wait
-    setTimeout(() => {
-      clearInterval(keep);
-      logBG(`⚡ Prep window for "${profileDir}" — fresh checkout load (fresh Kasada), will submit at drop.`);
-      const target = bootUrl ? freshCheckoutId(bootUrl) : freshCheckoutId(location.href);
-      location.href = target;
-    }, wait);
+    logBG(`🕒 Direct checkout armed for "${profileDir}" — holding ${Math.round(wait / 1000)}s; background alarm will reload it ~${PREP_LEAD_MS / 1000}s before drop (survives the tab being put to sleep).`);
+    const keep = setInterval(hold, 60000); // keep gs-content held while the tab is alive
+    try {
+      chrome.runtime.sendMessage({ type: "arm_reload", dropAtMs: dropMs, prepMs: PREP_LEAD_MS, bootUrl: bootUrlNow });
+    } catch (e) {
+      // Background unreachable — fall back to an in-page timer (works if the tab stays awake).
+      setTimeout(() => { clearInterval(keep); release(); location.href = freshCheckoutId(bootUrlNow); }, wait);
+    }
   } else {
     // We're inside the prep window (or at/after drop, or no drop time) — this is
     // a fresh page. Fill now; gs-content-script holds SUBMIT until dropAtMs.
