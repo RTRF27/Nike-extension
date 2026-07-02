@@ -732,21 +732,40 @@ async function runCheckoutFlow() {
   }
   await wait(300);
 
-  // Run the flow — if it fails or times out, reset the guard and retry once
-  try {
-    await runCheckoutFlow();
-  } catch (err) {
-    try { logBG(`❌ GS error (will retry): ${err}`); } catch (_) {}
-    console.error("[SNKRSBot GS] flow error, retrying in 3s:", err);
-    // Reset guard so retry can run
-    hasRun = false;
-    try { delete document.documentElement.dataset.snkrsBotRan; } catch(e) {}
-    await wait(3000);
-    if (!checkHasRun()) {
-      markHasRun();
-      runCheckoutFlow().catch(err2 => {
-        try { logBG(`❌ GS retry also failed: ${err2}`); } catch (_) {}
-      });
-    }
+  // ── Single-flight flow runner + stall watchdog ──────────────
+  // The flow can stall before submitting (e.g. delivery filled but PAYMENT
+  // never expanded, or a click that didn't register). A watchdog re-drives it
+  // from the current state, bounded, WITHOUT ever running two flows at once
+  // (so it never fights the drop-time hold, which keeps the flow "running").
+  let flowRunning = false;
+  let redrives = 0;
+  async function drive() {
+    if (flowRunning) return;
+    flowRunning = true;
+    try { await runCheckoutFlow(); }
+    catch (err) { try { logBG(`❌${profileTag()} flow error: ${err}`); } catch (_) {} }
+    finally { flowRunning = false; }
   }
+
+  const isConfirmed = () => {
+    if (!location.hostname.includes("gs.nike.com")) return true;
+    const t = (document.body.innerText || "").toUpperCase();
+    return /PROCESSING|JUST A MINUTE|ORDER CONFIRMED|THANK YOU|YOU'RE IN|ENTRY CONFIRMED/.test(t);
+  };
+  const stuckPreSubmit = () =>
+    location.hostname.includes("gs.nike.com") && !isConfirmed() &&
+    !!(findDeliveryContinueOnly() || findPaymentContinueOnly() || findPaymentAccordionRow());
+
+  await drive(); // initial run
+
+  const watchdog = setInterval(() => {
+    if (isConfirmed()) { clearInterval(watchdog); return; }
+    if (redrives >= 4) { clearInterval(watchdog); return; }
+    if (flowRunning) return;            // busy (incl. holding for drop) — leave it
+    if (stuckPreSubmit()) {
+      redrives++;
+      logBG(`🩺${profileTag()} Watchdog: checkout stalled before submit — re-driving (${redrives}/4).`);
+      drive();
+    }
+  }, 12000);
 })();
