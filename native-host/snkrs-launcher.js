@@ -155,6 +155,41 @@ function clearPreflight() {
   } catch (e) {}
 }
 
+// ── Per-tab checkout TIMELINE (drop replay / analytics) ───────
+// One file per key (profileDir#tabId), holding the ordered checkout events
+// (started→loaded→filled→submitted→done/error) with timestamps + the drop
+// time, so the dashboard can render a per-account timeline and compute how
+// many ms before/after go-live each submit landed. Same per-profile-file
+// pattern as status/, for the same cross-profile-visibility reason.
+const TIMELINE_DIR = path.join(CONFIG_DIR, "timeline");
+function timelineFileFor(key) {
+  const safe = String(key).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 90);
+  return path.join(TIMELINE_DIR, `tl_${safe}.json`);
+}
+function setTimelineEntry(key, entry) {
+  writeJsonFile(timelineFileFor(key), Object.assign({}, entry, { key }));
+}
+function readTimeline() {
+  const map = {};
+  try {
+    for (const f of fs.readdirSync(TIMELINE_DIR)) {
+      if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
+      const rec = readJsonFile(path.join(TIMELINE_DIR, f));
+      if (!rec) continue;
+      const k = rec.key || f.replace(/^tl_/, "").replace(/\.json$/, "");
+      map[k] = rec;
+    }
+  } catch (e) { /* dir not created yet */ }
+  return map;
+}
+function clearTimeline() {
+  try {
+    for (const f of fs.readdirSync(TIMELINE_DIR)) {
+      if (f.endsWith(".json")) { try { fs.unlinkSync(path.join(TIMELINE_DIR, f)); } catch (e) {} }
+    }
+  } catch (e) {}
+}
+
 function clearStatus(profileDir) {
   try {
     for (const f of fs.readdirSync(STATUS_DIR)) {
@@ -346,6 +381,23 @@ function handle(msg) {
     case "clearPreflight":
       try {
         clearPreflight();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "setTimeline":
+      if (!msg.profileDir) return { ok: false, error: "Missing key." };
+      try {
+        setTimelineEntry(msg.profileDir, msg.entry || {});
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "getTimeline":
+      return { ok: true, timeline: readTimeline() };
+    case "clearTimeline":
+      try {
+        clearTimeline();
         return { ok: true };
       } catch (e) {
         return { ok: false, error: String(e && e.message || e) };

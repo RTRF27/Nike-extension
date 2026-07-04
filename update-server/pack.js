@@ -37,8 +37,8 @@ const UPDATE_BASE = `http://127.0.0.1:${UPDATE_PORT}`;
 // Repo files that are NOT part of the extension payload.
 const EXCLUDES = [
   ".git", ".gitignore", ".keys", "node_modules",
-  "update-server", "native-host", "force-install",
-  "README.md", "snkrs-bot.zip", "pack-tmp.cjs",
+  "update-server", "native-host", "force-install", "test-harness",
+  "README.md", "package.json", "package-lock.json", "snkrs-bot.zip", "pack-tmp.cjs",
 ];
 
 function findOrCreateKey() {

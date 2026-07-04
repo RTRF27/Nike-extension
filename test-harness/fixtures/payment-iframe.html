@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Fixture: DELIVERY confirmed, PAYMENT expanded with the gs-payments card
+     iframe open, and a payment-section CONTINUE that sits AFTER the iframe.
+     A delivery CONTINUE also lingers ABOVE the form. The strict finders must:
+       • treat the CONTINUE above the iframe as delivery (or none),
+       • treat the CONTINUE after the iframe as payment,
+       • NOT fire submit yet (still disabled). -->
+<html lang="en">
+<head><meta charset="utf-8"><title>GS Checkout — payment iframe</title></head>
+<body>
+  <main class="checkout">
+    <section class="category delivery-section">
+      <h2>DELIVERY</h2>
+      <div class="summary">1 Orchard Rd, 238888</div>
+      <button class="button-continue" type="button">Continue</button>
+    </section>
+
+    <section class="category payment-section">
+      <h2>PAYMENT</h2>
+      <iframe class="newCard" src="https://gs-payments.nike.com/card" title="Card entry"
+              width="400" height="220"></iframe>
+      <button class="button-continue" type="button">Continue</button>
+    </section>
+
+    <button class="button-submit" type="button" disabled>Submit Order</button>
+  </main>
+</body>
+</html>

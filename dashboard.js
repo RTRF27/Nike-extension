@@ -31,6 +31,7 @@ function navigateTo(name) {
   }
   if (name === "live") renderLivePage();
   if (name === "preflight") { renderPreflight(); refreshVersionBanner(); }
+  if (name === "history") renderDropReplay();
 }
 
 function renderHomeStats() {
@@ -241,6 +242,10 @@ let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-produ
 let multiProduct = false;
 let currentRunId  = null;      // ID of the most recently launched history entry
 let countdownTimer = null;
+
+const TIMELINE_KEY = "snkrsTimeline";
+let timelines = {};            // {key(profileDir#tab): {profileDir,events:[],dropAt,label}}
+let timelinePollTimer = null;
 
 const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/profile"; // logged-in-only page — good login signal
 let preflightResults = {};     // {profileDir: {ts,version,checks:{...}}}
@@ -910,6 +915,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
+  }
+  if (changes[TIMELINE_KEY]) {
+    // Merge the local mirror (this profile's own tabs) with polled cross-profile
+    // entries so neither source clobbers the other.
+    timelines = { ...timelines, ...(changes[TIMELINE_KEY].newValue || {}) };
+    if (_currentPage === "history") renderDropReplay();
   }
   if (changes[CARDS_KEY]) {
     cardProfiles = changes[CARDS_KEY].newValue || [];
@@ -1698,6 +1709,138 @@ function buildHistoryEntry(entry) {
   return div;
 }
 
+// ══════════════════ DROP REPLAY / ANALYTICS ══════════════════
+// Renders each account's checkout timeline for the most recent drop:
+// loaded → filled → submitted timing, and how many ms before/after go-live
+// the submit landed. Fed by the shared timeline folder (via the native host),
+// so it shows accounts running in OTHER Chrome profiles.
+
+const REPLAY_STAGES = [
+  { code: "loaded",    label: "Loaded" },
+  { code: "delivery",  label: "Delivery" },
+  { code: "filled",    label: "Card filled" },
+  { code: "ready",     label: "Ready" },
+  { code: "submitted", label: "Submitted" },
+];
+
+function eventTime(events, code) {
+  const e = events.find(x => x.code === code);
+  return e ? e.t : null;
+}
+function fmtDelta(ms) {
+  if (ms == null) return "—";
+  if (ms < 1000) return ms + "ms";
+  return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + "s";
+}
+function labelForKey(entry) {
+  const acct = accounts.find(a => a.profileDir === entry.profileDir);
+  return (acct && (acct.label || acct.profileDir)) || entry.profileDir || entry.label || entry.key;
+}
+
+// Outcome for a timeline: prefer resolved draw result, else terminal event.
+function replayOutcome(entry) {
+  const s = bestStatusFor(entry.profileDir);
+  if (s && ["win", "loss", "entered", "limit", "success"].includes(s.code)) {
+    const map = { win: ["🏆 WON", "var(--green)"], loss: ["😔 LOST", "var(--red)"],
+      entered: ["✓ ENTERED", "#4a90e2"], success: ["✓ ENTERED", "#4a90e2"], limit: ["⚠ LIMIT", "var(--orange)"] };
+    return map[s.code];
+  }
+  const events = entry.events || [];
+  const err = events.find(e => e.code === "error");
+  if (err) return [`✕ ${(err.extra && err.extra.reason) || "error"}`.replace(/_/g, " "), "var(--red)"];
+  if (eventTime(events, "submitted")) return ["🚀 SUBMITTED", "var(--purple2)"];
+  if (eventTime(events, "ready")) return ["● PRIMED", "var(--orange)"];
+  return ["… running", "var(--grey)"];
+}
+
+function renderDropReplay() {
+  const list = $("replayList");
+  if (!list) return;
+  list.innerHTML = "";
+  const entries = Object.values(timelines).filter(e => e && (e.events || []).length);
+  if (!entries.length) {
+    list.appendChild(el("p", { className: "hint" },
+      "No timeline yet. Launch a drop — each account's loaded→filled→submitted timing appears here."));
+    return;
+  }
+  // Most-recent drop first; within it, most-recently-updated account first.
+  entries.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+
+  for (const entry of entries) {
+    const events = entry.events || [];
+    const t0 = eventTime(events, "started") || (events[0] && events[0].t);
+    const submittedT = eventTime(events, "submitted");
+    const submittedEv = events.find(e => e.code === "submitted");
+
+    const card = el("div", { className: "replay-card" });
+
+    const head = el("div", { className: "replay-head" });
+    head.appendChild(el("span", { className: "replay-name" }, labelForKey(entry)));
+    const [outText, outColor] = replayOutcome(entry);
+    const outEl = el("span", { className: "replay-outcome" }, outText);
+    outEl.style.color = outColor;
+    head.appendChild(outEl);
+    card.appendChild(head);
+
+    // Timeline dots for each reached stage, with elapsed-since-start under each.
+    const track = el("div", { className: "replay-track" });
+    for (const st of REPLAY_STAGES) {
+      const t = eventTime(events, st.code);
+      const dot = el("div", { className: "replay-step" + (t ? " on" : "") });
+      dot.appendChild(el("span", { className: "replay-dot" }));
+      dot.appendChild(el("span", { className: "replay-step-label" }, st.label));
+      dot.appendChild(el("span", { className: "replay-step-time" },
+        t && t0 ? "+" + fmtDelta(t - t0) : "—"));
+      track.appendChild(dot);
+    }
+    card.appendChild(track);
+
+    // Key metrics row: total prep, and go-live offset for the submit.
+    const metrics = el("div", { className: "replay-metrics" });
+    const loadedT = eventTime(events, "loaded");
+    const filledT = eventTime(events, "filled");
+    if (loadedT && filledT) metrics.appendChild(el("span", { className: "replay-metric" }, `fill ${fmtDelta(filledT - loadedT)}`));
+    if (filledT && submittedT) metrics.appendChild(el("span", { className: "replay-metric" }, `→submit ${fmtDelta(submittedT - filledT)}`));
+
+    // ms before/after go-live — the headline number.
+    let offsetMs = null;
+    if (submittedEv && submittedEv.extra && submittedEv.extra.offsetMs != null) offsetMs = submittedEv.extra.offsetMs;
+    else if (submittedT && entry.dropAt) offsetMs = submittedT - entry.dropAt;
+    if (offsetMs != null) {
+      const after = offsetMs >= 0;
+      const badge = el("span", { className: "replay-offset " + (after ? "after" : "before") },
+        `${after ? "+" : ""}${fmtDelta(Math.abs(offsetMs)).replace(/^/, offsetMs < 0 ? "-" : "")} vs go-live`);
+      // simpler text:
+      badge.textContent = `${after ? "+" : "−"}${fmtDelta(Math.abs(offsetMs))} vs go-live`;
+      metrics.appendChild(badge);
+    } else if (entry.dropAt && !submittedT) {
+      metrics.appendChild(el("span", { className: "replay-metric" }, "holding for drop…"));
+    }
+    card.appendChild(metrics);
+    list.appendChild(card);
+  }
+}
+
+// Poll the shared timeline folder (accounts run in OTHER Chrome profiles).
+function startTimelinePolling() {
+  if (timelinePollTimer) clearInterval(timelinePollTimer);
+  const tick = async () => {
+    const resp = await hostSend({ cmd: "getTimeline" });
+    if (!resp || !resp.ok || !resp.timeline) return;
+    let changed = false;
+    for (const [k, entry] of Object.entries(resp.timeline)) {
+      const cur = timelines[k];
+      if (!cur || cur.updated !== entry.updated || (cur.events || []).length !== (entry.events || []).length) {
+        timelines[k] = entry;
+        changed = true;
+      }
+    }
+    if (changed && _currentPage === "history") renderDropReplay();
+  };
+  tick();
+  timelinePollTimer = setInterval(tick, 2500);
+}
+
 // ── Native host helper (extension pages can call this directly) ─
 function hostSend(payload) {
   return new Promise((resolve) => {
@@ -2312,6 +2455,12 @@ async function launchAll() {
   const config = await saveAll(true);
   await appendHistory(config);
 
+  // Fresh drop → clear the previous run's replay timelines so the Drop Replay
+  // view reflects THIS launch.
+  timelines = {};
+  await chrome.storage.local.set({ [TIMELINE_KEY]: {} });
+  await hostSend({ cmd: "clearTimeline" });
+
   flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
   let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
   for (const acct of all) {
@@ -2634,6 +2783,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     flashTemp($("preflightMsg"), "Preflight results cleared.", "#888");
   });
   startPreflightPolling();
+
+  // ── Drop replay / analytics ──
+  {
+    const localTl = await chrome.storage.local.get(TIMELINE_KEY);
+    if (localTl[TIMELINE_KEY]) timelines = localTl[TIMELINE_KEY];
+  }
+  startTimelinePolling();
+  if ($("clearReplayBtn")) $("clearReplayBtn").addEventListener("click", async () => {
+    timelines = {};
+    await chrome.storage.local.set({ [TIMELINE_KEY]: {} });
+    await hostSend({ cmd: "clearTimeline" });
+    renderDropReplay();
+    flashTemp($("replayMsg"), "Replay cleared.", "#888");
+  });
   $("multiProductToggle").addEventListener("change", () => {
     multiProduct = $("multiProductToggle").checked;
     applyMultiUI();

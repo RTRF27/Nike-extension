@@ -153,12 +153,30 @@ the same steps in short:
 
 | File | Role |
 |------|------|
-| `dashboard.html/.css/.js` | Multi-account control room (+ Preflight page & version banner) |
+| `dashboard.html/.css/.js` | Multi-account control room (+ Preflight page, version banner, Drop Replay) |
 | `update-server/` | Signed-.crx packer + local update server + force-install scripts (auto-update) |
+| `checkout-core.js` | Pure DOM detection + explicit checkout **state machine** (no `chrome.*`) |
+| `test-harness/` | Offline checkout tests + visual runner against saved fixture HTML |
 | `bootstrap-content-script.js` | Applies central config to a launched profile; also runs the per-profile Preflight checks |
-| `background.js` | + native-host bridge & boot handler (existing flow unchanged) |
-| `native-host/` | Launcher host, installers, host manifest (new) |
+| `background.js` | Native-host bridge, boot handler, version/preflight/timeline plumbing |
+| `native-host/` | Launcher host, installers, host manifest (config/status/orders/versions/preflight/timeline files) |
 | `popup.*` | Single-profile popup (+ button to open the dashboard) |
 | `snkrs-content-script.js` | Draw entry — **unchanged** |
-| `gs-content-script.js` | Checkout — **unchanged** |
+| `gs-content-script.js` | Checkout **adapter** — thin bridge over `checkout-core.js` (same detection + log phrasings) |
 | `gs-payments-content-script.js` | Card autofill — **unchanged** |
+
+## Reliability & testing (v3.4)
+
+- **Checkout is now an explicit state machine** — `LOADING → DELIVERY →
+  PAYMENT → READY → HOLDING → SUBMITTING → DONE/ERROR`, with per-state
+  timeouts/retries and structured logging. The battle-tested DOM detection and
+  the exact log phrasings are preserved; only the control flow is formalised,
+  and it lives in `checkout-core.js` with no `chrome.*` dependency.
+- **Offline checkout test harness** (`test-harness/`) — iterate the
+  fill/confirm/submit flow against **saved fixture HTML** in a real browser,
+  no live drop required. `node test-harness/test.mjs` (26 assertions) or the
+  visual runner `node test-harness/serve.mjs`.
+- **Drop Replay** (dashboard HISTORY tab) — every drop is recorded as a
+  per-account timeline (loaded → card filled → submitted) with fill/submit
+  timing and, crucially, **how many ms before/after go-live each submit
+  landed**, alongside win/loss and failure reasons.

@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Fixture: INLINE native card fields (no iframe), already filled. SUBMIT
+     enabled. isInlineCardFilled() must be true; the machine proceeds straight
+     to SUBMIT without waiting for an iframe signal. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>GS Checkout — inline card</title></head>
+<body>
+  <main class="checkout">
+    <section class="category delivery-section">
+      <h2>DELIVERY</h2><div class="summary">1 Orchard Rd, 238888</div>
+    </section>
+
+    <section class="category payment-section">
+      <h2>PAYMENT</h2>
+      <label>Card Number
+        <input name="cardNumber" autocomplete="cc-number" value="4242 4242 4242 4242">
+      </label>
+      <input name="expiry" placeholder="MM/YY" value="12/34">
+      <input name="cvv" placeholder="CVV" value="123">
+      <button class="button-continue" type="button">Continue</button>
+    </section>
+
+    <button class="button-submit" type="button">Submit Order</button>
+  </main>
+</body>
+</html>

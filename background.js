@@ -1127,6 +1127,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // Drop replay/analytics: the checkout state machine emits structured events
+  // (started/loaded/filled/submitted/done/error) with precise timestamps. We
+  // attribute each to a TAB (profile + tab id) and accumulate a timeline, both
+  // locally and in the shared timeline folder so the DASHBOARD (a different
+  // Chrome profile) can build its per-account Drop Replay view.
+  if (msg.type === "checkout_event") {
+    const tabId = sender?.tab?.id;
+    const profileDir = tabId != null ? tabProfileMap[tabId] : null;
+    if (tabId == null) return false;
+    const key = `${profileDir || "local"}#${tabId}`;
+    const ev = { code: msg.code, t: Number(msg.t) || Date.now(), extra: msg.extra || null };
+    chrome.storage.local.get("snkrsTimeline", (data) => {
+      const store = data.snkrsTimeline || {};
+      const entry = store[key] || { key, profileDir: profileDir || "", tabId, events: [], dropAt: 0, updated: 0 };
+      entry.profileDir = profileDir || entry.profileDir;
+      if (msg.dropAt) entry.dropAt = Number(msg.dropAt) || entry.dropAt;
+      entry.events.push(ev);
+      if (entry.events.length > 60) entry.events = entry.events.slice(-60);
+      entry.updated = Date.now();
+      entry.label = tabLabel(sender && sender.tab) || entry.label || "";
+      store[key] = entry;
+      chrome.storage.local.set({ snkrsTimeline: store });
+      // Events are infrequent (~10/drop) so no throttling — flush each to disk.
+      if (profileDir) nativeSend({ cmd: "setTimeline", profileDir: key, entry }).catch(() => {});
+    });
+    return false;
+  }
+
   // Orders page — store raw API or DOM-scraped data keyed by profileDir.
   // Dashboard.js normalises and displays it.
   if (msg.type === "orders_api_data" || msg.type === "orders_dom_data") {

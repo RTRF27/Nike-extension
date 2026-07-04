@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- Fixture: a SAVED card is on file. PAYMENT is collapsed showing "VISA ····5992",
+     no open card iframe, and SUBMIT is enabled. isPaymentAlreadyComplete() must
+     be true so the machine does NOT wait for a card-fill that never happens. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>GS Checkout — saved card</title></head>
+<body>
+  <main class="checkout">
+    <section class="category delivery-section">
+      <h2>DELIVERY</h2>
+      <div class="summary">1 Orchard Rd, 238888</div>
+    </section>
+
+    <section class="category payment-section collapsed">
+      <h2>PAYMENT</h2>
+      <div class="saved-card">VISA ····5992</div>
+    </section>
+
+    <button class="button-submit" type="button">Submit Order</button>
+  </main>
+</body>
+</html>

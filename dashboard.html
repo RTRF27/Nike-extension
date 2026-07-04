@@ -448,8 +448,20 @@
     <div class="page-section" id="page-history">
       <div class="section-header">
         <h1 class="section-title">DROP HISTORY</h1>
-        <span class="section-sub">Record of every run</span>
+        <span class="section-sub">Timeline replay + record of every run</span>
       </div>
+
+      <section class="card" style="margin-bottom:20px;">
+        <div class="card-head">
+          <h2>⏱ DROP REPLAY — LAST RUN</h2>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="card-tag" id="replayTag">LIVE TIMELINE</span>
+            <button id="clearReplayBtn" class="btn btn-mini btn-dark">Clear replay</button>
+          </div>
+        </div>
+        <p class="hint" id="replayMsg">Per-account timing (loaded → filled → submitted) and how many ms before/after go-live each submit landed.</p>
+        <div id="replayList" class="replay-list"></div>
+      </section>
 
       <section class="card">
         <div class="card-head">
