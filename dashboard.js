@@ -30,6 +30,7 @@ function navigateTo(name) {
     if (!_upcomingLoaded) loadUpcoming(false);
   }
   if (name === "live") renderLivePage();
+  if (name === "preflight") { renderPreflight(); refreshVersionBanner(); }
 }
 
 function renderHomeStats() {
@@ -240,6 +241,13 @@ let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-produ
 let multiProduct = false;
 let currentRunId  = null;      // ID of the most recently launched history entry
 let countdownTimer = null;
+
+const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/profile"; // logged-in-only page — good login signal
+let preflightResults = {};     // {profileDir: {ts,version,checks:{...}}}
+let profileVersions = {};      // {profileDir: {version,ts}}
+let latestVersion = "";        // repo manifest version reported by the host
+let preflightPollTimer = null;
+const PENDING_PF = "__pending__"; // placeholder verdict while a run is in flight
 
 // ── Random helpers ────────────────────────────────────────────
 function shuffle(arr) {
@@ -468,6 +476,283 @@ function freshCheckoutId(url) {
 function refreshAllBadges() {
   accounts.forEach(a => { if (a.profileDir) updateStatusBadge(a.profileDir); });
   renderLivePage();
+}
+
+// ══════════════════ PREFLIGHT + VERSION BANNER ══════════════════
+// The pre-drop health check. RUN PREFLIGHT opens every account's profile on a
+// logged-in-only Nike page tagged #snkrsPreflight=<profileDir>; the bootstrap
+// + background run the checks, publish results to the shared preflight folder,
+// and close the tab. We poll that folder and render a red/green checklist.
+
+function cmpVer(a, b) {
+  const pa = String(a || "").split(".").map(Number);
+  const pb = String(b || "").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+// The seven checks shown per profile, in display order.
+const PF_CHECK_DEFS = [
+  { key: "version", label: "Version" },
+  { key: "host",    label: "Host" },
+  { key: "login",   label: "Nike login" },
+  { key: "address", label: "Address" },
+  { key: "card",    label: "Card" },
+  { key: "cookies", label: "Cookies" },
+  { key: "target",  label: "Target" },
+];
+
+// Some checks the dashboard can determine on its own (card on file, a launch
+// target assigned) without needing the profile's browser. Merge those in.
+function localChecksFor(acct) {
+  const checks = {};
+  const card = cardProfiles.find(c => c.id === acct.cardId);
+  const hasCard = !!(card && (card.cardNumber || "").replace(/\s/g, "").length >= 12);
+  checks.card = hasCard
+    ? { ok: true, detail: `card “${card.name}” assigned` }
+    : { ok: null, detail: "no saved card — will type manually at checkout" };
+
+  const targets = launchTargetsFor(acct);
+  checks.target = targets.length
+    ? { ok: true, detail: `${targets.length} target(s) · size ${acct.size || "?"}` }
+    : { ok: false, detail: "no product/size assigned for this account" };
+  return checks;
+}
+
+// Reduce one profile's per-check map to a card verdict: red (any hard fail),
+// amber (any unknown/warning), green (all good), or pending.
+function preflightVerdict(checks) {
+  let anyBad = false, anyWarn = false, seen = 0;
+  for (const def of PF_CHECK_DEFS) {
+    const c = checks[def.key];
+    if (!c) continue;
+    seen++;
+    if (c.ok === false) anyBad = true;
+    else if (c.ok === null || c.ok === undefined) anyWarn = true;
+  }
+  if (!seen) return "pending";
+  if (anyBad) return "red";
+  if (anyWarn) return "amber";
+  return "green";
+}
+
+// Merge shared-folder results + locally-derived checks for one account.
+function mergedChecksFor(acct) {
+  const rec = preflightResults[acct.profileDir] || {};
+  const remote = rec.checks || {};
+  const local = localChecksFor(acct);
+  return { ...local, ...remote, __rec: rec };
+}
+
+function pfIcon(ok) {
+  if (ok === true) return { ico: "✓", cls: "ok" };
+  if (ok === false) return { ico: "✕", cls: "bad" };
+  return { ico: "!", cls: "warn" };
+}
+
+function renderPreflight() {
+  const grid = $("preflightGrid");
+  const empty = $("preflightEmpty");
+  const summary = $("preflightSummary");
+  if (!grid) return;
+
+  const withProfile = accounts.filter(a => a.profileDir);
+  const anyData = withProfile.some(a => preflightResults[a.profileDir]) ||
+                  Object.keys(preflightResults).length > 0;
+
+  if (!withProfile.length) {
+    grid.innerHTML = "";
+    if (summary) summary.innerHTML = "";
+    if (empty) { empty.style.display = "block"; empty.innerHTML = "No accounts have a Chrome profile yet. Add profiles on the <strong>PROFILES</strong> page first."; }
+    return;
+  }
+  if (empty) empty.style.display = anyData ? "none" : "block";
+
+  const counts = { green: 0, red: 0, amber: 0, pending: 0 };
+  grid.innerHTML = "";
+
+  for (const acct of withProfile) {
+    const checks = mergedChecksFor(acct);
+    const rec = checks.__rec || {};
+    const pendingRun = rec.__pending && !rec.ts;
+    const verdict = pendingRun ? "pending" : preflightVerdict(checks);
+    counts[verdict] = (counts[verdict] || 0) + 1;
+
+    const card = el("div", { className: `pf-card ${verdict}` });
+    const head = el("div", { className: "pf-card-head" });
+    head.appendChild(el("span", { className: "pf-card-name" }, acct.label || acct.profileDir));
+    const verdictText = pendingRun ? "CHECKING…"
+      : verdict === "green" ? "READY"
+      : verdict === "red" ? "BLOCKED"
+      : verdict === "amber" ? "REVIEW" : "NO DATA";
+    head.appendChild(el("span", { className: `pf-card-verdict ${verdict}` }, verdictText));
+    card.appendChild(head);
+
+    const list = el("div", { className: "pf-checks" });
+    for (const def of PF_CHECK_DEFS) {
+      const c = checks[def.key] || { ok: null, detail: pendingRun ? "checking…" : "not checked yet" };
+      const { ico, cls } = pfIcon(c.ok);
+      const row = el("div", { className: `pf-check ${cls}` });
+      row.appendChild(el("span", { className: "ico" }, ico));
+      row.appendChild(el("span", { className: "lbl" }, def.label));
+      row.appendChild(el("span", { className: "dtl" }, c.detail || ""));
+      list.appendChild(row);
+    }
+    card.appendChild(list);
+
+    if (rec.ts) {
+      const d = new Date(rec.ts);
+      card.appendChild(el("div", { className: "pf-card-time" },
+        `checked ${d.toLocaleTimeString()}${rec.version ? " · v" + rec.version : ""}`));
+    }
+    grid.appendChild(card);
+  }
+
+  if (summary) {
+    const chip = (n, label, color) =>
+      `<div class="pf-chip" style="color:${color}"><span class="n">${n}</span><span>${label}</span></div>`;
+    summary.innerHTML =
+      chip(counts.green, "READY", "var(--green)") +
+      chip(counts.amber, "REVIEW", "var(--orange)") +
+      chip(counts.red, "BLOCKED", "var(--red)") +
+      (counts.pending ? chip(counts.pending, "CHECKING", "var(--purple2)") : "");
+  }
+}
+
+// Whether any account is currently blocked (used to gate LAUNCH ALL).
+function preflightBlockers() {
+  return accounts.filter(a => a.profileDir).filter(a => {
+    const rec = preflightResults[a.profileDir];
+    if (!rec || !rec.ts) return false; // never checked → don't block
+    return preflightVerdict(mergedChecksFor(a)) === "red";
+  });
+}
+
+async function refreshVersionBanner() {
+  const banner = $("versionBanner");
+  if (!banner) return;
+  const resp = await hostSend({ cmd: "getVersions" });
+  if (resp && resp.ok) {
+    profileVersions = resp.versions || {};
+    if (resp.latestVersion) latestVersion = resp.latestVersion;
+  }
+  // Also probe the local update server so we can report whether auto-update is live.
+  let serverInfo = null;
+  try {
+    const r = await fetch("http://127.0.0.1:38473/version.json", { cache: "no-store" });
+    if (r.ok) serverInfo = await r.json();
+  } catch (e) { /* server not running */ }
+  if (serverInfo && serverInfo.version) latestVersion = latestVersion || serverInfo.version;
+
+  const withProfile = accounts.filter(a => a.profileDir);
+  const known = withProfile.map(a => ({ acct: a, v: (profileVersions[a.profileDir] || {}).version }))
+                           .filter(x => x.v);
+  const stale = latestVersion
+    ? known.filter(x => cmpVer(x.v, latestVersion) < 0)
+    : [];
+  const unknown = withProfile.length - known.length;
+
+  let cls, title, detail;
+  if (!latestVersion) {
+    cls = "warn";
+    title = "Update server offline";
+    detail = "Start it: <code>node update-server/server.js</code> (or run the installer). Can't tell which profiles are stale without it.";
+  } else if (stale.length) {
+    cls = "bad";
+    title = `${stale.length} profile(s) on an OLD version`;
+    detail = `Latest is v${latestVersion}. In each stale profile open chrome://extensions → Update, or just wait — auto-update pulls it within ~5h.`;
+  } else if (unknown) {
+    cls = "warn";
+    title = "Some profiles haven't reported yet";
+    detail = `Latest v${latestVersion}. ${known.length}/${withProfile.length} profiles reported in. Run PREFLIGHT (or launch them once) so they report their version.`;
+  } else {
+    cls = "ok";
+    title = `All profiles on v${latestVersion}`;
+    detail = withProfile.length
+      ? "Every profile with a version report is up to date. 🎉"
+      : "No profiles configured yet.";
+  }
+
+  const pills = known.map(x => {
+    const isStale = latestVersion && cmpVer(x.v, latestVersion) < 0;
+    return `<span class="vb-pill ${isStale ? "stale" : "good"}">${escapeHtml(x.acct.label || x.acct.profileDir)}: v${escapeHtml(x.v)}</span>`;
+  }).join("");
+
+  banner.className = "version-banner " + cls;
+  banner.innerHTML =
+    `<span class="vb-title">${escapeHtml(title)}</span>` +
+    `<span class="vb-spacer"></span>` +
+    (serverInfo ? `<span class="vb-pill good">server v${escapeHtml(serverInfo.version)}</span>` : `<span class="vb-pill stale">server offline</span>`) +
+    `<div style="flex-basis:100%; height:0;"></div>` +
+    `<span class="hint" style="margin:4px 0 0;">${detail}</span>` +
+    (pills ? `<div style="flex-basis:100%; height:2px;"></div>${pills}` : "");
+}
+
+async function runPreflight() {
+  const msg = $("preflightMsg");
+  const withProfile = accounts.filter(a => a.profileDir);
+  if (!withProfile.length) {
+    flashTemp(msg, "No accounts have a Chrome profile set. Add them on PROFILES first.", "var(--orange)", 5000);
+    return;
+  }
+  if (!hostOk) {
+    const up = await pingHost();
+    if (!up) {
+      flashTemp(msg, "Launcher offline — install/start the native host first (SETTINGS → setup).", "var(--orange)", 6000);
+      return;
+    }
+  }
+  // Save config first so each profile's boot has current data (and so the
+  // card/target local checks match what we're about to launch).
+  await saveAll(true);
+
+  // Mark every target profile as pending so the UI shows CHECKING immediately.
+  for (const a of withProfile) {
+    preflightResults[a.profileDir] = { __pending: true, profileDir: a.profileDir };
+  }
+  renderPreflight();
+  navigateTo("preflight");
+
+  flash(msg, `Opening ${withProfile.length} profile(s) to health-check…`, "#888");
+  let opened = 0, lastErr = "";
+  for (const a of withProfile) {
+    const sep = NIKE_PREFLIGHT_URL.includes("#") ? "&" : "#";
+    const url = `${NIKE_PREFLIGHT_URL}${sep}snkrsPreflight=${encodeURIComponent(a.profileDir)}`;
+    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url });
+    if (resp.ok) opened++; else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 400));
+  }
+  if (opened === withProfile.length) {
+    flashTemp(msg, `🩺 Checking ${opened} profile(s)… results appear below as each finishes (tabs close themselves).`, "var(--green)", 8000);
+  } else if (opened > 0) {
+    flashTemp(msg, `Started ${opened}/${withProfile.length}. Last error: ${lastErr}`, "var(--orange)", 7000);
+  } else {
+    flashTemp(msg, `Couldn't open any profile. ${lastErr || "Is the launcher installed?"}`, "var(--red)", 7000);
+  }
+}
+
+// Poll the shared preflight folder (results arrive from OTHER Chrome profiles).
+function startPreflightPolling() {
+  if (preflightPollTimer) clearInterval(preflightPollTimer);
+  const tick = async () => {
+    const resp = await hostSend({ cmd: "getPreflight" });
+    if (!resp || !resp.ok) return;
+    if (resp.latestVersion) latestVersion = resp.latestVersion;
+    let changed = false;
+    for (const [pd, entry] of Object.entries(resp.preflight || {})) {
+      const cur = preflightResults[pd];
+      if (!cur || cur.ts !== entry.ts || cur.__pending) {
+        preflightResults[pd] = entry;
+        changed = true;
+      }
+    }
+    if (changed && _currentPage === "preflight") { renderPreflight(); refreshVersionBanner(); }
+  };
+  tick();
+  preflightPollTimer = setInterval(tick, 2500);
 }
 
 // ── LIVE MONITOR (cyber command center) ───────────────────────
@@ -2006,6 +2291,24 @@ async function launchAll() {
     flashTemp($("statusMsg"), "No accounts have a Chrome profile set yet.", "#fa5400");
     return;
   }
+
+  // Preflight gate: if a recent run flagged any profile BLOCKED (red), warn
+  // before launching so you don't watch it fail live. Confirm-to-proceed only
+  // (never a hard block — the operator always has the final call).
+  const blockers = preflightBlockers();
+  if (blockers.length) {
+    const names = blockers.map(a => a.label || a.profileDir).join(", ");
+    const proceed = confirm(
+      `⚠️ Preflight flagged ${blockers.length} profile(s) as BLOCKED:\n\n${names}\n\n` +
+      `These may fail at the drop (not logged in, no target, etc.). ` +
+      `Open the PREFLIGHT tab to see why.\n\nLaunch anyway?`);
+    if (!proceed) {
+      flashTemp($("statusMsg"), `Launch cancelled — fix ${blockers.length} blocked profile(s) on PREFLIGHT first.`, "#fa5400", 6000);
+      navigateTo("preflight");
+      return;
+    }
+  }
+
   const config = await saveAll(true);
   await appendHistory(config);
 
@@ -2321,6 +2624,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     liveStatuses = {};
     refreshAllBadges();
   });
+
+  // ── Preflight page ──
+  if ($("preflightRunBtn")) $("preflightRunBtn").addEventListener("click", runPreflight);
+  if ($("preflightClearBtn")) $("preflightClearBtn").addEventListener("click", async () => {
+    await hostSend({ cmd: "clearPreflight" });
+    preflightResults = {};
+    renderPreflight();
+    flashTemp($("preflightMsg"), "Preflight results cleared.", "#888");
+  });
+  startPreflightPolling();
   $("multiProductToggle").addEventListener("change", () => {
     multiProduct = $("multiProductToggle").checked;
     applyMultiUI();

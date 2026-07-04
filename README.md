@@ -77,10 +77,31 @@ The native host runs on Node. Check with `node --version`. Get it from
 <https://nodejs.org/> if missing.
 
 ### 2. Load the extension
-`chrome://extensions` → enable **Developer mode** → **Load unpacked** → select
-this folder. The extension ID is pinned to
-`gkfbgibdipccnmamfeflgpahoehpbebf` (via the `key` in `manifest.json`) so the
-native host manifest can trust it on every machine.
+
+**Recommended — auto-update into every profile at once** (kills the mixed-version
+problem): run `update-server/install-windows.bat` as administrator (macOS/Linux:
+`update-server/install-unix.sh`). It packs a signed `.crx`, serves it from a
+local loopback update server, and force-installs it into **every** Chrome
+profile via `ExtensionInstallForcelist` — so all profiles run the same build and
+update together. See [`update-server/README.md`](update-server/README.md).
+Publish a new build later with: bump `version` in `manifest.json` →
+`node update-server/pack.js`.
+
+**Or manually, per profile:** `chrome://extensions` → enable **Developer mode**
+→ **Load unpacked** → select this folder. The extension ID is pinned via the
+`key` in `manifest.json` so the native host manifest trusts it on every machine.
+(The `key` and native-host `allowed_origins` are kept in sync automatically by
+`pack.js` when you use the auto-update installer.)
+
+### Pre-drop health check (Preflight)
+Before a drop, open the dashboard's **PREFLIGHT** tab and click **RUN
+PREFLIGHT**. It opens each profile on Nike, checks it, and closes the tab,
+turning every account red/green on: extension version current, native host
+connected, logged into Nike, delivery address on file, card assigned, cookies
+warm, and a launch target set. A version banner flags any profile running a
+stale build, and **LAUNCH ALL** warns before launching if any profile is
+blocked — so you catch problems *before* the drop, not while 14 accounts fail
+live.
 
 ### 3. Install the native launcher (one time)
 - **Windows:** double-click `native-host/install-windows.bat`
@@ -132,8 +153,9 @@ the same steps in short:
 
 | File | Role |
 |------|------|
-| `dashboard.html/.css/.js` | Multi-account control room (new) |
-| `bootstrap-content-script.js` | Applies central config to a launched profile (new) |
+| `dashboard.html/.css/.js` | Multi-account control room (+ Preflight page & version banner) |
+| `update-server/` | Signed-.crx packer + local update server + force-install scripts (auto-update) |
+| `bootstrap-content-script.js` | Applies central config to a launched profile; also runs the per-profile Preflight checks |
 | `background.js` | + native-host bridge & boot handler (existing flow unchanged) |
 | `native-host/` | Launcher host, installers, host manifest (new) |
 | `popup.*` | Single-profile popup (+ button to open the dashboard) |

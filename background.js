@@ -4,6 +4,8 @@
 
 const SETTINGS_KEY = "snkrsBotSettings";
 const DROP_ALARM_NAME = "snkrsDropAlarm";
+const SELF_PROFILE_KEY = "snkrsSelfProfileDir";
+const EXT_VERSION = chrome.runtime.getManifest().version;
 
 const defaultSettings = {
   enabled: true,
@@ -418,11 +420,16 @@ chrome.runtime.onStartup.addListener(() => {
   rescheduleDashLaunch();
   armUpcomingPoll();
   rearmTabReloads();
+  reportVersionToHost();
 });
 chrome.runtime.onInstalled.addListener(() => {
   scheduleDropAlarm();
   armUpcomingPoll();
   rearmTabReloads();
+  // Fires on every extension UPDATE too — report the new version immediately
+  // so the dashboard banner flips this profile to green without waiting for
+  // the next browser restart.
+  reportVersionToHost();
 });
 
 // ── Drop-time tab reload (survives Memory Saver / SW sleep) ────
@@ -589,6 +596,136 @@ function nativeSend(message) {
   });
 }
 
+// ── Version reporting (feeds the dashboard's stale-profile banner) ──
+// A profile learns its own profileDir the first time the dashboard boots it
+// (#snkrsBoot / #snkrsPreflight markers). We remember it so that EVERY
+// subsequent browser start can report "this profile runs version X" to the
+// shared versions.json via the native host — that's what the dashboard
+// compares against the repo's latest version.
+async function rememberSelfProfileDir(profileDir) {
+  if (!profileDir) return;
+  await chrome.storage.local.set({ [SELF_PROFILE_KEY]: profileDir });
+}
+
+async function getSelfProfileDir() {
+  const d = await chrome.storage.local.get(SELF_PROFILE_KEY);
+  return d[SELF_PROFILE_KEY] || "";
+}
+
+async function reportVersionToHost(profileDir) {
+  const dir = profileDir || await getSelfProfileDir();
+  if (!dir) return; // never booted by the dashboard yet — nothing to attribute
+  await nativeSend({ cmd: "reportVersion", profileDir: dir, entry: { version: EXT_VERSION, ts: Date.now() } });
+}
+
+// Dotted-numeric version compare: -1 / 0 / 1.
+function cmpVer(a, b) {
+  const pa = String(a || "").split(".").map(Number);
+  const pb = String(b || "").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+}
+
+// ── Preflight (pre-drop health check, runs INSIDE each profile) ──
+// The dashboard opens this profile on a nike.com page tagged
+// #snkrsPreflight=<profileDir>. The bootstrap content script collects
+// page-level signals (login token, sign-in button, etc.) and hands them to
+// us; we add everything only the background can see (native host, cookies,
+// version), try an authenticated identity call for the delivery address,
+// then write the whole result to the shared preflight folder and close the
+// tab. The dashboard aggregates the folder into the red/green checklist.
+
+// Best-effort: ask Nike who this token belongs to, and whether the account
+// has address data. 200 = definitely logged in. Anything else = "unknown",
+// never "failed" — the page signals still decide login.
+async function preflightIdentityCheck(accessToken) {
+  const out = { tokenAccepted: null, addressOk: null, detail: "" };
+  if (!accessToken) { out.detail = "no session token on page"; return out; }
+  try {
+    const res = await fetch("https://api.nike.com/identity/user/v1/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (res.status === 401 || res.status === 403) {
+      out.tokenAccepted = false;
+      out.detail = `token rejected (HTTP ${res.status})`;
+      return out;
+    }
+    if (!res.ok) { out.detail = `identity HTTP ${res.status}`; return out; }
+    out.tokenAccepted = true;
+    const body = await res.json();
+    // Look for anything address-shaped in the profile payload.
+    const json = JSON.stringify(body).toLowerCase();
+    if (/"(shippingaddress|addressline1|address1|postalcode|postcode)"/.test(json)) {
+      out.addressOk = true;
+      out.detail = "identity OK · address data present";
+    } else {
+      out.detail = "identity OK · no address in profile payload";
+    }
+  } catch (e) {
+    out.detail = "identity call failed: " + String(e && e.message || e);
+  }
+  return out;
+}
+
+async function runPreflight(profileDir, page, accessToken) {
+  await rememberSelfProfileDir(profileDir);
+
+  const entry = { profileDir, ts: Date.now(), version: EXT_VERSION, checks: {} };
+
+  // 1) Native host reachable FROM THIS PROFILE (each profile registers the
+  //    host independently via the HKCU key — one broken profile can differ).
+  const ping = await nativeSend({ cmd: "ping" });
+  entry.checks.host = ping.ok
+    ? { ok: true, detail: `launcher v${ping.version}` }
+    : { ok: false, detail: ping.error || "native host unreachable" };
+
+  // 2) Extension version vs latest (repo manifest, from the host).
+  const latest = ping.ok ? (ping.latestVersion || "") : "";
+  entry.latestVersion = latest;
+  entry.checks.version = latest
+    ? { ok: cmpVer(EXT_VERSION, latest) >= 0, detail: `running ${EXT_VERSION} · latest ${latest}` }
+    : { ok: null, detail: `running ${EXT_VERSION} · latest unknown (host offline)` };
+
+  // 3) Cookies warm: does this profile carry a real nike.com cookie jar,
+  //    including Kasada's KP_* anti-bot cookies?
+  try {
+    const cookies = await chrome.cookies.getAll({ domain: "nike.com" });
+    const kasada = cookies.some(c => /^KP_/i.test(c.name));
+    entry.checks.cookies = {
+      ok: cookies.length >= 5 && kasada ? true : (cookies.length >= 5 ? null : false),
+      detail: `${cookies.length} nike.com cookies` + (kasada ? " · Kasada present" : " · no Kasada cookie yet"),
+    };
+  } catch (e) {
+    entry.checks.cookies = { ok: null, detail: "cookies API unavailable" };
+  }
+
+  // 4) Login + delivery address: page signals + authenticated identity call.
+  const idc = await preflightIdentityCheck(accessToken);
+  const pageLogin = page && page.login || {};
+  let loginOk;
+  if (idc.tokenAccepted === true) loginOk = true;
+  else if (pageLogin.hasToken && pageLogin.tokenFresh) loginOk = true;
+  else if (pageLogin.signInVisible && !pageLogin.hasToken) loginOk = false;
+  else if (pageLogin.accountMenu) loginOk = true;
+  else loginOk = pageLogin.hasToken ? null : false;
+  entry.checks.login = {
+    ok: loginOk,
+    detail: [
+      pageLogin.hasToken ? (pageLogin.tokenFresh ? "session token valid" : "session token EXPIRED") : "no session token",
+      pageLogin.signInVisible ? "Sign-In button visible" : "",
+      idc.tokenAccepted === true ? "API accepted token" : (idc.tokenAccepted === false ? "API rejected token" : ""),
+    ].filter(Boolean).join(" · "),
+  };
+  entry.checks.address = { ok: idc.addressOk, detail: idc.detail };
+
+  await nativeSend({ cmd: "setPreflight", profileDir, entry });
+  return entry;
+}
+
 // Build the per-profile settings object that the existing content scripts
 // already understand, from the central shared config + this account's row.
 function buildSettingsForProfile(config, profileDir) {
@@ -725,6 +862,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Boot bootstrap (content script) asks us to fetch this profile's central
   // config from the native host and hand back ready-to-store settings.
   if (msg.type === "boot_fetch_settings") {
+    // Booting tells us which profile we are — remember it and report our
+    // version so the dashboard's stale-profile banner sees this profile.
+    rememberSelfProfileDir(msg.profileDir).then(() => reportVersionToHost(msg.profileDir));
     nativeSend({ cmd: "getConfig" }).then((resp) => {
       if (!resp || !resp.ok) {
         sendResponse({ ok: false, error: resp && resp.error || "host error" });
@@ -738,6 +878,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (sender?.tab?.id) tabProfileMap[sender.tab.id] = msg.profileDir;
       sendResponse({ ok: true, settings });
     });
+    return true;
+  }
+
+  // Preflight: the bootstrap content script (opened with #snkrsPreflight=…)
+  // hands us its page-level signals; we complete the checks, publish the
+  // result to the shared preflight folder, and close the tab (unless the
+  // URL asked to keep it open for debugging).
+  if (msg.type === "preflight_page_checks") {
+    const tabId = sender?.tab?.id;
+    (async () => {
+      let entry = null;
+      try {
+        entry = await runPreflight(msg.profileDir, msg.page || {}, msg.accessToken || "");
+      } catch (e) {
+        // Still publish SOMETHING so the dashboard doesn't show "no data".
+        entry = { profileDir: msg.profileDir, ts: Date.now(), version: EXT_VERSION,
+          checks: { host: { ok: null, detail: "preflight crashed: " + String(e && e.message || e) } } };
+        await nativeSend({ cmd: "setPreflight", profileDir: msg.profileDir, entry }).catch(() => {});
+      }
+      sendResponse({ ok: true, entry });
+      if (!msg.keepOpen && tabId != null) {
+        // Small grace so late cookies (Kasada) land before the tab dies.
+        setTimeout(() => chrome.tabs.remove(tabId, () => { chrome.runtime.lastError; }), 4000);
+      }
+    })();
     return true;
   }
 

@@ -40,6 +40,7 @@
       <button class="nav-tab active" data-nav="home">HOME</button>
       <button class="nav-tab" data-nav="drop">DROP</button>
       <button class="nav-tab" data-nav="live">LIVE</button>
+      <button class="nav-tab" data-nav="preflight">PREFLIGHT</button>
       <button class="nav-tab" data-nav="profiles">PROFILES</button>
       <button class="nav-tab" data-nav="cards">CARDS</button>
       <button class="nav-tab" data-nav="orders">ORDERS</button>
@@ -263,6 +264,30 @@
       <div id="liveGrid" class="live-grid"></div>
       <div id="liveEmpty" class="live-empty" style="display:none;">
         No activity yet. Launch your accounts — each one's live checkout step appears here.
+      </div>
+    </div>
+
+    <!-- ─────────────────── PREFLIGHT ─────────────────── -->
+    <div class="page-section" id="page-preflight">
+      <div class="section-header">
+        <h1 class="section-title">PREFLIGHT</h1>
+        <span class="section-sub">Pre-drop health check across every profile — go green before you launch</span>
+        <button id="preflightRunBtn" class="btn btn-accent" style="margin-left:auto;">🩺 RUN PREFLIGHT</button>
+        <button id="preflightClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
+      </div>
+
+      <!-- Version / update-server banner -->
+      <div id="versionBanner" class="version-banner"></div>
+
+      <p class="hint" id="preflightMsg" style="margin:10px 0 6px;">
+        RUN PREFLIGHT opens each profile on Nike, checks it, and closes the tab.
+        Each row turns red/green so you catch problems before the drop, not during it.
+      </p>
+
+      <div id="preflightSummary" class="pf-summary"></div>
+      <div id="preflightGrid" class="pf-grid"></div>
+      <div id="preflightEmpty" class="live-empty">
+        No preflight run yet. Click <strong>RUN PREFLIGHT</strong> to check every profile.
       </div>
     </div>
 

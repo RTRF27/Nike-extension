@@ -1,30 +1,40 @@
-# Extension install — manual load (force-install removed)
+# Auto-update is back — and it no longer nukes itself
 
-The automated force-install (Chrome enterprise policy + local crx server) has
-been **removed**. It caused the extension to vanish on restart: when the policy
-claimed the extension ID but Chrome couldn't reach the local crx server at
-startup, Chrome dropped the policy-managed copy *and* overrode any manually
-loaded one.
+The old force-install here was removed because it wrote the Chrome policy
+**before** verifying anything: when the policy claimed the extension ID but
+Chrome couldn't reach the crx server at startup, Chrome dropped the extension
+in every profile.
 
-## If your extension keeps disappearing — clean up first
+That's fixed. The replacement lives in **[`../update-server/`](../update-server/)**
+and is safe by construction: it packs a self-verified signed `.crx`, starts +
+health-checks the local update server, and only writes
+`ExtensionInstallForcelist` **after** it has actually downloaded `update.xml`
+and the crx from that server. A down server can no longer remove anything —
+Chrome keeps a policy-installed extension even when the update URL is
+unreachable.
 
-If you ever ran the old auto-installer, purge its leftovers once:
+## Use this instead
 
-1. Right-click **`REMOVE-ALL.bat`** → **Run as administrator**.
-   - Deletes the Chrome `ExtensionInstallForcelist` / `ExtensionInstallSources`
-     policy (HKLM + HKCU), the login scheduled task, and the local server.
-2. Quit Chrome completely (Task Manager → end all `chrome.exe`), reopen.
-3. `chrome://policy` → **Reload policies** → confirm `ExtensionInstallForcelist`
-   is gone.
+- **Install auto-update:** run `../update-server/install-windows.bat` as
+  administrator (macOS/Linux: `../update-server/install-unix.sh`).
+- **Publish an update:** bump `version` in `manifest.json`, then
+  `node ../update-server/pack.js`.
+- The dashboard's **PREFLIGHT** tab shows a version banner flagging any profile
+  still on an old build.
 
-## Loading the extension (the supported way)
+See [`../update-server/README.md`](../update-server/README.md) for the full
+explanation of why this pipeline can't repeat the old failure.
 
-In each profile you use:
+## Cleaning up the OLD broken installer
 
-1. `chrome://extensions` → enable **Developer mode**.
-2. **Load unpacked** → select the repo folder (the one with `manifest.json`).
-3. It loads as ID `gkfbgibdipccnmamfeflgpahoehpbebf` (pinned by the manifest
-   `key`, so it matches the native host) and **stays loaded across restarts**.
+If you ever ran the original auto-installer, purge its leftovers once with
+**`REMOVE-ALL.bat`** (right-click → Run as administrator) before installing the
+new one. It deletes the old policy, login task, and server. Then quit Chrome
+completely, reopen, and run the new installer above.
 
-Repeat once per profile. Because the launcher no longer passes
-`--load-extension`, bot-launched profiles keep whatever you loaded manually.
+## Manual load (no auto-update)
+
+Still supported, per profile: `chrome://extensions` → Developer mode → **Load
+unpacked** → select the repo folder. It loads with the ID pinned by the
+manifest `key`. (The auto-update installer is the way to avoid doing this 14
+times.)
