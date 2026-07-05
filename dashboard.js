@@ -582,14 +582,26 @@ function renderPreflight() {
   for (const acct of withProfile) {
     const checks = mergedChecksFor(acct);
     const rec = checks.__rec || {};
-    const pendingRun = rec.__pending && !rec.ts;
-    const verdict = pendingRun ? "pending" : preflightVerdict(checks);
+    // A profile that was launched for preflight but never reported back within
+    // the grace window almost always means it isn't logged in (Nike redirected
+    // its /sg/member page to login, dropping our marker) or the tab didn't open.
+    // Surface that as a hard fail instead of an eternal "CHECKING…".
+    const PREFLIGHT_TIMEOUT_MS = 40000;
+    const timedOut = rec.__pending && !rec.ts && rec.startedAt &&
+                     (Date.now() - rec.startedAt > PREFLIGHT_TIMEOUT_MS);
+    const pendingRun = rec.__pending && !rec.ts && !timedOut;
+    const verdict = pendingRun ? "pending" : (timedOut ? "red" : preflightVerdict(checks));
     counts[verdict] = (counts[verdict] || 0) + 1;
+
+    if (timedOut && !checks.login) {
+      checks.login = { ok: false, detail: "no response — is this profile logged in / did the tab open?" };
+    }
 
     const card = el("div", { className: `pf-card ${verdict}` });
     const head = el("div", { className: "pf-card-head" });
     head.appendChild(el("span", { className: "pf-card-name" }, acct.label || acct.profileDir));
     const verdictText = pendingRun ? "CHECKING…"
+      : timedOut ? "NO RESPONSE"
       : verdict === "green" ? "READY"
       : verdict === "red" ? "BLOCKED"
       : verdict === "amber" ? "REVIEW" : "NO DATA";
@@ -715,8 +727,10 @@ async function runPreflight() {
   await saveAll(true);
 
   // Mark every target profile as pending so the UI shows CHECKING immediately.
+  // startedAt lets us flag profiles that never report back (e.g. a logged-out
+  // profile whose /sg/member page redirected to login, dropping our marker).
   for (const a of withProfile) {
-    preflightResults[a.profileDir] = { __pending: true, profileDir: a.profileDir };
+    preflightResults[a.profileDir] = { __pending: true, startedAt: Date.now(), profileDir: a.profileDir };
   }
   renderPreflight();
   navigateTo("preflight");
@@ -754,7 +768,10 @@ function startPreflightPolling() {
         changed = true;
       }
     }
-    if (changed && _currentPage === "preflight") { renderPreflight(); refreshVersionBanner(); }
+    // Re-render on any change, OR while entries are still pending so the
+    // no-response timeout can flip a stuck profile to a hard fail on schedule.
+    const anyPending = Object.values(preflightResults).some(r => r && r.__pending && !r.ts);
+    if (_currentPage === "preflight" && (changed || anyPending)) { renderPreflight(); refreshVersionBanner(); }
   };
   tick();
   preflightPollTimer = setInterval(tick, 2500);

@@ -201,21 +201,76 @@ function detectPageStatus() {
 }
 
 // ── Confetti celebration ──────────────────────────────────────
+// Self-contained canvas confetti — no external script. Nike's Content-Security-
+// Policy blocks loading a CDN <script> into the page, so the old jsdelivr-based
+// version silently never fired. This draws its own particles on an overlay
+// canvas and cleans itself up.
 function launchConfetti() {
-  const script = document.createElement("script");
-  script.src = "https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js";
-  script.onload = () => {
-    const duration = 6000;
-    const end = Date.now() + duration;
+  try {
+    if (document.getElementById("snkrs-confetti-canvas")) return; // already running
+    const canvas = document.createElement("canvas");
+    canvas.id = "snkrs-confetti-canvas";
+    canvas.style.cssText =
+      "position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2147483646;";
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext("2d");
     const colors = ["#fa5400", "#ffffff", "#111111", "#1db954", "#ffd700"];
 
+    const onResize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+    window.addEventListener("resize", onResize);
+
+    // Spawn particles from both bottom corners, arcing inward.
+    const particles = [];
+    const spawn = () => {
+      for (const side of [0, 1]) {
+        for (let i = 0; i < 6; i++) {
+          const angle = side === 0 ? randFloat(-1.2, -0.3) : randFloat(-2.84, -1.94);
+          const speed = randFloat(9, 17);
+          particles.push({
+            x: side === 0 ? 0 : canvas.width,
+            y: canvas.height,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            size: randFloat(5, 10),
+            color: colors[randInt(0, colors.length - 1)],
+            rot: randFloat(0, Math.PI * 2),
+            vrot: randFloat(-0.2, 0.2),
+            life: 1,
+          });
+        }
+      }
+    };
+
+    const end = Date.now() + 6000;
     (function frame() {
-      window.confetti({ particleCount: 6, angle: 60, spread: 65, origin: { x: 0 }, colors });
-      window.confetti({ particleCount: 6, angle: 120, spread: 65, origin: { x: 1 }, colors });
-      if (Date.now() < end) requestAnimationFrame(frame);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (Date.now() < end && Math.random() < 0.9) spawn();
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.vy += 0.28;            // gravity
+        p.vx *= 0.99;            // drag
+        p.x += p.vx; p.y += p.vy;
+        p.rot += p.vrot;
+        p.life -= 0.006;
+        if (p.life <= 0 || p.y > canvas.height + 20) { particles.splice(i, 1); continue; }
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, p.life);
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+        ctx.restore();
+      }
+      if (Date.now() < end || particles.length) {
+        requestAnimationFrame(frame);
+      } else {
+        window.removeEventListener("resize", onResize);
+        canvas.remove();
+      }
     })();
-  };
-  document.head.appendChild(script);
+  } catch (e) { log("confetti error (non-fatal):", e); }
 }
 
 // ── Status Poller ────────────────────────────────────────────

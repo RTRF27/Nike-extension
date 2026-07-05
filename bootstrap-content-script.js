@@ -40,14 +40,20 @@
       try {
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
-          if (!/^oidc\.user:/i.test(k)) continue;
+          const raw = localStorage.getItem(k);
+          // Nike's OIDC session lives under an "oidc.user:*" key, but the exact
+          // prefix has changed across their web builds — so also accept any
+          // value that parses to an object carrying an access_token.
+          if (!/oidc|access_token|nike/i.test(k) && !/access_token/.test(raw || "")) continue;
           try {
-            const v = JSON.parse(localStorage.getItem(k));
-            if (v && v.access_token) {
+            const v = JSON.parse(raw);
+            const tok = v && (v.access_token || (v.tokens && v.tokens.access_token));
+            if (tok) {
               login.hasToken = true;
-              const expMs = (Number(v.expires_at) || 0) * 1000;
-              login.tokenFresh = expMs > Date.now();
-              if (!accessToken || login.tokenFresh) accessToken = v.access_token;
+              const expSec = Number(v.expires_at) || Number(v.expiresAt) || 0;
+              const expMs = expSec > 1e12 ? expSec : expSec * 1000; // secs or ms
+              login.tokenFresh = expMs ? expMs > Date.now() : true;
+              if (!accessToken || login.tokenFresh) accessToken = tok;
             }
           } catch (e) {}
         }
