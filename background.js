@@ -752,6 +752,10 @@ function buildSettingsForProfile(config, profileDir) {
     preferredSizeType:   account.sizeType || "footwear",
     productKeyword:      keyword,
     profileLabel:        account.label || profileDir,
+    // The profile's own directory, so content scripts can self-identify in the
+    // messages they send — the background then never depends on a volatile
+    // in-memory tab→profile map to attribute their status.
+    profileDir:          profileDir,
     logWebhook:          account.logWebhook || opts.logWebhook || "",
     alertWebhook:        account.alertWebhook || opts.alertWebhook || "",
     cardName:            card.cardName   || "",
@@ -779,10 +783,62 @@ function buildSettingsForProfile(config, profileDir) {
 const cardFillCache = {};
 
 // ── Live status board support ─────────────────────────────────
-// Maps tabId → profileDir so log messages from a launched Nike tab
-// can be attributed to the correct dashboard account row.
+// Maps tabId → profileDir so log messages from a launched Nike tab can be
+// attributed to the correct dashboard account row.
+//
+// IMPORTANT (MV3): the service worker is ephemeral — Chrome terminates it after
+// ~30s idle, under memory pressure, and at a 5-minute hard cap. A plain
+// in-memory object is lost on every restart, so any log/status/replay message
+// that arrives after a restart could not be attributed to a profile and was
+// silently dropped — which is why the LIVE board went stale while profiles sat
+// holding for a drop. We now BACK the map with chrome.storage.session (survives
+// worker restarts within the browser session) and rehydrate on startup. Content
+// scripts also self-identify (msg.profileDir) as the primary source of truth.
+const TAB_PROFILE_STORE = "snkrsTabProfiles";
 const tabProfileMap = {};
-chrome.tabs.onRemoved.addListener((tabId) => { delete tabProfileMap[tabId]; });
+
+// Rehydrate the in-memory cache whenever the worker (re)starts.
+chrome.storage.session.get(TAB_PROFILE_STORE).then((d) => {
+  Object.assign(tabProfileMap, d[TAB_PROFILE_STORE] || {});
+}).catch(() => {});
+
+async function persistTabProfile(tabId, profileDir) {
+  if (tabId == null || !profileDir) return;
+  tabProfileMap[tabId] = profileDir;
+  try {
+    const d = await chrome.storage.session.get(TAB_PROFILE_STORE);
+    const m = d[TAB_PROFILE_STORE] || {};
+    if (m[tabId] === profileDir) return;
+    m[tabId] = profileDir;
+    await chrome.storage.session.set({ [TAB_PROFILE_STORE]: m });
+  } catch (e) { /* session storage unavailable — in-memory still works */ }
+}
+
+// Resolve the profile for a tab, most-authoritative first:
+//   1. the profileDir the content script stamped into the message (survives
+//      worker restarts AND tab reloads),
+//   2. the in-memory cache,
+//   3. the persisted session store (rehydrates the cache on a cold worker).
+async function resolveTabProfile(tabId, msgProfileDir) {
+  if (msgProfileDir) { persistTabProfile(tabId, msgProfileDir); return msgProfileDir; }
+  if (tabId == null) return null;
+  if (tabProfileMap[tabId]) return tabProfileMap[tabId];
+  try {
+    const d = await chrome.storage.session.get(TAB_PROFILE_STORE);
+    const m = d[TAB_PROFILE_STORE] || {};
+    if (m[tabId]) { tabProfileMap[tabId] = m[tabId]; return m[tabId]; }
+  } catch (e) {}
+  return null;
+}
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  delete tabProfileMap[tabId];
+  try {
+    const d = await chrome.storage.session.get(TAB_PROFILE_STORE);
+    const m = d[TAB_PROFILE_STORE] || {};
+    if (m[tabId] != null) { delete m[tabId]; await chrome.storage.session.set({ [TAB_PROFILE_STORE]: m }); }
+  } catch (e) {}
+});
 
 // A short human label for a tab (the product it's on) for the live monitor.
 function tabLabel(tab) {
@@ -875,7 +931,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "No matching account in shared config." });
         return;
       }
-      if (sender?.tab?.id) tabProfileMap[sender.tab.id] = msg.profileDir;
+      if (sender?.tab?.id) persistTabProfile(sender.tab.id, msg.profileDir);
       sendResponse({ ok: true, settings });
     });
     return true;
@@ -1116,26 +1172,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // id) so the command-center monitor can show every product tab in every
     // browser — not just the last one per profile. Stored locally AND mirrored
     // to the shared status folder so the dashboard (a different Chrome profile)
-    // can see them all.
+    // can see them all. Resolve the profile from the message first (content
+    // scripts self-identify), falling back to the persisted tab→profile map, so
+    // a restarted service worker never drops status.
     const tabId = sender?.tab?.id;
-    const profileDir = tabId != null ? tabProfileMap[tabId] : null;
-    if (profileDir != null && tabId != null) {
-      const code = parseStatusFromLog(msg.message);
-      const key = `${profileDir}#${tabId}`;
-      const label = tabLabel(sender && sender.tab);
-      chrome.storage.local.get("snkrsStatus", (data) => {
-        const s = data.snkrsStatus || {};
-        const prev = s[key] || {};
-        const entry = {
-          key, profileDir, tabId,
-          label: label || prev.label || "",
-          code: code || prev.code || "checkout", // keep last known stage if none
-          message: msg.message,
-          time: Date.now(),
-        };
-        s[key] = entry;
-        chrome.storage.local.set({ snkrsStatus: s });
-        pushStatusToShared(key, entry); // throttled, best-effort
+    if (tabId != null) {
+      resolveTabProfile(tabId, msg.profileDir).then((profileDir) => {
+        if (profileDir == null) return;
+        const code = parseStatusFromLog(msg.message);
+        const key = `${profileDir}#${tabId}`;
+        const label = tabLabel(sender && sender.tab);
+        chrome.storage.local.get("snkrsStatus", (data) => {
+          const s = data.snkrsStatus || {};
+          const prev = s[key] || {};
+          const entry = {
+            key, profileDir, tabId,
+            label: label || prev.label || "",
+            code: code || prev.code || "checkout", // keep last known stage if none
+            message: msg.message,
+            time: Date.now(),
+          };
+          s[key] = entry;
+          chrome.storage.local.set({ snkrsStatus: s });
+          pushStatusToShared(key, entry); // throttled, best-effort
+        });
       });
     }
     return false;
@@ -1148,23 +1208,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Chrome profile) can build its per-account Drop Replay view.
   if (msg.type === "checkout_event") {
     const tabId = sender?.tab?.id;
-    const profileDir = tabId != null ? tabProfileMap[tabId] : null;
     if (tabId == null) return false;
-    const key = `${profileDir || "local"}#${tabId}`;
-    const ev = { code: msg.code, t: Number(msg.t) || Date.now(), extra: msg.extra || null };
-    chrome.storage.local.get("snkrsTimeline", (data) => {
-      const store = data.snkrsTimeline || {};
-      const entry = store[key] || { key, profileDir: profileDir || "", tabId, events: [], dropAt: 0, updated: 0 };
-      entry.profileDir = profileDir || entry.profileDir;
-      if (msg.dropAt) entry.dropAt = Number(msg.dropAt) || entry.dropAt;
-      entry.events.push(ev);
-      if (entry.events.length > 60) entry.events = entry.events.slice(-60);
-      entry.updated = Date.now();
-      entry.label = tabLabel(sender && sender.tab) || entry.label || "";
-      store[key] = entry;
-      chrome.storage.local.set({ snkrsTimeline: store });
-      // Events are infrequent (~10/drop) so no throttling — flush each to disk.
-      if (profileDir) nativeSend({ cmd: "setTimeline", profileDir: key, entry }).catch(() => {});
+    resolveTabProfile(tabId, msg.profileDir).then((profileDir) => {
+      const key = `${profileDir || "local"}#${tabId}`;
+      const ev = { code: msg.code, t: Number(msg.t) || Date.now(), extra: msg.extra || null };
+      chrome.storage.local.get("snkrsTimeline", (data) => {
+        const store = data.snkrsTimeline || {};
+        const entry = store[key] || { key, profileDir: profileDir || "", tabId, events: [], dropAt: 0, updated: 0 };
+        entry.profileDir = profileDir || entry.profileDir;
+        if (msg.dropAt) entry.dropAt = Number(msg.dropAt) || entry.dropAt;
+        entry.events.push(ev);
+        if (entry.events.length > 60) entry.events = entry.events.slice(-60);
+        entry.updated = Date.now();
+        entry.label = tabLabel(sender && sender.tab) || entry.label || "";
+        store[key] = entry;
+        chrome.storage.local.set({ snkrsTimeline: store });
+        // Events are infrequent (~10/drop) so no throttling — flush each to disk.
+        if (profileDir) nativeSend({ cmd: "setTimeline", profileDir: key, entry }).catch(() => {});
+      });
     });
     return false;
   }
@@ -1173,10 +1234,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Dashboard.js normalises and displays it.
   if (msg.type === "orders_api_data" || msg.type === "orders_dom_data") {
     const tabId     = sender?.tab?.id;
-    const profileDir = msg.profileDir || (tabId ? tabProfileMap[tabId] : "");
-    if (!profileDir) return false;
-
-    chrome.storage.local.get("snkrsOrders", (data) => {
+    resolveTabProfile(tabId, msg.profileDir).then((profileDir) => {
+      if (!profileDir) return;
+      chrome.storage.local.get("snkrsOrders", (data) => {
       const store   = data.snkrsOrders || {};
       const entry   = store[profileDir] || {};
       entry.ts      = Date.now();
@@ -1204,6 +1264,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // DASHBOARD (which runs in a different Chrome profile and therefore can't
       // see this profile's chrome.storage.local) can read these orders.
       nativeSend({ cmd: "setOrders", profileDir, entry }).catch(() => {});
+      });
     });
     return false;
   }

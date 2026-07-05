@@ -195,3 +195,16 @@ the same steps in short:
 - **🔥 WARM ALL (Preflight tab)** — opens the SNKRS feed in every profile (bot
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
+
+## Live-feed attribution (v3.7)
+
+The LIVE board used to go stale while profiles sat holding for a drop. Cause:
+the background attributed each tab's status via an **in-memory** tab→profile
+map, and MV3 service workers are ephemeral (killed after ~30s idle / memory
+pressure / a 5-minute cap). After a restart the map was empty and never rebuilt,
+so status/replay/orders messages couldn't be attributed and were silently
+dropped. Fixed two ways: content scripts now **self-identify** (`profileDir` in
+every `log`/`checkout_event` message), and the map is **persisted to
+`chrome.storage.session`** and rehydrated on worker startup. Covered by
+`test-harness/attribution-test.mjs` (exercises the real functions across a
+simulated worker restart).

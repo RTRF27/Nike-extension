@@ -18,7 +18,9 @@ let entryAttempted = false;
 
 function log(...args) { console.log("[SNKRSBot]", ...args); }
 function logBG(msg) {
-  try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
+  // Stamp profileDir so the background attributes status even after an MV3
+  // service-worker restart wiped its in-memory tab→profile map.
+  try { chrome.runtime.sendMessage({ type: "log", message: msg, profileDir: settings?.profileDir }); }
   catch (e) { console.warn("[SNKRSBot] logBG:", e); }
 }
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }

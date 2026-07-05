@@ -12,7 +12,7 @@ function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) 
 function randFloat(min, max) { return Math.random() * (max - min) + min; }
 
 function logBG(msg) {
-  try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
+  try { chrome.runtime.sendMessage({ type: "log", message: msg, profileDir: settings?.profileDir }); }
   catch (e) { console.warn("[SNKRSBot PAYMENTS] logBG:", e); }
 }
 

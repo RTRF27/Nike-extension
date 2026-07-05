@@ -50,7 +50,9 @@ function extAlive() { try { return !!(chrome.runtime && chrome.runtime.id); } ca
 
 function logBG(msg) {
   if (!extAlive()) return; // orphaned tab — extension reloaded; stop quietly
-  try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
+  // Stamp our profileDir so the background can attribute this status even after
+  // its (ephemeral MV3) service worker restarted and lost its in-memory map.
+  try { chrome.runtime.sendMessage({ type: "log", message: msg, profileDir: settings?.profileDir }); }
   catch (e) { /* context invalidated mid-call — ignore */ }
 }
 
@@ -66,6 +68,7 @@ function emitEvent(evt) {
       dropAt: evt.dropAt || 0,
       extra: evt.extra || null,
       url: location.href,
+      profileDir: settings?.profileDir,
     });
   } catch (e) { /* ignore */ }
 }
