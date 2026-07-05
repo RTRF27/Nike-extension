@@ -952,3 +952,110 @@ select.inp { cursor: pointer; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
   html { scroll-behavior: auto; }
 }
+
+/* ══════════════════ PREFLIGHT + VERSION BANNER ══════════════════ */
+.version-banner {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+  padding: 13px 16px; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); background: var(--glass);
+  font-size: 13px; color: var(--grey); margin-bottom: 6px;
+}
+.version-banner.ok    { border-color: rgba(52,211,153,.35); background: linear-gradient(90deg, rgba(52,211,153,.09), transparent); }
+.version-banner.warn  { border-color: rgba(251,146,60,.4);  background: linear-gradient(90deg, rgba(251,146,60,.1), transparent); }
+.version-banner.bad   { border-color: rgba(248,113,113,.4); background: linear-gradient(90deg, rgba(248,113,113,.1), transparent); }
+.version-banner .vb-title { font-weight: 800; letter-spacing: .3px; color: var(--white); }
+.version-banner.ok   .vb-title { color: var(--green); }
+.version-banner.warn .vb-title { color: var(--orange); }
+.version-banner.bad  .vb-title { color: var(--red); }
+.version-banner .vb-pill {
+  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 700;
+  letter-spacing: .5px; border: 1px solid var(--purple-dim); color: var(--purple2);
+  white-space: nowrap;
+}
+.version-banner .vb-pill.stale { border-color: rgba(251,146,60,.5); color: var(--orange); }
+.version-banner .vb-pill.good  { border-color: rgba(52,211,153,.45); color: var(--green); }
+.version-banner .vb-spacer { flex: 1 1 auto; }
+
+.pf-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 16px; }
+.pf-chip {
+  display: flex; align-items: center; gap: 7px; padding: 7px 13px;
+  border-radius: 20px; border: 1px solid var(--line); background: var(--panel2);
+  font-size: 12px; font-weight: 700; letter-spacing: .4px;
+}
+.pf-chip .n { font-size: 15px; font-weight: 800; }
+
+.pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.pf-card {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--glass); padding: 15px 16px 13px; position: relative; overflow: hidden;
+}
+.pf-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+  background: var(--grey2);
+}
+.pf-card.green::before { background: var(--green); box-shadow: 0 0 14px var(--green); }
+.pf-card.red::before   { background: var(--red);   box-shadow: 0 0 14px var(--red); }
+.pf-card.amber::before { background: var(--orange); box-shadow: 0 0 14px var(--orange); }
+.pf-card.pending::before { background: var(--purple4); animation: pulse-dot 1.6s ease-in-out infinite; }
+.pf-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.pf-card-name { font-weight: 800; font-size: 15px; color: var(--white); letter-spacing: .3px; }
+.pf-card-verdict {
+  font-size: 11px; font-weight: 800; letter-spacing: .8px; padding: 3px 9px; border-radius: 6px;
+}
+.pf-card-verdict.green { color: var(--green); background: rgba(52,211,153,.14); }
+.pf-card-verdict.red   { color: var(--red);   background: rgba(248,113,113,.14); }
+.pf-card-verdict.amber { color: var(--orange); background: rgba(251,146,60,.14); }
+.pf-card-verdict.pending { color: var(--purple2); background: rgba(139,92,246,.16); }
+.pf-checks { display: flex; flex-direction: column; gap: 6px; }
+.pf-check { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; line-height: 1.4; }
+.pf-check .ico { flex-shrink: 0; width: 16px; text-align: center; font-size: 13px; }
+.pf-check .lbl { font-weight: 700; color: var(--white); min-width: 66px; }
+.pf-check .dtl { color: var(--grey); }
+.pf-check.ok   .lbl { color: var(--green); }
+.pf-check.bad  .lbl { color: var(--red); }
+.pf-check.warn .lbl { color: var(--orange); }
+.pf-card-time { margin-top: 10px; font-size: 11px; color: var(--grey2); }
+
+/* ══════════════════ DROP REPLAY / ANALYTICS ══════════════════ */
+.replay-list { display: flex; flex-direction: column; gap: 12px; }
+.replay-card {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel2); padding: 13px 15px;
+}
+.replay-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.replay-name { font-weight: 800; color: var(--white); letter-spacing: .3px; }
+.replay-outcome { font-size: 12px; font-weight: 800; letter-spacing: .5px; }
+.replay-track {
+  display: flex; gap: 6px; align-items: flex-start;
+  overflow-x: auto; padding-bottom: 4px;
+}
+.replay-step {
+  flex: 1 1 0; min-width: 74px; display: flex; flex-direction: column;
+  align-items: center; gap: 5px; position: relative; opacity: .38;
+}
+.replay-step.on { opacity: 1; }
+/* connector line between steps */
+.replay-step::before {
+  content: ""; position: absolute; top: 6px; left: 50%; width: 100%; height: 2px;
+  background: var(--line); z-index: 0;
+}
+.replay-step:last-child::before { display: none; }
+.replay-step.on::before { background: var(--purple-dim); }
+.replay-dot {
+  width: 13px; height: 13px; border-radius: 50%; background: var(--grey2);
+  border: 2px solid var(--panel2); position: relative; z-index: 1;
+}
+.replay-step.on .replay-dot { background: var(--purple4); box-shadow: 0 0 8px var(--purple-glow); }
+.replay-step-label { font-size: 10.5px; font-weight: 700; color: var(--grey); text-align: center; }
+.replay-step-time { font-size: 10.5px; color: var(--purple2); font-variant-numeric: tabular-nums; }
+.replay-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.replay-metric {
+  font-size: 11px; font-weight: 700; letter-spacing: .3px; color: var(--grey);
+  padding: 3px 9px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel);
+}
+.replay-offset {
+  font-size: 11.5px; font-weight: 800; letter-spacing: .3px;
+  padding: 3px 10px; border-radius: 14px;
+}
+.replay-offset.after  { color: var(--green);  background: rgba(52,211,153,.12);  border: 1px solid rgba(52,211,153,.4); }
+.replay-offset.before { color: var(--orange); background: rgba(251,146,60,.12); border: 1px solid rgba(251,146,60,.45); }

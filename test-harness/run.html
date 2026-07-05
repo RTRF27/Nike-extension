@@ -1,0 +1,116 @@
+<!doctype html>
+<!-- ============================================================
+     Visual checkout runner — iterate the fill/confirm/submit flow
+     against a saved fixture WITHOUT a live drop.
+     Open this file in a browser (or via `node test-harness/serve.mjs`).
+     Pick a fixture, then:
+       • "Snapshot"  → dump what the finders currently see
+       • "Run machine" → drive the whole state machine, streaming its
+         structured log + state transitions live.
+     The fixture loads in an <iframe>, so the machine drives real DOM
+     with the real layout engine — same as the offline Playwright test.
+     ============================================================ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SNKRS Checkout — offline runner</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; font-family: ui-monospace, Menlo, Consolas, monospace; background:#0b0a12; color:#e7e3ff; }
+  header { padding:12px 16px; background:#151228; border-bottom:1px solid #2a2350; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  select, button { font:inherit; padding:6px 12px; border-radius:8px; border:1px solid #3b2a6a; background:#1c1836; color:#e7e3ff; cursor:pointer; }
+  button.primary { background:#7c3aed; border-color:#7c3aed; }
+  button:hover { filter:brightness(1.15); }
+  .wrap { display:grid; grid-template-columns: 1fr 1fr; gap:0; height: calc(100vh - 52px); }
+  iframe { width:100%; height:100%; border:0; background:#fff; }
+  #log { margin:0; padding:12px; overflow:auto; white-space:pre-wrap; font-size:12.5px; line-height:1.5; background:#0b0a12; }
+  .state { font-weight:700; color:#a855f7; }
+  .err { color:#f87171; } .ok { color:#34d399; } .dim { color:#8b84b8; }
+  .badge { padding:2px 8px; border-radius:12px; background:#2a2350; font-size:12px; }
+</style>
+</head>
+<body>
+  <header>
+    <strong>SNKRS Checkout Runner</strong>
+    <select id="fixture">
+      <option value="flow-live.html">flow-live (drivable end-to-end)</option>
+      <option value="delivery.html">delivery</option>
+      <option value="payment-iframe.html">payment-iframe</option>
+      <option value="saved-card.html">saved-card</option>
+      <option value="inline-card.html">inline-card</option>
+      <option value="confirmation.html">confirmation</option>
+    </select>
+    <button id="reload">↻ Reload fixture</button>
+    <button id="snapshot">🔬 Snapshot</button>
+    <button class="primary" id="run">▶ Run machine</button>
+    <label><input type="checkbox" id="testMode"> test mode</label>
+    <label>hold <input type="number" id="holdSec" value="0" min="0" style="width:56px"> s</label>
+    <span class="badge" id="stateBadge">idle</span>
+  </header>
+  <div class="wrap">
+    <iframe id="frame"></iframe>
+    <pre id="log"></pre>
+  </div>
+
+<script src="../checkout-core.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  function line(msg, cls) {
+    const span = document.createElement("span");
+    if (cls) span.className = cls;
+    span.textContent = msg + "\n";
+    logEl.appendChild(span); logEl.scrollTop = logEl.scrollHeight;
+  }
+  function clear() { logEl.textContent = ""; }
+
+  function loadFixture() {
+    return new Promise((res) => {
+      const f = $("frame");
+      f.onload = () => res(f.contentDocument);
+      f.src = "fixtures/" + $("fixture").value + "?t=" + Date.now();
+    });
+  }
+
+  $("reload").onclick = async () => { clear(); await loadFixture(); line("Fixture reloaded.", "dim"); };
+  $("fixture").onchange = () => $("reload").click();
+
+  $("snapshot").onclick = async () => {
+    const doc = $("frame").contentDocument;
+    const s = window.CheckoutCore.snapshotPageState(doc);
+    line("── snapshot ──", "dim");
+    Object.entries(s).forEach(([k, v]) =>
+      line("  " + k.padEnd(18) + " " + v, v === true ? "ok" : (v === false ? "dim" : "")));
+  };
+
+  $("run").onclick = async () => {
+    clear();
+    const doc = await loadFixture();
+    await new Promise(r => setTimeout(r, 150));
+    const C = window.CheckoutCore;
+    const holdMs = Math.max(0, Number($("holdSec").value) || 0) * 1000;
+    const dropAt = holdMs ? Date.now() + holdMs : 0;
+    const machine = new C.CheckoutMachine({
+      doc,
+      log: (m) => line(m),
+      dbg: (m) => line(m, "dim"),
+      emit: (e) => { $("stateBadge").textContent = e.code; },
+      tag: () => "",
+      getCardFill: () => Promise.resolve(false),
+      cancelCardFill: () => {},
+      isTestMode: () => $("testMode").checked,
+      getDropAt: () => dropAt,
+    });
+    line("▶ running machine…", "state");
+    try {
+      const r = await machine.run();
+      line(`\n── done: state=${machine.state} submitted=${r.submitted} ──`,
+        r.submitted ? "ok" : "err");
+      $("stateBadge").textContent = machine.state;
+    } catch (e) { line("machine threw: " + e, "err"); }
+  };
+
+  loadFixture().then(() => line("Ready. Pick a fixture and Run machine.", "dim"));
+</script>
+</body>
+</html>

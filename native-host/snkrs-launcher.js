@@ -28,7 +28,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-const HOST_VERSION = "1.1.0";
+const HOST_VERSION = "1.2.0";
 
 // ── Shared config file ("the generic file") ───────────────────
 const CONFIG_DIR = path.join(os.homedir(), ".snkrs-bot");
@@ -100,6 +100,96 @@ function readStatus() {
   } catch (e) { /* dir not created yet */ }
   return map;
 }
+// ── Per-profile extension VERSION reports ─────────────────────
+// Each profile's background worker reports its running extension version
+// here on startup/boot. The dashboard compares these against the repo's
+// manifest version ("latest") to flag stale profiles in its banner and on
+// the Preflight page.
+const VERSIONS_PATH = path.join(CONFIG_DIR, "versions.json");
+function readVersions() { return readJsonFile(VERSIONS_PATH) || {}; }
+function setVersionEntry(profileDir, entry) {
+  const map = readVersions();
+  map[profileDir] = entry;
+  writeJsonFile(VERSIONS_PATH, map);
+}
+
+// The repo's manifest is the "latest available" version — the update server
+// packs exactly this folder, so it is what every profile should be running.
+function latestExtensionVersion() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(EXTENSION_DIR, "manifest.json"), "utf8")).version || "";
+  } catch (e) { return ""; }
+}
+
+// ── Per-profile PREFLIGHT results ─────────────────────────────
+// Same one-file-per-profile pattern as status/, for the same reason: the
+// checks run inside each profile's own Chrome, and the dashboard (another
+// profile) aggregates by reading the folder.
+const PREFLIGHT_DIR = path.join(CONFIG_DIR, "preflight");
+function preflightFileFor(profileDir) {
+  const safe = String(profileDir).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  return path.join(PREFLIGHT_DIR, `p_${safe}.json`);
+}
+function setPreflightEntry(profileDir, entry) {
+  writeJsonFile(preflightFileFor(profileDir), Object.assign({}, entry, { profileDir }));
+}
+function readPreflight() {
+  const map = {};
+  try {
+    for (const f of fs.readdirSync(PREFLIGHT_DIR)) {
+      if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
+      const rec = readJsonFile(path.join(PREFLIGHT_DIR, f));
+      if (!rec) continue;
+      const derived = f.replace(/^p_/, "").replace(/\.json$/, "");
+      if (!rec.profileDir) rec.profileDir = derived;
+      map[rec.profileDir] = rec;
+    }
+  } catch (e) { /* dir not created yet */ }
+  return map;
+}
+function clearPreflight() {
+  try {
+    for (const f of fs.readdirSync(PREFLIGHT_DIR)) {
+      if (f.endsWith(".json")) { try { fs.unlinkSync(path.join(PREFLIGHT_DIR, f)); } catch (e) {} }
+    }
+  } catch (e) {}
+}
+
+// ── Per-tab checkout TIMELINE (drop replay / analytics) ───────
+// One file per key (profileDir#tabId), holding the ordered checkout events
+// (started→loaded→filled→submitted→done/error) with timestamps + the drop
+// time, so the dashboard can render a per-account timeline and compute how
+// many ms before/after go-live each submit landed. Same per-profile-file
+// pattern as status/, for the same cross-profile-visibility reason.
+const TIMELINE_DIR = path.join(CONFIG_DIR, "timeline");
+function timelineFileFor(key) {
+  const safe = String(key).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 90);
+  return path.join(TIMELINE_DIR, `tl_${safe}.json`);
+}
+function setTimelineEntry(key, entry) {
+  writeJsonFile(timelineFileFor(key), Object.assign({}, entry, { key }));
+}
+function readTimeline() {
+  const map = {};
+  try {
+    for (const f of fs.readdirSync(TIMELINE_DIR)) {
+      if (!f.endsWith(".json") || f.endsWith(".tmp")) continue;
+      const rec = readJsonFile(path.join(TIMELINE_DIR, f));
+      if (!rec) continue;
+      const k = rec.key || f.replace(/^tl_/, "").replace(/\.json$/, "");
+      map[k] = rec;
+    }
+  } catch (e) { /* dir not created yet */ }
+  return map;
+}
+function clearTimeline() {
+  try {
+    for (const f of fs.readdirSync(TIMELINE_DIR)) {
+      if (f.endsWith(".json")) { try { fs.unlinkSync(path.join(TIMELINE_DIR, f)); } catch (e) {} }
+    }
+  } catch (e) {}
+}
+
 function clearStatus(profileDir) {
   try {
     for (const f of fs.readdirSync(STATUS_DIR)) {
@@ -230,6 +320,7 @@ function handle(msg) {
         userDataDir: userDataDir(),
         configPath: CONFIG_PATH,
         extensionDir: EXTENSION_DIR,
+        latestVersion: latestExtensionVersion(),
       };
     case "listProfiles":
       return { ok: true, profiles: listProfiles() };
@@ -263,6 +354,50 @@ function handle(msg) {
         } else {
           writeJsonFile(ORDERS_PATH, {});
         }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "reportVersion":
+      if (!msg.profileDir) return { ok: false, error: "Missing profileDir." };
+      try {
+        setVersionEntry(msg.profileDir, msg.entry || {});
+        return { ok: true, latestVersion: latestExtensionVersion() };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "getVersions":
+      return { ok: true, versions: readVersions(), latestVersion: latestExtensionVersion() };
+    case "setPreflight":
+      if (!msg.profileDir) return { ok: false, error: "Missing profileDir." };
+      try {
+        setPreflightEntry(msg.profileDir, msg.entry || {});
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "getPreflight":
+      return { ok: true, preflight: readPreflight(), latestVersion: latestExtensionVersion() };
+    case "clearPreflight":
+      try {
+        clearPreflight();
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "setTimeline":
+      if (!msg.profileDir) return { ok: false, error: "Missing key." };
+      try {
+        setTimelineEntry(msg.profileDir, msg.entry || {});
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e && e.message || e) };
+      }
+    case "getTimeline":
+      return { ok: true, timeline: readTimeline() };
+    case "clearTimeline":
+      try {
+        clearTimeline();
         return { ok: true };
       } catch (e) {
         return { ok: false, error: String(e && e.message || e) };

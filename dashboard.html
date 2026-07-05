@@ -40,6 +40,7 @@
       <button class="nav-tab active" data-nav="home">HOME</button>
       <button class="nav-tab" data-nav="drop">DROP</button>
       <button class="nav-tab" data-nav="live">LIVE</button>
+      <button class="nav-tab" data-nav="preflight">PREFLIGHT</button>
       <button class="nav-tab" data-nav="profiles">PROFILES</button>
       <button class="nav-tab" data-nav="cards">CARDS</button>
       <button class="nav-tab" data-nav="orders">ORDERS</button>
@@ -266,6 +267,30 @@
       </div>
     </div>
 
+    <!-- ─────────────────── PREFLIGHT ─────────────────── -->
+    <div class="page-section" id="page-preflight">
+      <div class="section-header">
+        <h1 class="section-title">PREFLIGHT</h1>
+        <span class="section-sub">Pre-drop health check across every profile — go green before you launch</span>
+        <button id="preflightRunBtn" class="btn btn-accent" style="margin-left:auto;">🩺 RUN PREFLIGHT</button>
+        <button id="preflightClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
+      </div>
+
+      <!-- Version / update-server banner -->
+      <div id="versionBanner" class="version-banner"></div>
+
+      <p class="hint" id="preflightMsg" style="margin:10px 0 6px;">
+        RUN PREFLIGHT opens each profile on Nike, checks it, and closes the tab.
+        Each row turns red/green so you catch problems before the drop, not during it.
+      </p>
+
+      <div id="preflightSummary" class="pf-summary"></div>
+      <div id="preflightGrid" class="pf-grid"></div>
+      <div id="preflightEmpty" class="live-empty">
+        No preflight run yet. Click <strong>RUN PREFLIGHT</strong> to check every profile.
+      </div>
+    </div>
+
     <!-- ─────────────────── PROFILES ─────────────────── -->
     <div class="page-section" id="page-profiles">
       <div class="section-header">
@@ -423,8 +448,20 @@
     <div class="page-section" id="page-history">
       <div class="section-header">
         <h1 class="section-title">DROP HISTORY</h1>
-        <span class="section-sub">Record of every run</span>
+        <span class="section-sub">Timeline replay + record of every run</span>
       </div>
+
+      <section class="card" style="margin-bottom:20px;">
+        <div class="card-head">
+          <h2>⏱ DROP REPLAY — LAST RUN</h2>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span class="card-tag" id="replayTag">LIVE TIMELINE</span>
+            <button id="clearReplayBtn" class="btn btn-mini btn-dark">Clear replay</button>
+          </div>
+        </div>
+        <p class="hint" id="replayMsg">Per-account timing (loaded → filled → submitted) and how many ms before/after go-live each submit landed.</p>
+        <div id="replayList" class="replay-list"></div>
+      </section>
 
       <section class="card">
         <div class="card-head">

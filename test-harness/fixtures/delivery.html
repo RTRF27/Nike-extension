@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- Fixture: DELIVERY section open, awaiting the delivery CONTINUE.
+     No payment form yet. Machine should detect a delivery CONTINUE and
+     NOT a payment CONTINUE / submit. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>GS Checkout — delivery</title>
+<style>.hidden{display:none}</style></head>
+<body>
+  <main class="checkout">
+    <section class="category delivery-section">
+      <h2>DELIVERY</h2>
+      <form>
+        <input name="firstName" value="Test" aria-label="First name">
+        <input name="address1" value="1 Orchard Rd" aria-label="Address line 1">
+        <input name="postalCode" value="238888" aria-label="Postal code">
+      </form>
+      <button class="button-continue" type="button">Continue</button>
+    </section>
+
+    <section class="category payment-section">
+      <div class="accordion-header">PAYMENT <button class="expand" type="button">+</button></div>
+    </section>
+
+    <!-- Pre-rendered but disabled until checkout is ready (matches real GS). -->
+    <button class="button-submit" type="button" disabled>Submit Order</button>
+  </main>
+</body>
+</html>

@@ -17,14 +17,75 @@
 (function () {
   const SETTINGS_KEY = "snkrsBotSettings";
 
-  function getBootProfile() {
+  function getMarker(name) {
     const hash = location.hash || "";
     const search = location.search || "";
-    const m = (hash + "&" + search).match(/snkrsBoot=([^&]+)/);
+    const m = (hash + "&" + search).match(new RegExp(name + "=([^&]+)"));
     return m ? decodeURIComponent(m[1]) : null;
   }
 
-  const profileDir = getBootProfile();
+  // ── Preflight visit (#snkrsPreflight=<profileDir>) ──────────
+  // The dashboard's Preflight page opens each profile here to health-check
+  // it before a drop. We collect what only a nike.com PAGE can see — the
+  // OIDC session token in localStorage and login-state DOM signals — and
+  // hand them to the background, which finishes the checks (host, version,
+  // cookies, identity API), publishes the result, and closes this tab.
+  const preflightProfile = getMarker("snkrsPreflight");
+  if (preflightProfile) {
+    const keepOpen = !!getMarker("snkrsKeep");
+
+    const collectAndSend = () => {
+      const login = { hasToken: false, tokenFresh: false, signInVisible: false, accountMenu: false };
+      let accessToken = "";
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          const raw = localStorage.getItem(k);
+          // Nike's OIDC session lives under an "oidc.user:*" key, but the exact
+          // prefix has changed across their web builds — so also accept any
+          // value that parses to an object carrying an access_token.
+          if (!/oidc|access_token|nike/i.test(k) && !/access_token/.test(raw || "")) continue;
+          try {
+            const v = JSON.parse(raw);
+            const tok = v && (v.access_token || (v.tokens && v.tokens.access_token));
+            if (tok) {
+              login.hasToken = true;
+              const expSec = Number(v.expires_at) || Number(v.expiresAt) || 0;
+              const expMs = expSec > 1e12 ? expSec : expSec * 1000; // secs or ms
+              login.tokenFresh = expMs ? expMs > Date.now() : true;
+              if (!accessToken || login.tokenFresh) accessToken = tok;
+            }
+          } catch (e) {}
+        }
+      } catch (e) {}
+      try {
+        // "Sign In" / "Join Us" CTAs mean logged OUT; an avatar/account
+        // entry means logged in. Both are best-effort — the token decides.
+        const signIn = document.querySelector(
+          'button[data-testid*="signin" i], a[href*="unite" i], a[data-testid*="join" i]');
+        const btnTexts = Array.from(document.querySelectorAll("nav button, nav a, header button, header a"))
+          .slice(0, 80).map(n => (n.textContent || "").trim().toLowerCase());
+        login.signInVisible = !!signIn || btnTexts.some(t => t === "sign in" || t === "join us");
+        login.accountMenu = !!document.querySelector(
+          '[data-testid*="avatar" i], [aria-label*="account" i], img[alt*="avatar" i]');
+      } catch (e) {}
+
+      chrome.runtime.sendMessage({
+        type: "preflight_page_checks",
+        profileDir: preflightProfile,
+        page: { login },
+        accessToken,
+        keepOpen,
+      }, () => { chrome.runtime.lastError; });
+    };
+
+    // Let the SPA hydrate (the nav/Sign-In button renders late).
+    if (document.readyState === "complete") setTimeout(collectAndSend, 4000);
+    else window.addEventListener("load", () => setTimeout(collectAndSend, 4000));
+    return; // a preflight tab never boots the drop config
+  }
+
+  const profileDir = getMarker("snkrsBoot");
   if (!profileDir) return; // not a dashboard-launched tab
 
   // Strip the boot marker from the address bar so it doesn't linger or

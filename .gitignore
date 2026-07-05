@@ -1,5 +1,9 @@
-# Signing key (left over from the removed auto-installer) — never commit.
+# CRX signing key — the extension ID depends on it. Back it up, NEVER commit.
 .keys/
+update-server/key.pem
+
+# Update-server build output (regenerate with: node update-server/pack.js)
+update-server/dist/
 
 # Build / tooling
 node_modules/

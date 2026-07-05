@@ -1,0 +1,61 @@
+<!doctype html>
+<!-- Fixture: a MUTATING checkout that advances as the machine clicks, so the
+     whole state machine can be driven LOADING → … → SUBMITTING → DONE offline.
+     Mirrors how the REAL GS page works: Angular ADDS/REMOVES DOM nodes for each
+     step (it does not merely toggle display), which is exactly what the finders'
+     CSS-visibility + DOM-order logic is built for.
+        delivery CONTINUE  → removes itself (delivery confirmed)
+        expand PAYMENT     → INJECTS an autofilled inline card + payment CONTINUE
+        payment CONTINUE   → removes card form, enables SUBMIT ORDER
+        SUBMIT ORDER       → shows "ORDER CONFIRMED"
+     Autofill-on-expand stands in for gs-payments filling the card. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>GS Checkout — live flow</title></head>
+<body>
+  <main class="checkout" id="root">
+    <section class="category delivery-section" id="delivery">
+      <h2>DELIVERY</h2>
+      <input name="address1" value="1 Orchard Rd" aria-label="Address line 1">
+      <button class="button-continue" id="deliveryContinue" type="button">Continue</button>
+    </section>
+
+    <section class="category payment-section" id="payment">
+      <div class="accordion-header" id="paymentAccordion">PAYMENT</div>
+      <p class="pay-hint">Choose a payment method to continue.</p>
+      <!-- card form + payment CONTINUE are injected here on expand -->
+    </section>
+
+    <button class="button-submit" id="submit" type="button" disabled>Submit Order</button>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    // Delivery CONTINUE → confirmed; the button goes away (node removed).
+    $("deliveryContinue").addEventListener("click", () => $("deliveryContinue").remove());
+
+    // Expand PAYMENT accordion → INJECT an already-filled inline card + a
+    // payment-section CONTINUE (simulating Angular rendering the card form and
+    // gs-payments autofilling it).
+    $("paymentAccordion").addEventListener("click", () => {
+      if ($("cardForm")) return; // idempotent
+      const form = document.createElement("div");
+      form.className = "card-form"; form.id = "cardForm";
+      form.innerHTML =
+        '<label>Card Number <input name="cardNumber" id="cardNumber" ' +
+        'autocomplete="cc-number" value="4242 4242 4242 4242"></label>' +
+        '<button class="button-continue" id="paymentContinue" type="button">Continue</button>';
+      $("payment").appendChild(form);
+      $("paymentContinue").addEventListener("click", () => {
+        $("cardForm").remove();        // payment committed → card form collapses
+        $("submit").disabled = false;  // SUBMIT ORDER now live
+      });
+    });
+
+    // SUBMIT → confirmation.
+    $("submit").addEventListener("click", () => {
+      $("root").innerHTML = "<h1>ORDER CONFIRMED</h1><p>You're in.</p>";
+    });
+  </script>
+</body>
+</html>
