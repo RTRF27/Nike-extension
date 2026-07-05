@@ -179,4 +179,19 @@ the same steps in short:
 - **Drop Replay** (dashboard HISTORY tab) — every drop is recorded as a
   per-account timeline (loaded → card filled → submitted) with fill/submit
   timing and, crucially, **how many ms before/after go-live each submit
-  landed**, alongside win/loss and failure reasons.
+  landed**, alongside win/loss and failure reasons. The summary is persisted
+  into each history run so past drops keep their timing.
+
+## Drop-day controls (v3.6)
+
+- **🛑 PANIC (LIVE tab)** — one click raises a shared abort flag that every
+  profile's checkout polls while holding SUBMIT, so all held submits cancel at
+  once (e.g. wrong product spotted). Cleared automatically on the next launch,
+  or manually. The draw flow respects it too.
+- **Preflight remediation** — red profiles get one-click fixes: **LOG IN**
+  (opens Nike sign-in), **UPDATE** (opens `chrome://extensions` to update),
+  **WARM** (warms cookies), each auto re-checking afterwards. A profile that
+  never reports back within 40s is flagged **NO RESPONSE** (likely logged out).
+- **🔥 WARM ALL (Preflight tab)** — opens the SNKRS feed in every profile (bot
+  stays idle) to refresh Kasada/cookies before a drop; the cookies check then
+  shows how long ago each profile was warmed.

@@ -343,6 +343,18 @@
       if (!this.d.emit) return;
       try { this.d.emit({ code, t: Date.now(), dropAt: this.dropAt || 0, extra: extra || null }); } catch (e) {}
     }
+    // PANIC / abort: the dashboard can raise a shared abort flag to stop every
+    // held SUBMIT at once (e.g. wrong product detected). checkAbort() is
+    // supplied by the adapter (throttled) and may be sync or async.
+    async _aborted() {
+      if (!this.d.checkAbort) return false;
+      try { return !!(await this.d.checkAbort()); } catch (e) { return false; }
+    }
+    _abort() {
+      this._to(STATES.ERROR);
+      this._emit("error", { reason: "panic_abort" });
+      return { state: this.state, submitted: false, aborted: true };
+    }
     _to(state) {
       const prev = this.state;
       this.state = state;
@@ -505,16 +517,33 @@
         this._to(STATES.HOLDING);
         this._emit("holding");
         this._log(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.`);
+        let sinceAbortCheck = 0;
         while (Date.now() < dropAt) {
+          // PANIC: bail out of the hold without ever submitting.
+          if (await this._aborted()) {
+            this._log(`🛑${tag} [3/3] PANIC — abort raised while holding. SUBMIT cancelled, order NOT placed.`);
+            return this._abort();
+          }
           const left = dropAt - Date.now();
           if (left > 5000) {
             this._log(`⏳${tag} [3/3] ${Math.ceil(left / 1000)}s to drop — SUBMIT held…`);
             await wait(Math.min(3000, left - 1500));
           } else {
+            // Final approach: fine-grained, but still poll abort ~once/sec.
             await wait(120);
+            if (++sinceAbortCheck >= 8) { sinceAbortCheck = 0; if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised at the line. SUBMIT cancelled.`);
+              return this._abort();
+            } }
           }
         }
         this._log(`🟢${tag} [3/3] DROP TIME — submitting now!`);
+      }
+
+      // Final abort gate right before the click (covers the no-hold path too).
+      if (await this._aborted()) {
+        this._log(`🛑${tag} [3/3] PANIC — abort raised. SUBMIT cancelled, order NOT placed.`);
+        return this._abort();
       }
 
       // ── SUBMITTING: click + verify, bounded retries ───────────

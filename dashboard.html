@@ -258,8 +258,10 @@
       <div class="section-header">
         <h1 class="section-title">LIVE MONITOR</h1>
         <span class="section-sub">Real-time status of every tab in every browser</span>
-        <button id="liveClearBtn" class="btn btn-mini btn-dark" style="margin-left:auto;">🗑 CLEAR</button>
+        <button id="panicBtn" class="btn btn-danger" style="margin-left:auto;">🛑 PANIC — STOP ALL SUBMITS</button>
+        <button id="liveClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
       </div>
+      <div id="panicBanner" class="panic-banner" style="display:none;"></div>
       <div id="liveSummary" class="live-summary"></div>
       <div id="liveGrid" class="live-grid"></div>
       <div id="liveEmpty" class="live-empty" style="display:none;">
@@ -273,6 +275,7 @@
         <h1 class="section-title">PREFLIGHT</h1>
         <span class="section-sub">Pre-drop health check across every profile — go green before you launch</span>
         <button id="preflightRunBtn" class="btn btn-accent" style="margin-left:auto;">🩺 RUN PREFLIGHT</button>
+        <button id="warmAllBtn" class="btn btn-dark" title="Open the SNKRS feed in every profile to warm Kasada/cookies (bot stays idle)">🔥 WARM ALL</button>
         <button id="preflightClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
       </div>
 

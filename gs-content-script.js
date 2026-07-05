@@ -123,6 +123,21 @@ async function armCardFillSignal(timeoutMs = 60000) {
   });
 }
 
+// ── PANIC / abort polling ─────────────────────────────────────
+// Asks our background (which reads the shared abort.json via the native host)
+// whether the dashboard has raised a global abort. Throttled so the HOLDING
+// loop can call it freely without hammering the native host.
+let _abortCache = { on: false, at: 0 };
+async function checkAbort() {
+  if (!extAlive()) return false;
+  if (Date.now() - _abortCache.at < 1200) return _abortCache.on;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "check_abort" });
+    _abortCache = { on: !!(resp && resp.on), at: Date.now() };
+  } catch (e) { /* keep last value */ }
+  return _abortCache.on;
+}
+
 // ── Drop-time gate resolution ─────────────────────────────────
 // The exact drop time this tab must hold SUBMIT until. Per-TAB value
 // (multi-product) from sessionStorage, else the shared per-profile setting.
@@ -178,6 +193,7 @@ async function runCheckoutFlow() {
     cancelCardFill: () => cancelCardFillWait(),
     isTestMode: () => !!settings?.testMode,
     getDropAt: () => resolveDropAt(),
+    checkAbort: () => checkAbort(),
   });
 
   const result = await machine.run();

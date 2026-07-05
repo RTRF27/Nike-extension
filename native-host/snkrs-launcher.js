@@ -190,6 +190,13 @@ function clearTimeline() {
   } catch (e) {}
 }
 
+// ── PANIC / abort flag ────────────────────────────────────────
+// One shared file the dashboard raises to stop every held SUBMIT at once.
+// Each profile's checkout script polls it (via its background) while holding.
+const ABORT_PATH = path.join(CONFIG_DIR, "abort.json");
+function readAbort() { return readJsonFile(ABORT_PATH) || { on: false, ts: 0 }; }
+function writeAbort(on) { writeJsonFile(ABORT_PATH, { on: !!on, ts: Date.now() }); }
+
 function clearStatus(profileDir) {
   try {
     for (const f of fs.readdirSync(STATUS_DIR)) {
@@ -395,6 +402,11 @@ function handle(msg) {
       }
     case "getTimeline":
       return { ok: true, timeline: readTimeline() };
+    case "setAbort":
+      try { writeAbort(msg.on); return { ok: true, abort: readAbort() }; }
+      catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    case "getAbort":
+      return { ok: true, abort: readAbort() };
     case "clearTimeline":
       try {
         clearTimeline();

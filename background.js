@@ -906,6 +906,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // PANIC: the dashboard raises/clears a shared abort flag; a checkout tab
+  // polls it (throttled) while holding SUBMIT so every profile can be stopped
+  // at once. Both go through the native host's shared abort.json.
+  if (msg.type === "set_abort") {
+    nativeSend({ cmd: "setAbort", on: !!msg.on }).then(r => sendResponse(r || { ok: false }));
+    return true;
+  }
+  if (msg.type === "check_abort") {
+    nativeSend({ cmd: "getAbort" }).then(r => {
+      sendResponse({ ok: !!(r && r.ok), on: !!(r && r.abort && r.abort.on), ts: r && r.abort && r.abort.ts });
+    });
+    return true;
+  }
+
   // Generic relay so extension pages (the dashboard) could also reach the
   // host through us if they prefer. {cmd} is forwarded verbatim.
   if (msg.type === "native") {

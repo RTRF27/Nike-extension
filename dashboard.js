@@ -29,7 +29,7 @@ function navigateTo(name) {
     renderHomeStats();
     if (!_upcomingLoaded) loadUpcoming(false);
   }
-  if (name === "live") renderLivePage();
+  if (name === "live") { renderLivePage(); refreshPanicBanner(); }
   if (name === "preflight") { renderPreflight(); refreshVersionBanner(); }
   if (name === "history") renderDropReplay();
 }
@@ -246,6 +246,9 @@ let countdownTimer = null;
 const TIMELINE_KEY = "snkrsTimeline";
 let timelines = {};            // {key(profileDir#tab): {profileDir,events:[],dropAt,label}}
 let timelinePollTimer = null;
+
+const WARM_KEY = "snkrsWarmTimes";
+let warmTimes = {};            // {profileDir: epochMs of last warm-up we opened}
 
 const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/profile"; // logged-in-only page — good login signal
 let preflightResults = {};     // {profileDir: {ts,version,checks:{...}}}
@@ -549,7 +552,41 @@ function mergedChecksFor(acct) {
   const rec = preflightResults[acct.profileDir] || {};
   const remote = rec.checks || {};
   const local = localChecksFor(acct);
-  return { ...local, ...remote, __rec: rec };
+  const merged = { ...local, ...remote, __rec: rec };
+  // Annotate the cookies check with how long ago we last warmed this profile.
+  const warm = warmTimes[acct.profileDir];
+  if (warm && merged.cookies) {
+    const mins = Math.round((Date.now() - warm) / 60000);
+    const ago = mins <= 0 ? "just now" : mins === 1 ? "1 min ago" : `${mins} min ago`;
+    merged.cookies = { ...merged.cookies, detail: `${merged.cookies.detail} · warmed ${ago}` };
+  }
+  return merged;
+}
+
+// ── Warm-up: open the SNKRS feed (no boot marker → bot idle) so each profile's
+// Kasada anti-bot cookies are fresh before the drop. Records when we warmed
+// each profile so the preflight cookies row can show its age.
+async function markWarm(profileDir) {
+  warmTimes[profileDir] = Date.now();
+  await chrome.storage.local.set({ [WARM_KEY]: warmTimes });
+}
+async function warmAll() {
+  const msg = $("preflightMsg");
+  const withProfile = accounts.filter(a => a.profileDir);
+  if (!withProfile.length) { flashTemp(msg, "No profiles to warm.", "var(--orange)", 4000); return; }
+  if (!hostOk && !(await pingHost())) { flashTemp(msg, "Launcher offline.", "var(--orange)", 5000); return; }
+  flash(msg, `Warming ${withProfile.length} profile(s) on the SNKRS feed…`, "#888");
+  let ok = 0, lastErr = "";
+  for (const a of withProfile) {
+    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url: WARMUP_URL });
+    if (resp.ok) { ok++; await markWarm(a.profileDir); } else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 350));
+  }
+  if (_currentPage === "preflight") renderPreflight();
+  flashTemp(msg, ok === withProfile.length
+    ? `🔥 Warmed ${ok} profile(s) — cookies/Kasada refreshed. Re-run preflight to confirm.`
+    : `Warmed ${ok}/${withProfile.length}. Last error: ${lastErr}`,
+    ok ? "var(--green)" : "var(--red)", 7000);
 }
 
 function pfIcon(ok) {
@@ -619,6 +656,24 @@ function renderPreflight() {
       list.appendChild(row);
     }
     card.appendChild(list);
+
+    // ── Remediation actions for a non-green profile ──
+    if (!pendingRun && (verdict === "red" || verdict === "amber")) {
+      const actions = el("div", { className: "pf-actions" });
+      const addBtn = (label, kind) => {
+        const b = el("button", { className: "btn btn-mini btn-dark" }, label);
+        b.addEventListener("click", () => remediateProfile(acct.profileDir, kind));
+        actions.appendChild(b);
+      };
+      if (checks.login && checks.login.ok === false) addBtn("🔑 LOG IN", "login");
+      if (checks.version && checks.version.ok === false) addBtn("⬆ UPDATE", "version");
+      if (checks.cookies && checks.cookies.ok !== true) addBtn("🔥 WARM", "warm");
+      // Always offer a plain re-check.
+      const rc = el("button", { className: "btn btn-mini btn-dark" }, "↻ RE-CHECK");
+      rc.addEventListener("click", () => { if (hostOk) launchPreflightFor(acct.profileDir); });
+      actions.appendChild(rc);
+      card.appendChild(actions);
+    }
 
     if (rec.ts) {
       const d = new Date(rec.ts);
@@ -738,9 +793,7 @@ async function runPreflight() {
   flash(msg, `Opening ${withProfile.length} profile(s) to health-check…`, "#888");
   let opened = 0, lastErr = "";
   for (const a of withProfile) {
-    const sep = NIKE_PREFLIGHT_URL.includes("#") ? "&" : "#";
-    const url = `${NIKE_PREFLIGHT_URL}${sep}snkrsPreflight=${encodeURIComponent(a.profileDir)}`;
-    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url });
+    const resp = await launchPreflightFor(a.profileDir);
     if (resp.ok) opened++; else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 400));
   }
@@ -751,6 +804,42 @@ async function runPreflight() {
   } else {
     flashTemp(msg, `Couldn't open any profile. ${lastErr || "Is the launcher installed?"}`, "var(--red)", 7000);
   }
+}
+
+// Launch ONE profile on the preflight page (marks it pending first).
+async function launchPreflightFor(profileDir) {
+  preflightResults[profileDir] = { __pending: true, startedAt: Date.now(), profileDir };
+  if (_currentPage === "preflight") renderPreflight();
+  const sep = NIKE_PREFLIGHT_URL.includes("#") ? "&" : "#";
+  const url = `${NIKE_PREFLIGHT_URL}${sep}snkrsPreflight=${encodeURIComponent(profileDir)}`;
+  return hostSend({ cmd: "launch", profileDir, url });
+}
+
+// ── Preflight remediation: one-click fix for a red/amber profile ──
+// Opens the profile at the page that fixes the specific problem, then
+// re-runs its preflight so the card goes green without a full re-check.
+async function remediateProfile(profileDir, kind) {
+  const msg = $("preflightMsg");
+  const urls = {
+    login:   NIKE_LOGIN_URL,                                   // sign in
+    version: "chrome://extensions/",                           // click Update
+    warm:    WARMUP_URL,                                       // warm Kasada/cookies
+  };
+  const url = urls[kind];
+  if (!url) return;
+  const resp = await hostSend({ cmd: "launch", profileDir, url });
+  if (!resp.ok) {
+    flashTemp(msg, `Couldn't open ${profileDir}: ${resp.error || (resp.hostMissing ? "launcher offline" : "unknown")}`, "var(--red)", 6000);
+    return;
+  }
+  if (kind === "warm") await markWarm(profileDir);
+  const note = kind === "login" ? "Sign in there, then it re-checks automatically."
+    : kind === "version" ? "Click Update on the extension, then it re-checks."
+    : "Let the feed load to warm cookies, then it re-checks.";
+  flashTemp(msg, `Opened ${profileDir} — ${note}`, "var(--green)", 8000);
+  // Give the user time to act, then re-run this profile's preflight.
+  const delay = kind === "login" ? 25000 : kind === "version" ? 12000 : 12000;
+  setTimeout(() => { if (hostOk) launchPreflightFor(profileDir); }, delay);
 }
 
 // Poll the shared preflight folder (results arrive from OTHER Chrome profiles).
@@ -1723,6 +1812,27 @@ function buildHistoryEntry(entry) {
   if (limits)  chip(`⚠ ${limits} limit`, "#fa5400");
 
   div.append(dateEl, urlEl, resultsDiv);
+
+  // Persisted replay timing (from the drop's per-account timeline).
+  const replay = entry.replay && typeof entry.replay === "object" ? entry.replay : null;
+  if (replay && Object.keys(replay).length) {
+    const strip = el("div", { className: "history-replay" });
+    for (const s of Object.values(replay)) {
+      const acct = (entry.accounts || []).find(a => a.profileDir === s.profileDir);
+      const name = (acct && (acct.label || acct.profileDir)) || s.profileDir;
+      const parts = [];
+      if (s.loadedT && s.filledT) parts.push(`fill ${fmtDelta(s.filledT - s.loadedT)}`);
+      if (s.error) parts.push(`✕ ${String(s.error).replace(/_/g, " ")}`);
+      else if (s.offsetMs != null) parts.push(`${s.offsetMs >= 0 ? "+" : "−"}${fmtDelta(Math.abs(s.offsetMs))} vs go-live`);
+      else if (s.submittedT) parts.push("submitted");
+      const row = el("div", { className: "history-replay-row" });
+      row.appendChild(el("span", { className: "hr-name" }, name));
+      row.appendChild(el("span", { className: "hr-detail" + (s.error ? " bad" : (s.offsetMs != null && s.offsetMs < 0 ? " warn" : "")) },
+        parts.join(" · ") || "—"));
+      strip.appendChild(row);
+    }
+    div.appendChild(strip);
+  }
   return div;
 }
 
@@ -1838,6 +1948,93 @@ function renderDropReplay() {
   }
 }
 
+// ══════════════════ PANIC / GLOBAL ABORT ══════════════════
+// Raises (or clears) a shared abort flag that every profile's checkout script
+// polls while holding SUBMIT — one click stops all held submits at once.
+async function setAbort(on) {
+  const resp = await hostSend({ cmd: "setAbort", on });
+  return resp && resp.ok;
+}
+async function refreshPanicBanner() {
+  const banner = $("panicBanner");
+  const btn = $("panicBtn");
+  if (!banner) return;
+  const resp = await hostSend({ cmd: "getAbort" });
+  const on = !!(resp && resp.ok && resp.abort && resp.abort.on);
+  if (on) {
+    banner.style.display = "flex";
+    banner.className = "panic-banner active";
+    const when = resp.abort.ts ? new Date(resp.abort.ts).toLocaleTimeString() : "";
+    banner.innerHTML =
+      `<span>🛑 <strong>ABORT ACTIVE</strong> — every profile is holding / not submitting${when ? " (since " + when + ")" : ""}.</span>` +
+      `<button id="panicClearBtn" class="btn btn-mini btn-light">✓ CLEAR ABORT</button>`;
+    const clr = $("panicClearBtn");
+    if (clr) clr.addEventListener("click", async () => {
+      await setAbort(false);
+      await refreshPanicBanner();
+      flashTemp($("statusMsg"), "Abort cleared — profiles may submit again on the next drive.", "#888");
+    });
+    if (btn) { btn.textContent = "🛑 ABORT ACTIVE"; btn.disabled = true; }
+  } else {
+    banner.style.display = "none";
+    if (btn) { btn.textContent = "🛑 PANIC — STOP ALL SUBMITS"; btn.disabled = false; }
+  }
+}
+async function raisePanic() {
+  const ok = await setAbort(true);
+  if (!ok) {
+    flashTemp($("statusMsg"), "Couldn't raise abort — is the launcher connected?", "var(--red)", 6000);
+    return;
+  }
+  await refreshPanicBanner();
+  flashTemp($("statusMsg"), "🛑 ABORT raised — all holding profiles will cancel their SUBMIT.", "var(--red)", 8000);
+}
+
+// Compact per-account summary of a timeline, for persisting into history.
+function summarizeTimeline(entry) {
+  const events = entry.events || [];
+  const startedT = eventTime(events, "started") || (events[0] && events[0].t) || 0;
+  const submittedEv = events.find(e => e.code === "submitted");
+  const submittedT = submittedEv ? submittedEv.t : null;
+  let offsetMs = null;
+  if (submittedEv && submittedEv.extra && submittedEv.extra.offsetMs != null) offsetMs = submittedEv.extra.offsetMs;
+  else if (submittedT && entry.dropAt) offsetMs = submittedT - entry.dropAt;
+  const err = events.find(e => e.code === "error");
+  return {
+    profileDir: entry.profileDir || "",
+    startedT,
+    loadedT: eventTime(events, "loaded"),
+    filledT: eventTime(events, "filled"),
+    submittedT,
+    dropAt: entry.dropAt || 0,
+    offsetMs,
+    error: err ? ((err.extra && err.extra.reason) || "error") : null,
+  };
+}
+
+// Snapshot the live timelines into the CURRENT history run so past drops keep
+// their timing (the live timeline store is cleared on each new launch).
+async function persistTimelineToHistory() {
+  if (!currentRunId) return;
+  // One summary per profile — prefer the tab that actually submitted.
+  const byProfile = {};
+  for (const entry of Object.values(timelines)) {
+    const pd = entry.profileDir;
+    if (!pd) continue;
+    const s = summarizeTimeline(entry);
+    const prev = byProfile[pd];
+    if (!prev || (s.submittedT && !prev.submittedT) || (s.startedT > prev.startedT)) byProfile[pd] = s;
+  }
+  if (!Object.keys(byProfile).length) return;
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  const history = Array.isArray(data[HISTORY_KEY]) ? data[HISTORY_KEY] : [];
+  const entry = history.find(e => e.id === currentRunId);
+  if (!entry) return;
+  if (JSON.stringify(entry.replay || {}) === JSON.stringify(byProfile)) return; // no change
+  entry.replay = byProfile;
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
+}
+
 // Poll the shared timeline folder (accounts run in OTHER Chrome profiles).
 function startTimelinePolling() {
   if (timelinePollTimer) clearInterval(timelinePollTimer);
@@ -1852,7 +2049,10 @@ function startTimelinePolling() {
         changed = true;
       }
     }
-    if (changed && _currentPage === "history") renderDropReplay();
+    if (changed) {
+      persistTimelineToHistory();
+      if (_currentPage === "history") renderDropReplay();
+    }
   };
   tick();
   timelinePollTimer = setInterval(tick, 2500);
@@ -2473,10 +2673,13 @@ async function launchAll() {
   await appendHistory(config);
 
   // Fresh drop → clear the previous run's replay timelines so the Drop Replay
-  // view reflects THIS launch.
+  // view reflects THIS launch, and clear any stale PANIC abort so a prior
+  // panic can't silently block this drop's submits.
   timelines = {};
   await chrome.storage.local.set({ [TIMELINE_KEY]: {} });
   await hostSend({ cmd: "clearTimeline" });
+  await setAbort(false);
+  refreshPanicBanner();
 
   flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
   let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
@@ -2790,6 +2993,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     liveStatuses = {};
     refreshAllBadges();
   });
+  const _panic = $("panicBtn");
+  if (_panic) _panic.addEventListener("click", raisePanic);
+  refreshPanicBanner();
 
   // ── Preflight page ──
   if ($("preflightRunBtn")) $("preflightRunBtn").addEventListener("click", runPreflight);
@@ -2800,6 +3006,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     flashTemp($("preflightMsg"), "Preflight results cleared.", "#888");
   });
   startPreflightPolling();
+  if ($("warmAllBtn")) $("warmAllBtn").addEventListener("click", warmAll);
+  {
+    const w = await chrome.storage.local.get(WARM_KEY);
+    if (w[WARM_KEY]) warmTimes = w[WARM_KEY];
+  }
 
   // ── Drop replay / analytics ──
   {

@@ -197,6 +197,33 @@ async function main() {
     await page.close();
   }
 
+  // ── 5. PANIC: abort raised while holding must cancel SUBMIT ──
+  console.log("[machine] panic abort during HOLDING cancels SUBMIT");
+  {
+    const page = await openFixture(context, fixture("saved-card.html"));
+    const out = await page.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const dropAt = Date.now() + 4000; // hold 4s
+      let submitted = false, aborted = false;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: (e) => { if (e.code === "submitted") submitted = true; },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => dropAt,
+        // Abort flips true ~1s into the hold.
+        checkAbort: () => Date.now() > (window.__t0 + 1000),
+      });
+      window.__t0 = Date.now();
+      const r = await machine.run();
+      aborted = !!r.aborted;
+      return { submitted, aborted, state: machine.state };
+    });
+    check("panic: never submitted", out.submitted === false, `submitted=${out.submitted}`);
+    eq("panic: reported aborted", out.aborted, true);
+    eq("panic: ended in ERROR", out.state, "ERROR");
+    await page.close();
+  }
+
   await browser.close();
 
   console.log("\n" + results.join("\n"));

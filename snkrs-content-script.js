@@ -24,6 +24,18 @@ function logBG(msg) {
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
 
+// ── PANIC / abort ─────────────────────────────────────────────
+// Shared abort flag the dashboard can raise to stop every profile entering.
+let _abortCache = { on: false, at: 0 };
+async function checkAbort() {
+  if (Date.now() - _abortCache.at < 1200) return _abortCache.on;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "check_abort" });
+    _abortCache = { on: !!(resp && resp.on), at: Date.now() };
+  } catch (e) {}
+  return _abortCache.on;
+}
+
 // ── Profile tag ──────────────────────────────────────────────
 function profileTag() {
   let base = "";
@@ -786,6 +798,12 @@ function startDropWatcher(tag, preferred) {
 // ── Core entry logic (extracted for reuse) ────────────────────
 async function executeEntry(tag, preferred) {
   if (entryAttempted) return; // prevent double-fire
+  // PANIC: dashboard raised a global abort — do not enter this draw.
+  if (await checkAbort()) {
+    logBG(`🛑${tag} PANIC — abort raised. NOT entering the draw.`);
+    showBanner("🛑 ABORTED — bot stopped, no entry made.", "#e03131");
+    return;
+  }
   entryAttempted = true;
 
   // Wait for size button to be fully ready (brief grace period)
