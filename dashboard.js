@@ -1990,6 +1990,22 @@ async function raisePanic() {
   flashTemp($("statusMsg"), "🛑 ABORT raised — all holding profiles will cancel their SUBMIT.", "var(--red)", 8000);
 }
 
+// CLOSE ALL: raise a shared close flag every profile's content scripts poll,
+// closing their bot windows within a couple of seconds. Auto-clears so it can't
+// linger and close the next launch.
+async function closeAllProfiles() {
+  if (!confirm("Close every profile's Nike/checkout windows now? (The dashboard stays open.)")) return;
+  const resp = await hostSend({ cmd: "setClose", on: true });
+  if (!resp || !resp.ok) {
+    flashTemp($("statusMsg"), "Couldn't send close — is the launcher connected?", "var(--red)", 6000);
+    return;
+  }
+  flashTemp($("statusMsg"), "✖ Closing all profile windows… (takes a couple of seconds per profile)", "var(--red)", 8000);
+  // Clear the flag after the pollers have had time to act, so a later launch
+  // isn't immediately closed.
+  setTimeout(() => { hostSend({ cmd: "setClose", on: false }); }, 8000);
+}
+
 // Compact per-account summary of a timeline, for persisting into history.
 function summarizeTimeline(entry) {
   const events = entry.events || [];
@@ -2679,6 +2695,7 @@ async function launchAll() {
   await chrome.storage.local.set({ [TIMELINE_KEY]: {} });
   await hostSend({ cmd: "clearTimeline" });
   await setAbort(false);
+  await hostSend({ cmd: "setClose", on: false }); // clear any stale CLOSE ALL
   refreshPanicBanner();
 
   flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
@@ -2995,6 +3012,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   const _panic = $("panicBtn");
   if (_panic) _panic.addEventListener("click", raisePanic);
+  const _closeAll = $("closeAllBtn");
+  if (_closeAll) _closeAll.addEventListener("click", closeAllProfiles);
   refreshPanicBanner();
 
   // ── Preflight page ──

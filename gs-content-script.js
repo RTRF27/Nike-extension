@@ -141,6 +141,28 @@ async function checkAbort() {
   return _abortCache.on;
 }
 
+// ── CLOSE ALL polling ─────────────────────────────────────────
+// The dashboard can raise a shared "close" flag; every profile's content
+// scripts poll it and ask the background to close this profile's bot windows
+// (e.g. wrong sizes assigned — bail out of everything).
+async function checkClose() {
+  if (!extAlive()) return false;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "check_close" });
+    return !!(resp && resp.on);
+  } catch (e) { return false; }
+}
+function startControlPoller() {
+  const iv = setInterval(async () => {
+    if (!extAlive()) { clearInterval(iv); return; }
+    if (await checkClose()) {
+      clearInterval(iv);
+      try { chrome.runtime.sendMessage({ type: "close_windows" }); } catch (e) {}
+    }
+  }, 2500);
+}
+startControlPoller();
+
 // ── Drop-time gate resolution ─────────────────────────────────
 // The exact drop time this tab must hold SUBMIT until. Per-TAB value
 // (multi-product) from sessionStorage, else the shared per-profile setting.

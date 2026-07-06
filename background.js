@@ -931,7 +931,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: "No matching account in shared config." });
         return;
       }
-      if (sender?.tab?.id) persistTabProfile(sender.tab.id, msg.profileDir);
+      if (sender?.tab?.id) {
+        persistTabProfile(sender.tab.id, msg.profileDir);
+        // Heartbeat: publish a "connected" status to the shared folder the
+        // instant this profile boots, so it appears on the dashboard's LIVE
+        // board immediately — before any checkout log. If a launched profile
+        // never shows up here, its native-host write is failing (extension not
+        // loaded / ID mismatch), which is the usual reason cross-profile status
+        // is missing.
+        const key = `${msg.profileDir}#${sender.tab.id}`;
+        const entry = {
+          key, profileDir: msg.profileDir, tabId: sender.tab.id,
+          label: tabLabel(sender.tab), code: "waiting",
+          message: "🟢 Connected — extension loaded, waiting for drop.", time: Date.now(),
+        };
+        chrome.storage.local.get("snkrsStatus", (data) => {
+          const s = data.snkrsStatus || {}; s[key] = entry;
+          chrome.storage.local.set({ snkrsStatus: s });
+        });
+        nativeSend({ cmd: "setStatus", profileDir: key, entry }).catch(() => {});
+      }
       sendResponse({ ok: true, settings });
     });
     return true;
@@ -974,6 +993,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: !!(r && r.ok), on: !!(r && r.abort && r.abort.on), ts: r && r.abort && r.abort.ts });
     });
     return true;
+  }
+
+  // CLOSE ALL: the dashboard raises a shared close flag; each profile's content
+  // scripts poll it and ask us to close this profile's bot windows.
+  if (msg.type === "set_close") {
+    nativeSend({ cmd: "setClose", on: !!msg.on }).then(r => sendResponse(r || { ok: false }));
+    return true;
+  }
+  if (msg.type === "check_close") {
+    nativeSend({ cmd: "getAbort" }).then(r => {
+      sendResponse({ ok: !!(r && r.ok), on: !!(r && r.abort && r.abort.close) });
+    });
+    return true;
+  }
+  if (msg.type === "close_windows") {
+    // Close every window in THIS profile that holds a Nike/checkout tab. The
+    // dashboard lives on a chrome-extension:// page, so it never matches and
+    // survives. Removing whole windows makes the profile's bot windows vanish.
+    chrome.tabs.query({ url: ["*://*.nike.com/*", "*://gs.nike.com/*", "*://gs-payments.nike.com/*"] }, (tabs) => {
+      const winIds = [...new Set((tabs || []).map(t => t.windowId))];
+      if (!winIds.length) {
+        // No window-scoped Nike tab (rare) — fall back to closing the tabs.
+        (tabs || []).forEach(t => chrome.tabs.remove(t.id, () => chrome.runtime.lastError));
+      } else {
+        winIds.forEach(id => chrome.windows.remove(id, () => chrome.runtime.lastError));
+      }
+    });
+    return false;
   }
 
   // Generic relay so extension pages (the dashboard) could also reach the

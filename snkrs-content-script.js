@@ -38,6 +38,20 @@ async function checkAbort() {
   return _abortCache.on;
 }
 
+// ── CLOSE ALL polling ─────────────────────────────────────────
+// Poll the shared close flag; when raised, ask the background to close this
+// profile's bot windows. Runs regardless of bot state so a launch tab can be
+// closed even if the bot is disabled or already entered.
+function startControlPoller() {
+  const iv = setInterval(async () => {
+    let close = false;
+    try { const r = await chrome.runtime.sendMessage({ type: "check_close" }); close = !!(r && r.on); }
+    catch (e) { clearInterval(iv); return; } // context invalidated — stop
+    if (close) { clearInterval(iv); try { chrome.runtime.sendMessage({ type: "close_windows" }); } catch (e) {} }
+  }, 2500);
+}
+startControlPoller();
+
 // ── Profile tag ──────────────────────────────────────────────
 function profileTag() {
   let base = "";
