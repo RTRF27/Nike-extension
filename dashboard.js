@@ -1999,6 +1999,75 @@ function renderDropReplay() {
   }
 }
 
+// ══════════════════ LIVE STATUS DIAGNOSTIC ══════════════════
+// Answers "why don't I see the other profiles?" by walking the exact chain:
+// this profile → native host → shared status folder → per-profile version
+// reports. Pinpoints whether launched profiles are writing at all.
+async function runLiveDiagnostic() {
+  const out = $("liveDiag");
+  if (!out) return;
+  out.style.display = "block";
+  out.textContent = "Running diagnostic…";
+  const L = [];
+
+  // 1) Can THIS (dashboard) profile reach the launcher?
+  const ping = await hostSend({ cmd: "ping" });
+  if (ping.ok) L.push(`✓ This dashboard profile reaches the launcher (host v${ping.version} · ${ping.platform}).`);
+  else {
+    L.push(`✗ This dashboard CANNOT reach the launcher: ${ping.error || "no response"}.`);
+    L.push(`  → Cross-profile status can't be read until the native host is installed for this profile.`);
+    out.textContent = L.join("\n");
+    return;
+  }
+
+  // 2) What's in the shared status folder (written by the launched profiles)?
+  const st = await hostSend({ cmd: "getStatus" });
+  const entries = (st.ok && st.status) ? Object.values(st.status) : [];
+  const byProfile = {};
+  entries.forEach(e => { const p = String(e.profileDir || "").split("#")[0]; if (p) (byProfile[p] = byProfile[p] || []).push(e); });
+  const profs = Object.keys(byProfile);
+  L.push("");
+  L.push(`SHARED STATUS FOLDER — ${entries.length} tab entr${entries.length === 1 ? "y" : "ies"} from ${profs.length} profile(s):`);
+  if (!entries.length) {
+    L.push(`  ⚠ EMPTY. The launched profiles are NOT writing any status. Almost always one of:`);
+    L.push(`     1. Those profiles run a STALE loaded copy of the extension. Unpacked extensions`);
+    L.push(`        do NOT hot-reload when files change — each profile keeps the old code until you`);
+    L.push(`        reload it (chrome://extensions → ↻) or fully restart that Chrome. The fix that`);
+    L.push(`        removes this for good is the force-install auto-update (update-server/), which`);
+    L.push(`        pushes the SAME build to every profile automatically.`);
+    L.push(`     2. The native host isn't reachable from those profiles (rare if it works here).`);
+  } else {
+    profs.sort().forEach(p => {
+      const es = byProfile[p].slice().sort((a, b) => (b.time || 0) - (a.time || 0));
+      const age = Math.round((Date.now() - (es[0].time || 0)) / 1000);
+      L.push(`  • ${p}: ${es.length} tab(s), latest "${es[0].code}" ${age}s ago`);
+    });
+    const missing = accounts.filter(a => a.profileDir && !byProfile[a.profileDir]);
+    if (missing.length) {
+      L.push("");
+      L.push(`  ✗ NO status from: ${missing.map(a => a.label || a.profileDir).join(", ")}.`);
+      L.push(`    Those profiles didn't report — likely running stale code, not launched, or their`);
+      L.push(`    account's "Chrome profile" doesn't match the real profile directory.`);
+    }
+  }
+
+  // 3) Which profiles have reported their extension version (i.e. booted current code)?
+  const vr = await hostSend({ cmd: "getVersions" });
+  if (vr.ok) {
+    const vs = Object.entries(vr.versions || {});
+    L.push("");
+    L.push(`REPORTED VERSIONS (latest is v${vr.latestVersion || "?"}):`);
+    if (!vs.length) L.push(`  ⚠ No profile has reported a version — none have booted with current code yet.`);
+    vs.sort().forEach(([p, v]) => {
+      const age = Math.round((Date.now() - (v.ts || 0)) / 1000);
+      const stale = vr.latestVersion && v.version !== vr.latestVersion;
+      L.push(`  • ${p}: v${v.version}${stale ? "  ← STALE, reload/update this profile" : ""} (${age}s ago)`);
+    });
+  }
+
+  out.textContent = L.join("\n");
+}
+
 // ══════════════════ PANIC / GLOBAL ABORT ══════════════════
 // Raises (or clears) a shared abort flag that every profile's checkout script
 // polls while holding SUBMIT — one click stops all held submits at once.
@@ -3234,6 +3303,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (_panic) _panic.addEventListener("click", raisePanic);
   const _closeAll = $("closeAllBtn");
   if (_closeAll) _closeAll.addEventListener("click", closeAllProfiles);
+  if ($("liveDiagBtn")) $("liveDiagBtn").addEventListener("click", runLiveDiagnostic);
   refreshPanicBanner();
 
   // ── Preflight page ──

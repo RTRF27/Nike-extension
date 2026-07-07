@@ -1212,3 +1212,10 @@ select.inp { cursor: pointer; }
   .side-launch, .side-foot-row .btn { font-size: 0; padding: 10px 0; }
   .side-launch::after { content: "🚀"; font-size: 15px; }
 }
+
+.live-diag {
+  margin: 4px 0 14px; padding: 14px 16px; border-radius: var(--radius-sm);
+  background: #0b0a14; border: 1px solid var(--purple-dim);
+  color: #c9c2f0; font-family: 'Courier New', monospace; font-size: 12px;
+  line-height: 1.55; white-space: pre-wrap; max-height: 340px; overflow: auto;
+}
