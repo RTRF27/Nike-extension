@@ -3,16 +3,13 @@
   "name": "Nike SNKRS Bot SG",
   "version": "4.1",
   "description": "Auto-selects size and submits SNKRS raffle entries on nike.com/sg. Multi-account dashboard launches each Chrome profile for the same drop.",
-
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyQ/0wvkw3roP0WQUPlySAxi1shygs758zBYr2843IyADFQLFafPzcyV9OfVjW8u4aB+DDl6Kf/NyegCVFPhKQWCAo3hHphRraEBoBCIh+efD5JvBhyMCU+VcnV2fqpauradDERiA/0PUslK1flp38KCn3m0ipj/LzuU8MKljjJImNPETUfUJB/ZL17GRT8WFMefb9gfwq3e4bpxz3RsX1BfE8GPHKp5YTysWA1g7MbyQGvGRMKXapFcxhw8OMDPXvbk3LD68KRnB34MEAmILV2usPXnaxVY2GG8UfgNQOPP6K1HFJ2D+sWiE63Pq5ok/JIoTLw/JbpB91UGQdDkF+QIDAQAB",
-
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvWRR7bAtlpOWpEpfxtJp31FHtAgSCz7sVCl2cBwXpZ82SdKVsU1SIWsj0E6vGiGkBCYUZz2OqIWdlGT+XvxHhAcyU2AV2SZnbg/NfAZKl6bJPVTUG9DWJRcNvD3JbWFJdf9FGSIOxto20zxyK7GdJE5DYhT6nQiJzU5twYfIzKmOpCUMuzymdxRyrtrt3RcBN1Jcqy+9M0Nhz1BO2/p5HXSMSNTHVEBZpiUVPWVGJR6+2vmJ9WvVeoNONHfB2+nAUp0oNFkEKumEuKwkV/lenSKv71DYEX2cfENkYzMv3euANkIx7zjTHbRFUNn+t3r9+CIWTT7G8NqvRPzdUGGgfwIDAQAB",
   "icons": {
-    "16":  "icons/icon16.png",
-    "32":  "icons/icon32.png",
-    "48":  "icons/icon48.png",
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-
   "permissions": [
     "tabs",
     "storage",
@@ -22,25 +19,25 @@
     "nativeMessaging",
     "cookies"
   ],
-
   "host_permissions": [
     "*://*.nike.com/*",
     "*://gs.nike.com/*",
     "*://gs-payments.nike.com/*",
     "http://127.0.0.1/*"
   ],
-
   "web_accessible_resources": [
     {
-      "resources": ["license.json"],
-      "matches":   ["<all_urls>"]
+      "resources": [
+        "license.json"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
     }
   ],
-
   "background": {
     "service_worker": "background.js"
   },
-
   "action": {
     "default_popup": "popup.html",
     "default_title": "SNKRS Bot",
@@ -51,7 +48,6 @@
       "128": "icons/icon128.png"
     }
   },
-
   "content_scripts": [
     {
       "matches": [
@@ -60,7 +56,9 @@
         "https://www.nike.com/sg/member/*",
         "https://nike.com/sg/member/*"
       ],
-      "js": ["bootstrap-content-script.js"],
+      "js": [
+        "bootstrap-content-script.js"
+      ],
       "run_at": "document_start"
     },
     {
@@ -68,28 +66,37 @@
         "https://www.nike.com/sg/launch/*",
         "https://nike.com/sg/launch/*"
       ],
-      "js": ["snkrs-content-script.js"],
+      "js": [
+        "snkrs-content-script.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://gs.nike.com/*"
       ],
-      "js": ["gs-bootstrap-content-script.js"],
+      "js": [
+        "gs-bootstrap-content-script.js"
+      ],
       "run_at": "document_start"
     },
     {
       "matches": [
         "https://gs.nike.com/*"
       ],
-      "js": ["checkout-core.js", "gs-content-script.js"],
+      "js": [
+        "checkout-core.js",
+        "gs-content-script.js"
+      ],
       "run_at": "document_idle"
     },
     {
       "matches": [
         "https://gs-payments.nike.com/*"
       ],
-      "js": ["gs-payments-content-script.js"],
+      "js": [
+        "gs-payments-content-script.js"
+      ],
       "run_at": "document_idle",
       "all_frames": true
     },
@@ -98,7 +105,9 @@
         "https://www.nike.com/*orders*",
         "https://nike.com/*orders*"
       ],
-      "js": ["orders-fetch-interceptor.js"],
+      "js": [
+        "orders-fetch-interceptor.js"
+      ],
       "world": "MAIN",
       "run_at": "document_start"
     },
@@ -107,7 +116,9 @@
         "https://www.nike.com/*orders*",
         "https://nike.com/*orders*"
       ],
-      "js": ["orders-content-script.js"],
+      "js": [
+        "orders-content-script.js"
+      ],
       "run_at": "document_start"
     }
   ]
