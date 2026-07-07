@@ -15,23 +15,72 @@
 // commands as a fallback.
 // ============================================================
 
-// ── Page navigation ──────────────────────────────────────────
-let _currentPage = "home";
-function navigateTo(name) {
+// ── Page navigation (CyberAIO sidebar + grouped sections) ─────
+// Four primary groups in the sidebar. Each maps to one or more of the existing
+// page-sections (so all their element IDs + wiring stay intact). Multi-section
+// groups get a secondary tab row; "stack" groups show their sections together.
+const NAV_GROUPS = {
+  dashboard: { sections: ["home", "live"], stack: true },
+  setup:     { sections: ["drop", "profiles", "cards", "preflight"], tabs: ["Drop", "Profiles", "Cards", "Preflight"] },
+  history:   { sections: ["history", "orders"], tabs: ["Insights & Replay", "Orders"] },
+  settings:  { sections: ["settings"], stack: true },
+};
+const SECTION_TO_GROUP = {};
+for (const [g, def] of Object.entries(NAV_GROUPS)) def.sections.forEach(s => (SECTION_TO_GROUP[s] = g));
+
+let _currentGroup = "dashboard";
+let _currentPage = "home";                 // the active (sub)section
+let _visibleSections = new Set(["home", "live"]);
+const isVisible = (section) => _visibleSections.has(section);
+
+function runSectionHooks(section) {
+  if (section === "home") { renderHomeStats(); if (!_upcomingLoaded) loadUpcoming(false); }
+  else if (section === "live") { renderLivePage(); refreshPanicBanner(); }
+  else if (section === "preflight") { renderPreflight(); refreshVersionBanner(); }
+  else if (section === "history") { renderDropReplay(); renderInsights(); }
+  else if (section === "drop") { renderSelfLearningForDrop(); }
+}
+
+function buildSubnav(group, active) {
+  const nav = document.getElementById("subNav");
+  if (!nav) return;
+  const g = NAV_GROUPS[group];
+  nav.innerHTML = "";
+  if (!g || g.stack || g.sections.length <= 1) { nav.style.display = "none"; return; }
+  nav.style.display = "flex";
+  g.sections.forEach((sec, i) => {
+    const b = document.createElement("button");
+    b.className = "subtab" + (sec === active ? " active" : "");
+    b.textContent = (g.tabs && g.tabs[i]) || sec.toUpperCase();
+    b.addEventListener("click", () => navigateTo(group, sec));
+    nav.appendChild(b);
+  });
+}
+
+// Accepts a group name ("setup") OR a section name ("preflight") so every
+// existing navigateTo("preflight"/"settings"/…) call keeps working.
+function navigateTo(name, subSection) {
+  let group, active;
+  if (NAV_GROUPS[name]) { group = name; active = subSection || NAV_GROUPS[name].sections[0]; }
+  else { group = SECTION_TO_GROUP[name] || "dashboard"; active = name; }
+  const g = NAV_GROUPS[group];
+
   document.querySelectorAll(".page-section").forEach(s => s.classList.remove("active"));
-  document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
-  const sec = document.getElementById("page-" + name);
-  const tab = document.querySelector(`.nav-tab[data-nav="${name}"]`);
-  if (sec) sec.classList.add("active");
-  if (tab) tab.classList.add("active");
-  _currentPage = name;
-  if (name === "home") {
-    renderHomeStats();
-    if (!_upcomingLoaded) loadUpcoming(false);
-  }
-  if (name === "live") { renderLivePage(); refreshPanicBanner(); }
-  if (name === "preflight") { renderPreflight(); refreshVersionBanner(); }
-  if (name === "history") renderDropReplay();
+  _visibleSections = new Set();
+  const shown = g.stack ? g.sections : [active];
+  shown.forEach(sec => {
+    const el = document.getElementById("page-" + sec);
+    if (el) { el.classList.add("active"); _visibleSections.add(sec); }
+  });
+
+  document.querySelectorAll(".side-item").forEach(t => t.classList.toggle("active", t.dataset.nav === group));
+  buildSubnav(group, active);
+
+  _currentGroup = group;
+  _currentPage = active;
+  shown.forEach(runSectionHooks);
+  const c = document.querySelector(".content");
+  if (c) c.scrollTop = 0;
 }
 
 function renderHomeStats() {
@@ -582,7 +631,7 @@ async function warmAll() {
     if (resp.ok) { ok++; await markWarm(a.profileDir); } else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 350));
   }
-  if (_currentPage === "preflight") renderPreflight();
+  if (isVisible("preflight")) renderPreflight();
   flashTemp(msg, ok === withProfile.length
     ? `🔥 Warmed ${ok} profile(s) — cookies/Kasada refreshed. Re-run preflight to confirm.`
     : `Warmed ${ok}/${withProfile.length}. Last error: ${lastErr}`,
@@ -809,7 +858,7 @@ async function runPreflight() {
 // Launch ONE profile on the preflight page (marks it pending first).
 async function launchPreflightFor(profileDir) {
   preflightResults[profileDir] = { __pending: true, startedAt: Date.now(), profileDir };
-  if (_currentPage === "preflight") renderPreflight();
+  if (isVisible("preflight")) renderPreflight();
   const sep = NIKE_PREFLIGHT_URL.includes("#") ? "&" : "#";
   const url = `${NIKE_PREFLIGHT_URL}${sep}snkrsPreflight=${encodeURIComponent(profileDir)}`;
   return hostSend({ cmd: "launch", profileDir, url });
@@ -860,7 +909,7 @@ function startPreflightPolling() {
     // Re-render on any change, OR while entries are still pending so the
     // no-response timeout can flip a stuck profile to a hard fail on schedule.
     const anyPending = Object.values(preflightResults).some(r => r && r.__pending && !r.ts);
-    if (_currentPage === "preflight" && (changed || anyPending)) { renderPreflight(); refreshVersionBanner(); }
+    if (isVisible("preflight") && (changed || anyPending)) { renderPreflight(); refreshVersionBanner(); }
   };
   tick();
   preflightPollTimer = setInterval(tick, 2500);
@@ -997,7 +1046,7 @@ function startStatusPolling() {
       }
     }
     if (changed) refreshAllBadges();
-    else if (_currentPage === "live") renderLivePage(); // keep the monitor fresh
+    else if (isVisible("live")) renderLivePage(); // keep the monitor fresh
   };
   tick();
   statusPollTimer = setInterval(tick, 2500);
@@ -1021,12 +1070,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
+    if (isVisible("history")) renderInsights();
+    if (isVisible("drop")) renderSelfLearningForDrop();
   }
   if (changes[TIMELINE_KEY]) {
     // Merge the local mirror (this profile's own tabs) with polled cross-profile
     // entries so neither source clobbers the other.
     timelines = { ...timelines, ...(changes[TIMELINE_KEY].newValue || {}) };
-    if (_currentPage === "history") renderDropReplay();
+    if (isVisible("history")) renderDropReplay();
   }
   if (changes[CARDS_KEY]) {
     cardProfiles = changes[CARDS_KEY].newValue || [];
@@ -2051,6 +2102,166 @@ async function persistTimelineToHistory() {
   await chrome.storage.local.set({ [HISTORY_KEY]: history });
 }
 
+// ══════════════════ SELF-LEARNING ══════════════════
+// The bot mines its own drop history (persisted runs + per-account replay
+// timings) to learn: how fast checkout fills, how close to go-live it submits,
+// which sizes hit, and what usually goes wrong — then turns that into an
+// Insights panel, a recommended open-lead (auto-tune), and size hints.
+
+let _insights = null;          // cached compute
+let _prepLeadSec = 0;          // user/auto-tuned open-lead (0 = default 30s)
+
+function computeInsights(history) {
+  const runs = Array.isArray(history) ? history : [];
+  const out = {
+    runs: runs.length,
+    wins: 0, entered: 0, losses: 0, limits: 0, entries: 0,
+    fills: [], offsets: [], failures: {}, sizes: {},
+  };
+  for (const run of runs) {
+    const results = (run.results && typeof run.results === "object") ? run.results : {};
+    const replay = (run.replay && typeof run.replay === "object") ? run.replay : {};
+    for (const acct of (run.accounts || [])) {
+      const code = results[acct.profileDir];
+      const size = acct.size;
+      if (size) {
+        const s = out.sizes[size] || (out.sizes[size] = { size, win: 0, entered: 0, total: 0 });
+        s.total++;
+        if (code === "win") s.win++;
+        else if (code === "entered" || code === "success") s.entered++;
+      }
+      if (code) {
+        out.entries++;
+        if (code === "win") out.wins++;
+        else if (code === "loss") { out.losses++; out.failures["not selected"] = (out.failures["not selected"] || 0) + 1; }
+        else if (code === "entered" || code === "success") out.entered++;
+        else if (code === "limit") { out.limits++; out.failures["entry limit"] = (out.failures["entry limit"] || 0) + 1; }
+      }
+    }
+    for (const s of Object.values(replay)) {
+      if (s.loadedT && s.filledT) out.fills.push(s.filledT - s.loadedT);
+      if (s.offsetMs != null) out.offsets.push(s.offsetMs);
+      if (s.error) out.failures[String(s.error).replace(/_/g, " ")] = (out.failures[String(s.error).replace(/_/g, " ")] || 0) + 1;
+    }
+  }
+  const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  out.avgFill = avg(out.fills);
+  out.maxFill = out.fills.length ? Math.max(...out.fills) : null;
+  out.avgOffset = avg(out.offsets);
+  // Recommended open-lead: cover the slowest observed fill + a safety buffer,
+  // clamped to a sane 20–90s window. Null until we have fill data.
+  out.recommendedLeadSec = out.maxFill != null
+    ? Math.max(20, Math.min(90, Math.ceil(out.maxFill / 1000) + 15))
+    : null;
+  const failEntries = Object.entries(out.failures).sort((a, b) => b[1] - a[1]);
+  out.topFailure = failEntries.length ? failEntries[0] : null;
+  out.winRate = out.entries ? (out.wins + out.entered) / out.entries : null;
+  out.topSizes = Object.values(out.sizes)
+    .map(s => ({ ...s, rate: s.total ? (s.win + s.entered) / s.total : 0 }))
+    .sort((a, b) => b.rate - a.rate || b.total - a.total);
+  return out;
+}
+
+async function loadInsights() {
+  const d = await chrome.storage.local.get(HISTORY_KEY);
+  _insights = computeInsights(Array.isArray(d[HISTORY_KEY]) ? d[HISTORY_KEY] : []);
+  return _insights;
+}
+
+async function renderInsights() {
+  const body = $("insightsBody");
+  const msg = $("insightsMsg");
+  if (!body) return;
+  const ins = await loadInsights();
+  if (!ins.runs) {
+    body.innerHTML = "";
+    if (msg) msg.textContent = "The bot studies every drop it runs. Run a few and it learns your fill speed, timing margin, and which sizes hit.";
+    return;
+  }
+  if (msg) msg.textContent = `Learned from ${ins.runs} drop${ins.runs > 1 ? "s" : ""} · ${ins.entries} entr${ins.entries === 1 ? "y" : "ies"}.`;
+
+  const fmtMs = (ms) => ms == null ? "—" : ms < 1000 ? Math.round(ms) + "ms" : (ms / 1000).toFixed(1) + "s";
+  const tile = (val, label, cls) => `<div class="insight-tile ${cls || ""}"><div class="it-val">${val}</div><div class="it-label">${label}</div></div>`;
+
+  const offTxt = ins.avgOffset == null ? "—"
+    : (ins.avgOffset >= 0 ? "+" : "−") + fmtMs(Math.abs(ins.avgOffset));
+  const winPct = ins.winRate == null ? "—" : Math.round(ins.winRate * 100) + "%";
+
+  let html = `<div class="insight-tiles">` +
+    tile(winPct, "hit rate", ins.winRate >= 0.5 ? "good" : "") +
+    tile(fmtMs(ins.avgFill), "avg fill time") +
+    tile(offTxt, "avg submit vs go-live", ins.avgOffset != null && ins.avgOffset < 0 ? "warn" : "good") +
+    tile(ins.wins, "wins", ins.wins ? "good" : "") +
+    `</div>`;
+
+  // Recommendation line.
+  const recs = [];
+  if (ins.recommendedLeadSec != null) {
+    const curLead = _prepLeadSec || 30;
+    if (ins.recommendedLeadSec > curLead + 3)
+      recs.push(`⏱ Your slowest checkout filled in ${fmtMs(ins.maxFill)} — open accounts <strong>${ins.recommendedLeadSec}s</strong> early (currently ${curLead}s) so nothing's still filling at go-live.`);
+    else
+      recs.push(`✅ Fills complete well within your ${curLead}s open-lead — timing margin looks safe.`);
+  }
+  if (ins.avgOffset != null && ins.avgOffset < -150)
+    recs.push(`⚠ On average you submit <strong>${fmtMs(Math.abs(ins.avgOffset))} early</strong> — that risks LAUNCH_NOT_ACTIVE. The drop-time gate should hold to exactly go-live.`);
+  if (ins.topFailure && ins.topFailure[1] >= 2)
+    recs.push(`🔎 Most common issue: <strong>${escapeHtml(ins.topFailure[0])}</strong> (${ins.topFailure[1]}×).`);
+  if (recs.length) html += `<div class="insight-recs">` + recs.map(r => `<div class="insight-rec">${r}</div>`).join("") + `</div>`;
+
+  // Top sizes by hit rate.
+  if (ins.topSizes.length) {
+    const rows = ins.topSizes.slice(0, 6).map(s =>
+      `<div class="size-stat"><span class="ss-size">${escapeHtml(s.size)}</span>` +
+      `<span class="ss-bar"><span class="ss-fill" style="width:${Math.round(s.rate * 100)}%"></span></span>` +
+      `<span class="ss-rate">${Math.round(s.rate * 100)}% <span class="muted">(${s.win + s.entered}/${s.total})</span></span></div>`).join("");
+    html += `<div class="insight-sizes"><div class="insight-sub">HIT RATE BY SIZE</div>${rows}</div>`;
+  }
+  body.innerHTML = html;
+}
+
+// Drop-page self-learning: recommended open-lead (auto-tune) + size hints.
+async function renderSelfLearningForDrop() {
+  const ins = await loadInsights();
+
+  // Auto-tune box.
+  const box = $("autoTuneBox"), txt = $("autoTuneText");
+  if (box && txt) {
+    if (ins.recommendedLeadSec != null) {
+      const cur = _prepLeadSec || 30;
+      box.style.display = "flex";
+      txt.innerHTML = `🧠 Recommended open-lead <strong>${ins.recommendedLeadSec}s</strong> ` +
+        `<span class="muted">(from your ${(ins.maxFill / 1000).toFixed(1)}s slowest fill · currently ${cur}s)</span>`;
+      const btn = $("autoTuneApplyBtn");
+      if (btn) btn.style.display = (ins.recommendedLeadSec !== cur) ? "" : "none";
+    } else {
+      box.style.display = "none";
+    }
+  }
+
+  // Size hints.
+  const sh = $("sizeHints");
+  if (sh) {
+    if (ins.topSizes.length && ins.entries >= 2) {
+      const top = ins.topSizes.slice(0, 4).filter(s => s.total >= 1)
+        .map(s => `<span class="size-hint-chip">${escapeHtml(s.size)} · ${Math.round(s.rate * 100)}%</span>`).join("");
+      sh.style.display = "";
+      sh.innerHTML = `<span class="muted">🧠 Best historical sizes:</span> ${top}`;
+    } else {
+      sh.style.display = "none";
+    }
+  }
+}
+
+async function applyAutoTune() {
+  const ins = _insights || await loadInsights();
+  if (ins.recommendedLeadSec == null) return;
+  _prepLeadSec = ins.recommendedLeadSec;
+  await saveAll(true);           // persists options.prepLeadSec + re-arms
+  renderSelfLearningForDrop();
+  flashTemp($("statusMsg"), `🧠 Open-lead set to ${_prepLeadSec}s — accounts will open that early before the drop.`, "var(--green)", 6000);
+}
+
 // Poll the shared timeline folder (accounts run in OTHER Chrome profiles).
 function startTimelinePolling() {
   if (timelinePollTimer) clearInterval(timelinePollTimer);
@@ -2067,7 +2278,7 @@ function startTimelinePolling() {
     }
     if (changed) {
       persistTimelineToHistory();
-      if (_currentPage === "history") renderDropReplay();
+      if (isVisible("history")) renderDropReplay();
     }
   };
   tick();
@@ -2349,6 +2560,9 @@ function buildConfig() {
       pollerIntervalMin: parseInt($("optPollerMin").value) || 3,
       logWebhook: $("logWebhook").value.trim(),
       alertWebhook: $("alertWebhook").value.trim(),
+      // Self-learning auto-tune: how many seconds early to open accounts before
+      // the drop (0/absent = background default of 30s).
+      prepLeadSec: _prepLeadSec || 0,
     },
     accounts: accounts.map(a => ({
       id: a.id,
@@ -2797,6 +3011,7 @@ function applyConfigToUI(cfg) {
     }));
   }
 
+  _prepLeadSec = Number(opts.prepLeadSec) || 0;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
   $("optPoller").checked = opts.statusPollerEnabled ?? true;
@@ -2951,10 +3166,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("cpSaveBtn").addEventListener("click", saveCardProfile);
   $("cpCancelBtn").addEventListener("click", resetCardForm);
 
-  // ── Page navigation ──
-  document.querySelectorAll(".nav-tab").forEach(tab => {
+  // ── Page navigation (sidebar) ──
+  document.querySelectorAll(".side-item").forEach(tab => {
     tab.addEventListener("click", () => navigateTo(tab.dataset.nav));
   });
+  // Persistent sidebar quick-actions.
+  if ($("sideLaunchBtn")) $("sideLaunchBtn").addEventListener("click", launchAll);
+  if ($("sidePanicBtn")) $("sidePanicBtn").addEventListener("click", raisePanic);
+  if ($("sideCloseBtn")) $("sideCloseBtn").addEventListener("click", closeAllProfiles);
+  navigateTo("dashboard");
   renderHomeStats();
 
   // ── Getting Started guide (collapsible, lives on HOME page) ──
@@ -3053,6 +3273,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     products.push(newProduct());
     renderProducts();
   });
+  if ($("autoTuneApplyBtn")) $("autoTuneApplyBtn").addEventListener("click", applyAutoTune);
   $("randomAssignBtn").addEventListener("click", randomAssign);
   $("directUrlsBtn").addEventListener("click", () => assignCheckoutUrls($("assignMsg")));
   $("saveBtn").addEventListener("click", () => saveAll(false));

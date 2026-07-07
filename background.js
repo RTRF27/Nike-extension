@@ -502,7 +502,15 @@ const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
 // primed to SUBMIT the instant the drop goes live. The content scripts hold the
 // actual SUBMIT click until the real drop time (never before → no
 // LAUNCH_NOT_ACTIVE). Long enough to fill, short enough that Kasada stays valid.
-const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds
+const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds (default)
+
+// Self-learning auto-tune: the dashboard can override the open-lead per its
+// observed fill times (options.prepLeadSec). Clamped to a sane 15–120s.
+function prepLeadMsFor(cfg) {
+  const secs = cfg && cfg.options && Number(cfg.options.prepLeadSec);
+  if (secs && secs > 0) return Math.max(15, Math.min(120, secs)) * 1000;
+  return DASH_PREP_LEAD_MS;
+}
 
 // Returns the list of boot URLs to open for an account. Multi-product: one per
 // product target (each its own checkout URL + drop time). Single: one.
@@ -558,7 +566,7 @@ async function rescheduleDashLaunch() {
   }
   // Open PREP seconds before the drop so the page is primed; the content scripts
   // hold SUBMIT until the real drop time.
-  const openAt = dropMs - DASH_PREP_LEAD_MS;
+  const openAt = dropMs - prepLeadMsFor(cfg);
   if (dropMs <= Date.now() - LAUNCH_GRACE_MS) {
     // Drop passed long ago — stale. Disarm silently.
     await chrome.storage.local.remove(DASH_LAUNCH_STORE);
@@ -1180,7 +1188,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       // Open PREP seconds before the drop (fresh page/Kasada + time to fill);
       // the content scripts hold SUBMIT until the real drop time.
-      const openAt = dropMs - DASH_PREP_LEAD_MS;
+      const openAt = dropMs - prepLeadMsFor(cfg);
       if (dropMs <= Date.now() - LAUNCH_GRACE_MS) {
         // Drop passed long ago → stale. Disarm silently.
         await chrome.storage.local.remove(DASH_LAUNCH_STORE);

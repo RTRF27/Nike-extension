@@ -1090,3 +1090,125 @@ select.inp { cursor: pointer; }
 .history-replay-row .hr-detail { color: var(--purple2); font-variant-numeric: tabular-nums; }
 .history-replay-row .hr-detail.warn { color: var(--orange); }
 .history-replay-row .hr-detail.bad { color: var(--red); }
+
+/* ══════════════════════════════════════════════════════════════
+   CYBERAIO REVAMP — sidebar shell, subnav, self-learning
+   (appended last so it overrides the legacy top-bar layout)
+   ══════════════════════════════════════════════════════════════ */
+.app-shell { display: flex; min-height: 100vh; position: relative; z-index: 1; }
+
+/* ── Sidebar ── */
+.sidebar {
+  width: 216px; flex-shrink: 0; height: 100vh; position: sticky; top: 0;
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 18px 14px 16px; box-sizing: border-box;
+  background: linear-gradient(180deg, rgba(16,13,29,.96), rgba(10,8,20,.96));
+  border-right: 1px solid var(--glass-brd);
+  backdrop-filter: blur(10px);
+}
+.sidebar .brand { padding: 4px 8px 14px; margin-bottom: 6px; border-bottom: 1px solid var(--line2); }
+.sidebar .brand-sub { color: var(--purple2); letter-spacing: 3px; }
+
+.side-nav { display: flex; flex-direction: column; gap: 3px; }
+.side-item {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 11px 13px; border-radius: 10px; border: 1px solid transparent;
+  background: transparent; color: var(--grey); cursor: pointer;
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 700;
+  font-size: 15px; letter-spacing: .6px; text-align: left;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.side-item .si-ico { font-size: 15px; width: 18px; text-align: center; opacity: .9; }
+.side-item:hover { background: rgba(139,92,246,.08); color: var(--white); }
+.side-item.active {
+  background: linear-gradient(90deg, rgba(139,92,246,.22), rgba(139,92,246,.05));
+  border-color: var(--purple-dim); color: #fff;
+  box-shadow: inset 3px 0 0 var(--purple);
+}
+.side-item.active .si-ico { color: var(--purple2); opacity: 1; }
+
+.side-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line2); }
+.side-foot .host-pill { width: 100%; justify-content: center; }
+.side-launch { width: 100%; }
+.side-foot-row { display: flex; gap: 6px; }
+.side-foot-row .btn { flex: 1; font-size: 11px; padding: 8px 6px; }
+
+/* ── Content column ── */
+.content { flex: 1; min-width: 0; height: 100vh; overflow-y: auto; }
+.main { max-width: 1200px; margin: 0 auto; padding: 24px 30px 70px; }
+
+/* ── Secondary tabs ── */
+.subnav {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  max-width: 1200px; margin: 0 auto; padding: 16px 30px 0;
+}
+.subtab {
+  padding: 8px 16px; border-radius: 9px; cursor: pointer;
+  background: var(--panel2); border: 1px solid var(--line);
+  color: var(--grey); font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700; font-size: 13px; letter-spacing: .8px;
+  transition: all .15s;
+}
+.subtab:hover { color: var(--white); border-color: var(--purple-dim); }
+.subtab.active {
+  background: linear-gradient(135deg, rgba(168,85,247,.25), rgba(99,102,241,.15));
+  border-color: var(--purple); color: #fff;
+  box-shadow: 0 0 14px var(--purple-glow);
+}
+
+/* When a stacked group shows two sections, space their headers a bit. */
+.page-section.active + .page-section.active { margin-top: 8px; }
+
+/* ── Self-learning: Insights ── */
+.insights-card { border-color: rgba(139,92,246,.3); }
+.insight-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 6px 0 4px; }
+.insight-tile {
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--panel2); padding: 14px; text-align: center;
+}
+.insight-tile.good { border-color: rgba(52,211,153,.4); background: linear-gradient(160deg, rgba(52,211,153,.1), transparent); }
+.insight-tile.warn { border-color: rgba(251,146,60,.4); background: linear-gradient(160deg, rgba(251,146,60,.1), transparent); }
+.it-val { font-family: 'Barlow Condensed', sans-serif; font-weight: 900; font-size: 30px; line-height: 1; color: var(--white); }
+.insight-tile.good .it-val { color: var(--green); }
+.insight-tile.warn .it-val { color: var(--orange); }
+.it-label { font-size: 10.5px; letter-spacing: 1px; color: var(--grey); text-transform: uppercase; margin-top: 6px; }
+
+.insight-recs { display: flex; flex-direction: column; gap: 8px; margin: 14px 0 4px; }
+.insight-rec {
+  font-size: 13px; line-height: 1.5; color: var(--white);
+  padding: 11px 14px; border-radius: var(--radius-sm);
+  background: rgba(139,92,246,.08); border: 1px solid var(--purple-dim);
+}
+.insight-rec strong { color: var(--purple2); }
+
+.insight-sizes { margin-top: 16px; }
+.insight-sub { font-size: 11px; letter-spacing: 1.5px; color: var(--grey); font-weight: 700; margin-bottom: 10px; }
+.size-stat { display: flex; align-items: center; gap: 12px; margin-bottom: 7px; font-size: 13px; }
+.size-stat .ss-size { min-width: 46px; font-weight: 800; color: var(--white); font-variant-numeric: tabular-nums; }
+.size-stat .ss-bar { flex: 1; height: 8px; border-radius: 6px; background: var(--panel3); overflow: hidden; }
+.size-stat .ss-fill { display: block; height: 100%; border-radius: 6px; background: linear-gradient(90deg, var(--indigo), var(--purple4)); }
+.size-stat .ss-rate { min-width: 84px; text-align: right; color: var(--purple2); font-variant-numeric: tabular-nums; }
+
+/* ── Self-learning: auto-tune + size hints on the Drop page ── */
+.autotune {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 13px; border-radius: var(--radius-sm);
+  background: rgba(139,92,246,.08); border: 1px solid var(--purple-dim);
+}
+.autotune-text { flex: 1; font-size: 12.5px; line-height: 1.45; color: var(--white); }
+.autotune-text strong { color: var(--purple2); }
+.size-hints { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; font-size: 12px; }
+.size-hint-chip {
+  padding: 3px 9px; border-radius: 12px; font-weight: 700;
+  background: rgba(52,211,153,.12); border: 1px solid rgba(52,211,153,.35); color: var(--green);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Narrow screens: collapse sidebar to icons ── */
+@media (max-width: 900px) {
+  .sidebar { width: 62px; padding: 14px 8px; }
+  .sidebar .brand-text, .side-item .si-label, .host-pill #hostText { display: none; }
+  .side-item { justify-content: center; padding: 12px 0; }
+  .side-launch, .side-foot-row .btn { font-size: 0; padding: 10px 0; }
+  .side-launch::after { content: "🚀"; font-size: 15px; }
+}

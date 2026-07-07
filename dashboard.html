@@ -24,47 +24,56 @@
     </div>
   </div>
 
-  <!-- ░░ TOPBAR ░░ -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="nike-swoosh">
-        <svg viewBox="0 0 24 9" fill="none"><path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/></svg>
+  <!-- ░░ APP SHELL: sidebar + content ░░ -->
+  <div class="app-shell">
+
+    <!-- ░░ SIDEBAR ░░ -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="nike-swoosh">
+          <svg viewBox="0 0 24 9" fill="none"><path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/></svg>
+        </div>
+        <div class="brand-text">
+          <span class="brand-label">SNKRS</span>
+          <span class="brand-sub">COMMAND</span>
+        </div>
       </div>
-      <div class="brand-text">
-        <span class="brand-label">SNKRS</span>
-        <span class="brand-sub">DROP DASHBOARD</span>
+
+      <nav class="side-nav" id="sideNav">
+        <button class="side-item active" data-nav="dashboard"><span class="si-ico">▦</span><span class="si-label">Dashboard</span></button>
+        <button class="side-item" data-nav="setup"><span class="si-ico">⚙</span><span class="si-label">Setup</span></button>
+        <button class="side-item" data-nav="history"><span class="si-ico">📊</span><span class="si-label">History</span></button>
+        <button class="side-item" data-nav="settings"><span class="si-ico">☰</span><span class="si-label">Settings</span></button>
+      </nav>
+
+      <div class="side-foot">
+        <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;">⚙ ADMIN</a>
+        <div class="host-pill" id="hostPill">
+          <span class="host-dot" id="hostDot"></span>
+          <span id="hostText">CHECKING…</span>
+        </div>
+        <button id="sideLaunchBtn" class="btn btn-accent side-launch">🚀 LAUNCH ALL</button>
+        <div class="side-foot-row">
+          <button id="sidePanicBtn" class="btn btn-danger side-panic" title="Stop all held submits">🛑 PANIC</button>
+          <button id="sideCloseBtn" class="btn btn-dark side-close" title="Close every profile's bot windows">✖ CLOSE</button>
+        </div>
       </div>
-    </div>
+    </aside>
 
-    <nav class="nav-tabs" id="navTabs">
-      <button class="nav-tab active" data-nav="home">HOME</button>
-      <button class="nav-tab" data-nav="drop">DROP</button>
-      <button class="nav-tab" data-nav="live">LIVE</button>
-      <button class="nav-tab" data-nav="preflight">PREFLIGHT</button>
-      <button class="nav-tab" data-nav="profiles">PROFILES</button>
-      <button class="nav-tab" data-nav="cards">CARDS</button>
-      <button class="nav-tab" data-nav="orders">ORDERS</button>
-      <button class="nav-tab" data-nav="history">HISTORY</button>
-      <button class="nav-tab" data-nav="settings">SETTINGS</button>
-    </nav>
+    <!-- ░░ CONTENT ░░ -->
+    <div class="content">
 
-    <div class="topbar-right">
-      <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;">⚙ ADMIN</a>
-      <div class="host-pill" id="hostPill">
-        <span class="host-dot" id="hostDot"></span>
-        <span id="hostText">CHECKING…</span>
+      <!-- Launcher-missing banner -->
+      <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
+        <strong>Launcher not connected.</strong> Launch buttons need the one-time native host install.
+        <a href="#" id="setupLink">How to install →</a>
       </div>
-    </div>
-  </header>
 
-  <!-- Launcher-missing banner -->
-  <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
-    <strong>Launcher not connected.</strong> Launch buttons need the one-time native host install.
-    <a href="#" id="setupLink">How to install →</a>
-  </div>
+      <!-- Secondary tabs (populated by JS for multi-view sections) -->
+      <div class="subnav" id="subNav"></div>
 
-  <!-- ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ PAGES ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ -->
-  <main class="main">
+      <!-- ░░░░░░░░░░░░░░░░░░░░░░░░░ PAGES ░░░░░░░░░░░░░░░░░░░░░░░░░ -->
+      <main class="main">
 
     <!-- ─────────────────── HOME ─────────────────── -->
     <div class="page-section active" id="page-home">
@@ -106,15 +115,9 @@
 
         <!-- Left: Live status board -->
         <div class="col">
-          <section class="card">
-            <div class="card-head">
-              <h2>⚡ LIVE STATUS</h2>
-              <span class="card-tag">ALL ACCOUNTS</span>
-            </div>
-            <div id="homeStatusList">
-              <p class="hint">No accounts running. Launch from the DROP page.</p>
-            </div>
-          </section>
+          <!-- LIVE STATUS mini-board removed — the full LIVE monitor renders
+               directly below in the Dashboard view (kept hidden for JS compat). -->
+          <div id="homeStatusList" style="display:none;"></div>
 
           <!-- Last drop summary -->
           <section class="card">
@@ -150,7 +153,7 @@
             </div>
           </section>
 
-          <section class="card">
+          <section class="card" style="display:none;">
             <div class="card-head">
               <h2>🚀 GETTING STARTED</h2>
               <span class="card-tag" id="guideToggle" style="cursor:pointer;">SHOW</span>
@@ -235,10 +238,17 @@
               <label class="switch"><input type="checkbox" id="scheduleEnabled"><span class="track"></span></label>
             </div>
             <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
+
+            <!-- Self-learning: recommended open-lead from observed fill times -->
+            <div id="autoTuneBox" class="autotune" style="display:none; margin-top:12px;">
+              <div class="autotune-text" id="autoTuneText"></div>
+              <button id="autoTuneApplyBtn" class="btn btn-mini btn-purple" style="white-space:nowrap;">Apply</button>
+            </div>
           </section>
 
           <section class="card">
             <div class="card-head"><h2>ACTIONS</h2></div>
+            <div id="sizeHints" class="size-hints" style="display:none;"></div>
             <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;">🎲 RANDOMLY ASSIGN SIZES</button>
             <button id="directUrlsBtn" class="btn btn-dark" style="width:100%; margin-bottom:10px;">⚡ BUILD DIRECT CHECKOUT URLS</button>
             <p class="hint" style="margin:-2px 0 10px;">Generates a unique gs.nike.com checkout link per account from the SKU + assigned size — skips the launch page and size picker. Falls back to the normal flow if it can't resolve.</p>
@@ -452,8 +462,18 @@
     <div class="page-section" id="page-history">
       <div class="section-header">
         <h1 class="section-title">DROP HISTORY</h1>
-        <span class="section-sub">Timeline replay + record of every run</span>
+        <span class="section-sub">What the bot has learned from your past drops</span>
       </div>
+
+      <!-- ░ SELF-LEARNING INSIGHTS ░ -->
+      <section class="card insights-card" style="margin-bottom:20px;">
+        <div class="card-head">
+          <h2>🧠 INSIGHTS</h2>
+          <span class="card-tag">SELF-LEARNING</span>
+        </div>
+        <p class="hint" id="insightsMsg">The bot studies every drop it runs. Run a few and it learns your fill speed, timing margin, and which sizes hit.</p>
+        <div id="insightsBody"></div>
+      </section>
 
       <section class="card" style="margin-bottom:20px;">
         <div class="card-head">
@@ -588,7 +608,9 @@
       </div>
     </div>
 
-  </main>
+      </main>
+    </div><!-- /.content -->
+  </div><!-- /.app-shell -->
 
   <!-- ─────────── TEMPLATES ─────────── -->
   <template id="accountRowTpl">

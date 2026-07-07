@@ -196,6 +196,26 @@ the same steps in short:
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
 
+## Dashboard revamp (v4.0)
+
+CyberAIO-style **left sidebar** with four sections (all overlapping panels
+merged, nothing removed):
+
+- **Dashboard** — overview stats + upcoming drops + quick launch + the full LIVE
+  monitor in one command-center view. Persistent **LAUNCH ALL / PANIC / CLOSE**
+  live in the sidebar footer, one click away from anywhere.
+- **Setup** — Drop / Profiles / Cards / Preflight as sub-tabs.
+- **History** — Insights & Replay / Orders.
+- **Settings** — options, webhooks, backup.
+
+**Self-learning** (grounded in the drop data the bot already records — no fake
+ML): an **Insights** panel mines every past drop for hit rate, average fill
+time, average submit-vs-go-live offset, and per-size hit rates; **Auto-tune**
+recommends (and one-click applies) the open-lead from your slowest observed
+fill; and **size hints** surface your best-performing sizes when assigning.
+Covered by `test-harness/dashboard-smoke.mjs` (loads the real dashboard with
+`chrome.*` stubbed and drives the sidebar + insights).
+
 ## Live-feed attribution (v3.7)
 
 The LIVE board used to go stale while profiles sat holding for a drop. Cause:
