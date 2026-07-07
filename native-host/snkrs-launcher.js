@@ -28,7 +28,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-const HOST_VERSION = "1.2.0";
+const HOST_VERSION = "1.3.0";
 
 // ── Shared config file ("the generic file") ───────────────────
 const CONFIG_DIR = path.join(os.homedir(), ".snkrs-bot");
@@ -291,7 +291,16 @@ function listProfiles() {
 // Extension folder is the parent of this native-host directory. We expose it
 // in the ping response for diagnostics, but we deliberately DO NOT pass it via
 // --load-extension when launching profiles (see below).
-const EXTENSION_DIR = path.resolve(__dirname, "..");
+// The extension folder = the parent of this native-host directory. On the
+// user's machine that resolves to e.g. C:\Snkrs-extension\Nike-extension.
+// Overridable with SNKRS_EXTENSION_DIR if the host lives elsewhere.
+const EXTENSION_DIR = process.env.SNKRS_EXTENSION_DIR || path.resolve(__dirname, "..");
+
+// Does the configured extension dir actually contain the extension?
+function extensionDirValid(dir) {
+  try { return !!dir && fs.existsSync(path.join(dir, "manifest.json")); }
+  catch (e) { return false; }
+}
 
 // Accepts a single url (string) OR many (array). Passing multiple URLs to one
 // chrome invocation opens them all as tabs in that profile — reliably, even
@@ -304,20 +313,39 @@ function launchProfile(profileDir, urlOrUrls, extensionDir) {
   }
   if (!profileDir) return { ok: false, error: "Missing profileDir." };
 
-  // IMPORTANT: we intentionally do NOT pass --load-extension.
-  // Chrome 137+ treats any session started with --load-extension as untrusted
-  // and DISABLES all developer-mode (unpacked) extensions in it — including the
-  // copy the user installed manually. That made bot-launched profiles open with
-  // NO extension, even though manual launches worked. Launching without the flag
-  // lets each profile load its own already-installed extension normally.
   const args = [`--profile-directory=${profileDir}`];
+
+  // Load the extension into EVERY launched profile straight from the shared
+  // folder, so profiles that don't already have it installed still run the bot
+  // (this is the fix for "Launch All opens profiles with no extension").
+  //
+  // Chrome 137+ ships a feature ("DisableLoadExtensionCommandLineSwitch") that
+  // neuters a bare --load-extension. We turn that feature OFF in the same
+  // command so --load-extension is honoured again. The extension keeps its
+  // pinned ID (manifest "key"), so it still matches the native host's
+  // allowed_origins and every profile runs the identical build from ONE folder.
+  //
+  // Caveat (Chrome's single-process model): --load-extension is only applied
+  // when this profile's Chrome starts a FRESH process. If a Chrome window for
+  // this user-data-dir is already open, the launch is forwarded to it and the
+  // flag is ignored — so for a clean result, close Chrome before Launch All,
+  // or use the force-install (update-server) which is process-independent.
+  // Disable with SNKRS_NO_LOAD_EXTENSION=1 (e.g. if you rely on force-install).
+  const extDir = extensionDir || EXTENSION_DIR;
+  let loadedExtension = false;
+  if (process.env.SNKRS_NO_LOAD_EXTENSION !== "1" && extensionDirValid(extDir)) {
+    args.push("--disable-features=DisableLoadExtensionCommandLineSwitch");
+    args.push(`--load-extension=${extDir}`);
+    loadedExtension = true;
+  }
+
   const urls = Array.isArray(urlOrUrls) ? urlOrUrls : (urlOrUrls ? [urlOrUrls] : []);
   for (const u of urls) if (u) args.push(u);
 
   try {
     const child = spawn(chrome, args, { detached: true, stdio: "ignore" });
     child.unref();
-    return { ok: true, pid: child.pid, chrome, tabs: urls.length };
+    return { ok: true, pid: child.pid, chrome, tabs: urls.length, loadedExtension, extensionDir: loadedExtension ? extDir : null };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -336,6 +364,8 @@ function handle(msg) {
         userDataDir: userDataDir(),
         configPath: CONFIG_PATH,
         extensionDir: EXTENSION_DIR,
+        extensionDirValid: extensionDirValid(EXTENSION_DIR),
+        loadExtensionOnLaunch: process.env.SNKRS_NO_LOAD_EXTENSION !== "1" && extensionDirValid(EXTENSION_DIR),
         latestVersion: latestExtensionVersion(),
       };
     case "listProfiles":
