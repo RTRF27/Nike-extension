@@ -2012,8 +2012,21 @@ async function runLiveDiagnostic() {
 
   // 1) Can THIS (dashboard) profile reach the launcher?
   const ping = await hostSend({ cmd: "ping" });
-  if (ping.ok) L.push(`✓ This dashboard profile reaches the launcher (host v${ping.version} · ${ping.platform}).`);
-  else {
+  if (ping.ok) {
+    L.push(`✓ This dashboard profile reaches the launcher (host v${ping.version} · ${ping.platform}).`);
+    // Show how launched profiles get the extension (the "no extension on Launch
+    // All" fix). Requires host v1.3.0+.
+    if (ping.extensionDir) {
+      if (ping.loadExtensionOnLaunch)
+        L.push(`✓ Launch All loads the extension into every profile from:\n    ${ping.extensionDir}\n  (only applies when that profile's Chrome starts fresh — close Chrome before Launch All for a clean result).`);
+      else if (ping.extensionDirValid === false)
+        L.push(`✗ Launcher extension folder is missing manifest.json:\n    ${ping.extensionDir}\n  → --load-extension can't run. Point SNKRS_EXTENSION_DIR at the folder with manifest.json.`);
+      else
+        L.push(`ℹ Launch All is NOT loading the extension (SNKRS_NO_LOAD_EXTENSION=1). Relying on force-install/manual load instead.`);
+    } else if (ping.version && ping.version < "1.3.0") {
+      L.push(`ℹ Launcher is host v${ping.version} — update the native host to v1.3.0+ to auto-load the extension into launched profiles.`);
+    }
+  } else {
     L.push(`✗ This dashboard CANNOT reach the launcher: ${ping.error || "no response"}.`);
     L.push(`  → Cross-profile status can't be read until the native host is installed for this profile.`);
     out.textContent = L.join("\n");
