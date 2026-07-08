@@ -315,25 +315,24 @@ function launchProfile(profileDir, urlOrUrls, extensionDir) {
 
   const args = [`--profile-directory=${profileDir}`];
 
-  // Load the extension into EVERY launched profile straight from the shared
-  // folder, so profiles that don't already have it installed still run the bot
-  // (this is the fix for "Launch All opens profiles with no extension").
-  //
-  // Chrome 137+ ships a feature ("DisableLoadExtensionCommandLineSwitch") that
-  // neuters a bare --load-extension. We turn that feature OFF in the same
-  // command so --load-extension is honoured again. The extension keeps its
-  // pinned ID (manifest "key"), so it still matches the native host's
-  // allowed_origins and every profile runs the identical build from ONE folder.
-  //
-  // Caveat (Chrome's single-process model): --load-extension is only applied
-  // when this profile's Chrome starts a FRESH process. If a Chrome window for
-  // this user-data-dir is already open, the launch is forwarded to it and the
-  // flag is ignored — so for a clean result, close Chrome before Launch All,
-  // or use the force-install (update-server) which is process-independent.
-  // Disable with SNKRS_NO_LOAD_EXTENSION=1 (e.g. if you rely on force-install).
+  // OPTIONAL (opt-in): load the extension into the launched profile straight
+  // from the shared folder. This is OFF by default because it is NOT reliable
+  // for a multi-profile drop and can interfere with an already-installed
+  // (manually loaded) copy:
+  //   • Chrome uses ONE process per User Data dir, so --load-extension is only
+  //     honoured by the FIRST profile that starts a fresh process; every
+  //     forwarded launch after that ignores the flag. It cannot put the
+  //     extension into 14 profiles.
+  //   • On Chrome 137+ a bare --load-extension is neutered; we pair it with
+  //     --disable-features=DisableLoadExtensionCommandLineSwitch when enabled.
+  // The RELIABLE way to have every profile carry the extension is either a
+  // manual "Load unpacked" in each profile (then fully restart Chrome to pick up
+  // updates) or the force-install policy (update-server/), which is
+  // process-independent. Enable this only for a single fresh profile with
+  // SNKRS_LOAD_EXTENSION=1.
   const extDir = extensionDir || EXTENSION_DIR;
   let loadedExtension = false;
-  if (process.env.SNKRS_NO_LOAD_EXTENSION !== "1" && extensionDirValid(extDir)) {
+  if (process.env.SNKRS_LOAD_EXTENSION === "1" && extensionDirValid(extDir)) {
     args.push("--disable-features=DisableLoadExtensionCommandLineSwitch");
     args.push(`--load-extension=${extDir}`);
     loadedExtension = true;
@@ -365,7 +364,7 @@ function handle(msg) {
         configPath: CONFIG_PATH,
         extensionDir: EXTENSION_DIR,
         extensionDirValid: extensionDirValid(EXTENSION_DIR),
-        loadExtensionOnLaunch: process.env.SNKRS_NO_LOAD_EXTENSION !== "1" && extensionDirValid(EXTENSION_DIR),
+        loadExtensionOnLaunch: process.env.SNKRS_LOAD_EXTENSION === "1" && extensionDirValid(EXTENSION_DIR),
         latestVersion: latestExtensionVersion(),
       };
     case "listProfiles":

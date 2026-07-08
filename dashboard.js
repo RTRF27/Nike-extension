@@ -2017,14 +2017,9 @@ async function runLiveDiagnostic() {
     // Show how launched profiles get the extension (the "no extension on Launch
     // All" fix). Requires host v1.3.0+.
     if (ping.extensionDir) {
+      L.push(`  Extension folder: ${ping.extensionDir}${ping.extensionDirValid === false ? "  (⚠ no manifest.json here!)" : ""}`);
       if (ping.loadExtensionOnLaunch)
-        L.push(`✓ Launch All loads the extension into every profile from:\n    ${ping.extensionDir}\n  (only applies when that profile's Chrome starts fresh — close Chrome before Launch All for a clean result).`);
-      else if (ping.extensionDirValid === false)
-        L.push(`✗ Launcher extension folder is missing manifest.json:\n    ${ping.extensionDir}\n  → --load-extension can't run. Point SNKRS_EXTENSION_DIR at the folder with manifest.json.`);
-      else
-        L.push(`ℹ Launch All is NOT loading the extension (SNKRS_NO_LOAD_EXTENSION=1). Relying on force-install/manual load instead.`);
-    } else if (ping.version && ping.version < "1.3.0") {
-      L.push(`ℹ Launcher is host v${ping.version} — update the native host to v1.3.0+ to auto-load the extension into launched profiles.`);
+        L.push(`  (opt-in --load-extension is ON — only affects the first fresh profile; not reliable for many profiles.)`);
     }
   } else {
     L.push(`✗ This dashboard CANNOT reach the launcher: ${ping.error || "no response"}.`);
@@ -2071,11 +2066,23 @@ async function runLiveDiagnostic() {
     L.push("");
     L.push(`REPORTED VERSIONS (latest is v${vr.latestVersion || "?"}):`);
     if (!vs.length) L.push(`  ⚠ No profile has reported a version — none have booted with current code yet.`);
+    let anyUnpacked = false;
     vs.sort().forEach(([p, v]) => {
       const age = Math.round((Date.now() - (v.ts || 0)) / 1000);
       const stale = vr.latestVersion && v.version !== vr.latestVersion;
-      L.push(`  • ${p}: v${v.version}${stale ? "  ← STALE, reload/update this profile" : ""} (${age}s ago)`);
+      const kind = v.installType === "development" ? " · unpacked"
+        : v.installType === "admin" ? " · force-installed"
+        : v.installType === "normal" ? " · web-store" : "";
+      if (v.installType === "development") anyUnpacked = true;
+      L.push(`  • ${p}: v${v.version}${kind}${stale ? "  ← STALE, restart this profile" : ""} (${age}s ago)`);
     });
+    if (anyUnpacked) {
+      L.push("");
+      L.push(`  ℹ Unpacked profiles only pick up new code when that profile's Chrome fully RESTARTS.`);
+      L.push(`    To make them all current now: quit Chrome COMPLETELY (check Task Manager for stray`);
+      L.push(`    chrome.exe), then reopen. To stop managing versions by hand, force-install`);
+      L.push(`    (update-server/install-windows.bat) so every profile auto-updates.`);
+    }
   }
 
   out.textContent = L.join("\n");

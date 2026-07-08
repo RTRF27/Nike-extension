@@ -620,10 +620,27 @@ async function getSelfProfileDir() {
   return d[SELF_PROFILE_KEY] || "";
 }
 
+// How this profile got the extension: "development" = Load unpacked (only
+// updates on a full Chrome restart — the stale-prone case), "admin" =
+// force-installed by policy (auto-updates), "normal" = Web Store. Available via
+// chrome.management.getSelf() without the "management" permission.
+function getInstallType() {
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.management || !chrome.management.getSelf) { resolve(""); return; }
+      chrome.management.getSelf((info) => {
+        if (chrome.runtime.lastError) { resolve(""); return; }
+        resolve((info && info.installType) || "");
+      });
+    } catch (e) { resolve(""); }
+  });
+}
+
 async function reportVersionToHost(profileDir) {
   const dir = profileDir || await getSelfProfileDir();
   if (!dir) return; // never booted by the dashboard yet — nothing to attribute
-  await nativeSend({ cmd: "reportVersion", profileDir: dir, entry: { version: EXT_VERSION, ts: Date.now() } });
+  const installType = await getInstallType();
+  await nativeSend({ cmd: "reportVersion", profileDir: dir, entry: { version: EXT_VERSION, ts: Date.now(), installType } });
 }
 
 // Dotted-numeric version compare: -1 / 0 / 1.
