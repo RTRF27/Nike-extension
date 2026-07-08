@@ -62,7 +62,26 @@ function findOrCreateKey() {
     catch (e) { console.warn(`! Skipping ${p} — not a usable private key (${e.message})`); }
   }
 
-  // Nothing usable — generate one.
+  // No usable private key found. If manifest.json ALREADY pins a key, generating
+  // a new one here would SILENTLY change the extension ID — which breaks the
+  // native host trust and every already-installed copy until all profiles are
+  // reinstalled/restarted. That footgun caused real breakage, so refuse to
+  // regenerate unless the user explicitly opts in.
+  let manifestHasKey = false;
+  try { manifestHasKey = !!JSON.parse(fs.readFileSync(path.join(ROOT, "manifest.json"), "utf8")).key; } catch (e) {}
+  if (manifestHasKey && process.env.SNKRS_CRX_REGEN !== "1") {
+    throw new Error(
+      "No signing private key found, but manifest.json already pins a key (a fixed extension ID).\n" +
+      "  Generating a new key would CHANGE the extension ID and break every installed copy + the\n" +
+      "  native host until all profiles are reinstalled. Do ONE of:\n" +
+      "    • restore the matching private key to .keys/crx-signing-key.pem (keeps the current ID), or\n" +
+      "    • set SNKRS_CRX_REGEN=1 to intentionally mint a NEW id (then reinstall the native host and\n" +
+      "      re-add the extension in every profile).\n" +
+      "  Back up .keys/crx-signing-key.pem once you have it — losing it forces an id change."
+    );
+  }
+
+  // Generate a new key (first-ever pack, or explicit regen).
   const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   const pem = privateKey.export({ type: "pkcs8", format: "pem" });
   fs.mkdirSync(KEYS_DIR, { recursive: true });
