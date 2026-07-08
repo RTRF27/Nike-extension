@@ -17,6 +17,42 @@ Every profile installs + auto-updates the same build.
 Dashboard banner + Preflight page show which profiles are still stale.
 ```
 
+## ⚠ Requirement: the machine must be "managed" (important)
+
+Chrome only **force-installs a self-hosted extension** (our local
+`http://127.0.0.1:38473/update.xml`) when the browser is **enterprise-managed**.
+On a plain personal PC it **blocks it** — `chrome://policy` shows
+`[BLOCKED] … not detected as enterprise managed`, and the extension never
+installs. This is a Chrome security rule, not a bug in this project. There are
+two ways forward:
+
+### Option A — keep Load-unpacked (works today, no managed machine)
+This is the simplest reliable path on a personal PC:
+1. Load the extension unpacked in each profile once.
+2. To update **all** profiles at once: `git pull`, then **fully quit Chrome**
+   (Task Manager → end every `chrome.exe`) and reopen. Every profile reloads the
+   extension from the folder — one restart syncs all of them.
+3. The dashboard's **🔍 DIAGNOSE** shows any profile still on an old version.
+
+You don't get silent background auto-update, but "one full restart updates
+everything" removes the 14×-reload pain.
+
+### Option B — enroll in Chrome Browser Cloud Management (free) → force-install works
+Makes your browser "managed" so the self-hosted force-install is allowed:
+1. Go to <https://chromeenterprise.google/> → get **Chrome Enterprise Core**
+   (free) with any Google account; in the Admin console create an **enrollment
+   token** (Devices → Chrome → Managed Browsers → Enroll).
+2. Set it on the PC (admin cmd):
+   `reg add "HKLM\SOFTWARE\Policies\Google\Chrome" /v CloudManagementEnrollmentToken /t REG_SZ /d <TOKEN> /f`
+3. Restart Chrome; `chrome://policy` → the browser is now enrolled/managed.
+4. **Then** run `install-windows.bat` — the force-install is no longer blocked.
+
+### Clean up a blocked policy
+If you already ran the installer and see `[BLOCKED]` at `chrome://policy`, remove
+it: run **`uninstall-windows.bat`** as admin (removes the forcelist policy + the
+server task), then restart Chrome. You're back to Load-unpacked with nothing
+broken.
+
 ## Migrating from "Load unpacked" (do this on a calm day)
 
 If your profiles currently run the extension via **Load unpacked**, switching to
