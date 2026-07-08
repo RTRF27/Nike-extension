@@ -807,6 +807,17 @@ function buildSettingsForProfile(config, profileDir) {
 // can retrieve it even if it arms the listener after the signal was sent.
 const cardFillCache = {};
 
+// CRITICAL: invalidate the cache the moment a tab starts loading a new page.
+// A reload keeps the SAME tabId, so without this a refreshed checkout (e.g.
+// after an "Oops"/error page) would read the PREVIOUS page's "card filled"
+// result and race ahead to SUBMIT before the fresh card is actually entered —
+// leaving it stuck waiting at submit. Clearing on navigation forces the fresh
+// page to wait for its own real card-fill signal.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") delete cardFillCache[tabId];
+});
+chrome.tabs.onRemoved.addListener((tabId) => { delete cardFillCache[tabId]; });
+
 // ── Live status board support ─────────────────────────────────
 // Maps tabId → profileDir so log messages from a launched Nike tab can be
 // attributed to the correct dashboard account row.
@@ -1128,6 +1139,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const cached = tabId ? cardFillCache[tabId] : null;
     sendResponse({ cached });
     return true;
+  }
+  // gs-bootstrap resets it at document_start on every (re)load, so a refreshed
+  // checkout never reuses the previous page's card-fill result.
+  if (msg.type === "reset_card_fill") {
+    const tabId = sender?.tab?.id;
+    if (tabId != null) delete cardFillCache[tabId];
+    return false;
   }
   if (msg.type === "get_settings") {
     getSettings().then(s => sendResponse({ settings: s }));

@@ -43,6 +43,13 @@
   function log(...a) { console.log("[SNKRSBot gs-boot]", ...a); }
   function logBG(msg) { try { chrome.runtime.sendMessage({ type: "log", message: msg }); } catch (e) {} }
 
+  // Runs at document_start on EVERY gs.nike.com load (incl. a manual refresh
+  // after an "Oops"/error page). Reset this tab's cached card-fill result so the
+  // checkout flow waits for THIS page's real card fill instead of reusing the
+  // previous load's "card filled" flag and racing to a SUBMIT that never
+  // completes. Deterministic: this fires before gs-content-script's idle init.
+  try { chrome.runtime.sendMessage({ type: "reset_card_fill" }); } catch (e) {}
+
   // Swap the checkoutId for a fresh UUID — reusing a spent/invalid checkout
   // session is a common cause of the gs.nike.com/error page.
   function freshCheckoutId(u) {
