@@ -40,6 +40,37 @@ if errorlevel 1 (
   pause & exit /b 1
 )
 
+REM ── Managed-machine gate ─────────────────────────────────────
+REM Chrome only force-installs a SELF-HOSTED extension (our local update URL)
+REM if the browser is enterprise-managed (domain-joined or enrolled in Chrome
+REM Browser Cloud Management). On a plain personal PC Chrome BLOCKS it — you'll
+REM see "[BLOCKED] ... not detected as enterprise managed" at chrome://policy.
+REM Detect the common "managed" signals; if none, warn before doing anything.
+set "MANAGED="
+reg query "HKLM\SOFTWARE\Policies\Google\Chrome\CloudManagementEnrollmentToken" >nul 2>nul && set "MANAGED=1"
+reg query "HKLM\SOFTWARE\Policies\Google\Chrome\CloudManagementEnrollmentMandatory" >nul 2>nul && set "MANAGED=1"
+if not defined MANAGED if defined USERDNSDOMAIN set "MANAGED=1"
+if not defined MANAGED (
+  echo.
+  echo  ============================================================
+  echo   WARNING: this PC does NOT look enterprise-managed.
+  echo   Chrome will BLOCK a self-hosted force-install ^(you'd see
+  echo   "[BLOCKED] ... not detected as enterprise managed" at
+  echo   chrome://policy^), so this installer would not actually work.
+  echo.
+  echo   To make force-install work, first enroll in Chrome Browser
+  echo   Cloud Management ^(free^) — see update-server\README.md,
+  echo   section "Unmanaged machines". OR skip force-install and keep
+  echo   Load-unpacked ^(one full Chrome restart updates every profile^).
+  echo  ============================================================
+  echo.
+  set /p GO="Continue anyway? (y/N): "
+  if /I not "%GO%"=="y" (
+    echo Aborted — nothing was changed.
+    pause & exit /b 1
+  )
+)
+
 echo [1/5] Packing + signing the extension...
 node "%SCRIPT_DIR%pack.js"
 if errorlevel 1 (
