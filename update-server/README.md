@@ -17,6 +17,36 @@ Every profile installs + auto-updates the same build.
 Dashboard banner + Preflight page show which profiles are still stale.
 ```
 
+## Migrating from "Load unpacked" (do this on a calm day)
+
+If your profiles currently run the extension via **Load unpacked**, switching to
+force-install ends the manual-reload / mixed-version / ID-drift pain for good —
+one policy entry installs and auto-updates the extension in **every** profile.
+
+1. **Run it:** right-click `install-windows.bat` → **Run as administrator**.
+   It packs + signs, starts the local update server, verifies the download, then
+   writes the Chrome policy. It prints the extension ID and whether it changed.
+   - **If it found your signing key** (`.keys\crx-signing-key.pem`): the ID stays
+     `gkfbg…` — same as your unpacked copies and native host. Cleanest case.
+   - **If no key was found:** it mints a NEW id **once** and saves the key. The
+     new id differs from your old unpacked copies, so you'll remove those in
+     step 4.
+2. **Quit Chrome completely** (Task Manager → end every `chrome.exe`), reopen.
+3. `chrome://policy` → **Reload policies** → confirm `ExtensionInstallForcelist`
+   shows the ID. In a couple of profiles, `chrome://extensions` should show the
+   extension as **"Installed by enterprise policy."**
+4. **Remove the old "Load unpacked" copies** from every profile
+   (`chrome://extensions` → Remove). Especially important if the ID changed —
+   otherwise the bot runs twice per profile.
+5. **Back up** `.keys\crx-signing-key.pem` somewhere safe. Losing it is the only
+   thing that forces another ID change; `pack.js` now refuses to regenerate
+   silently without it.
+
+From then on: bump `version` in `manifest.json`, run `node update-server/pack.js`
+(no admin, no ID change), and every profile updates within ~5h (or instantly via
+the Update button). The dashboard's **DIAGNOSE** shows each profile as
+`force-installed` once migrated.
+
 ## Install (Windows)
 
 1. Make sure Node.js is installed.

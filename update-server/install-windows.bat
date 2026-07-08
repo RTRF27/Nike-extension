@@ -22,6 +22,10 @@ set "TASK_NAME=SNKRS Bot Update Server"
 set "SCRIPT_DIR=%~dp0"
 set "PORT=38473"
 set "BASE=http://127.0.0.1:%PORT%"
+set "ORIG_ID=gkfbgibdipccnmamfeflgpahoehpbebf"
+REM Permit pack.js to MINT a signing key if none exists (first migration). If a
+REM key already exists in .keys\, pack reuses it and the ID does not change.
+set "SNKRS_CRX_REGEN=1"
 
 net session >nul 2>&1
 if errorlevel 1 (
@@ -99,21 +103,33 @@ echo    Extension ID : %EXT_ID%
 echo    Update URL   : %BASE%/update.xml
 echo    Server task  : "%TASK_NAME%"  (starts hidden at every logon)
 echo.
-echo  Now:
-echo    1. Quit Chrome completely and reopen it (any profile).
-echo    2. chrome://policy  -^>  Reload policies. You should see
-echo       ExtensionInstallForcelist with the ID above.
-echo    3. The extension appears in EVERY profile automatically and
-echo       updates in all of them when you publish (see below).
-echo    4. Once you confirm it works, REMOVE the old "Load unpacked"
-echo       copies from each profile (chrome://extensions) so only the
-echo       managed copy remains.
+if /I "%EXT_ID%"=="%ORIG_ID%" (
+  echo  Your signing key was found — the ID is UNCHANGED ^(gkfbg...^).
+  echo  The native host and every profile already trust it, so this is clean.
+) else (
+  echo  NOTE: no original key was found, so a NEW ID was minted:
+  echo        %EXT_ID%
+  echo  This differs from your old unpacked copies ^(%ORIG_ID%^),
+  echo  so after the managed copy appears you MUST remove the old unpacked
+  echo  ones or the bot will run TWICE per profile.
+)
 echo.
-echo  To publish an update later:
-echo    - bump "version" in manifest.json
-echo    - run:  node "%SCRIPT_DIR%pack.js"
-echo    - Chrome picks it up within ~5 hours, or immediately via
-echo      chrome://extensions -^> "Update" button in any profile.
-echo    (The dashboard banner shows which profiles are still stale.)
+echo  BACK UP the signing key so the ID never changes again:
+echo    copy  "%SCRIPT_DIR%..\.keys\crx-signing-key.pem"  somewhere safe.
+echo.
+echo  Now:
+echo    1. Quit Chrome COMPLETELY (Task Manager -^> end every chrome.exe), reopen.
+echo    2. chrome://policy -^> Reload policies -^> confirm ExtensionInstallForcelist
+echo       shows the ID above.
+echo    3. chrome://extensions in a couple of profiles -^> the extension should
+echo       appear as "Installed by enterprise policy".
+echo    4. THEN remove the old "Load unpacked" copies from every profile
+echo       (chrome://extensions -^> Remove) so only the managed copy remains.
+echo    5. If the launcher shows OFFLINE afterwards, re-run
+echo       native-host\install-windows.bat once (re-registers the matching ID).
+echo.
+echo  To publish an update later: bump "version" in manifest.json, run
+echo    node "%SCRIPT_DIR%pack.js"  — every profile auto-updates within ~5h
+echo    (or hit Update in chrome://extensions). No key regen, no ID change.
 echo ============================================================
 pause
