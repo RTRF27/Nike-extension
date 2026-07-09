@@ -615,6 +615,20 @@ select.inp { cursor: pointer; }
 .product-preview-date { font-size: 11px; color: var(--grey); }
 .product-preview-open { font-size: 10px; color: var(--purple2); letter-spacing: .5px; }
 
+/* ── GS CHECKOUT LINK GENERATOR ── */
+.gs-link-list { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.gs-link-row { display: flex; align-items: center; gap: 8px; }
+.gs-link-size {
+  font-family: 'Barlow Condensed', sans-serif; font-weight: 900;
+  font-size: 13px; letter-spacing: 1px; min-width: 58px; color: var(--purple2);
+}
+.gs-link-url {
+  flex: 1; min-width: 0; font-family: 'Courier New', monospace; font-size: 11px;
+  padding: 8px 10px;
+}
+.gs-link-actions { display: flex; gap: 8px; margin-top: 10px; }
+.gs-link-actions .btn { flex: 1; }
+
 /* ── ASSIGNED-PRODUCT NOTE ── */
 .acct-assigned {
   margin-top: 10px; padding: 7px 11px;

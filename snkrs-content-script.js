@@ -992,6 +992,16 @@ async function runSNKRSFlow() {
   if (settings?.testMode) showBanner("SNKRS BOT — TEST MODE (will not submit)");
   if (!isLaunchPage()) { log("Not a SNKRS launch page."); return; }
 
+  // Warm-then-flip: bootstrap-content-script will navigate this tab to the gs
+  // checkout link shortly before the drop. Do NOT run the launch-page submit
+  // flow or the status poller here — this tab only warms and then flips.
+  try {
+    if (sessionStorage.getItem("snkrsWarmFlip") === "1") {
+      log("Warm-then-flip mode — launch-page submit + poller suppressed; waiting to flip to checkout.");
+      return;
+    }
+  } catch (e) {}
+
   runSNKRSFlow().catch(err => {
     logBG(`❌ SNKRS flow error: ${err}`);
     console.error("[SNKRSBot]", err);

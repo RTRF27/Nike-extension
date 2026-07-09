@@ -218,6 +218,19 @@
               <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
             </div>
           </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>🔗 GS CHECKOUT LINKS</h2>
+              <span class="card-tag">MANUAL PASTE</span>
+            </div>
+            <p class="hint">Generate ready-to-paste <code>gs.nike.com</code> checkout links for a SKU — one per size. Each COPY mints a fresh <code>checkoutId</code>, so paste straight into a logged-in tab at go-live.</p>
+            <label class="lbl" for="gsLinkSku">SKU</label>
+            <input type="text" id="gsLinkSku" class="inp" placeholder="e.g. IH1610-052">
+            <button id="gsLinkGenBtn" class="btn btn-purple" style="width:100%; margin-top:10px;">🔗 GENERATE LINKS</button>
+            <div id="gsLinkMsg" class="hint" style="margin-top:6px;"></div>
+            <div id="gsLinkList" class="gs-link-list"></div>
+          </section>
         </div>
 
         <div class="col">
@@ -255,6 +268,20 @@
             <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;">🎲 RANDOMLY ASSIGN SIZES</button>
             <button id="directUrlsBtn" class="btn btn-dark" style="width:100%; margin-bottom:10px;">⚡ BUILD DIRECT CHECKOUT URLS</button>
             <p class="hint" style="margin:-2px 0 10px;">Generates a unique gs.nike.com checkout link per account from the SKU + assigned size — skips the launch page and size picker. Falls back to the normal flow if it can't resolve.</p>
+
+            <div class="toggle" style="margin-bottom:10px;">
+              <div>
+                <div class="t-label">🔥 Warm page, then flip to checkout</div>
+                <div class="t-hint">LAUNCH ALL opens the launch page first (warms Kasada), then auto-switches every tab to its gs.nike.com checkout link shortly before the drop — so checkout loads fresh and never hits the Oops page.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="warmFlipToggle" checked><span class="track"></span></label>
+            </div>
+            <div id="flipLeadRow" style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+              <label class="lbl" for="flipLeadMin" style="margin:0;">Flip to checkout</label>
+              <input type="number" id="flipLeadMin" class="inp" value="7" min="0.5" max="60" step="0.5" style="width:80px;">
+              <span class="muted">min before drop</span>
+            </div>
+
             <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
             <div class="actions">
               <button id="saveBtn" class="btn btn-light">SAVE CONFIG</button>

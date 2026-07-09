@@ -457,6 +457,67 @@ function previewError(box, text) {
   box.innerHTML = `<span class="hint" style="color:#fa5400">${text}</span>`;
 }
 
+// ── Manual gs.nike.com checkout-link generator ────────────────
+// Resolve a SKU and list a ready-to-paste checkout link for every size, so the
+// user can drop one straight into a logged-in tab. Reuses the same resolver and
+// URL builder the automatic flow uses, so the links are identical.
+async function generateGsLinks() {
+  const sku  = ($("gsLinkSku").value || "").trim().toUpperCase();
+  const msg  = $("gsLinkMsg");
+  const list = $("gsLinkList");
+  list.innerHTML = "";
+  if (!sku) { msg.style.color = "#fa5400"; msg.textContent = "Enter a SKU first."; return; }
+  msg.style.color = "#888"; msg.textContent = `Resolving ${sku} from Nike…`;
+
+  let d;
+  try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
+  if (!d || !d.ok) {
+    msg.style.color = "#fa5400";
+    msg.textContent = `Couldn't resolve ${sku}: ${(d && d.error) || "not found"}. Sizes often publish closer to drop time.`;
+    return;
+  }
+  const skus = d.skus || [];
+  if (!skus.length) {
+    msg.style.color = "#fa5400";
+    msg.textContent = `No sizes published for ${sku} yet — try again nearer the drop.`;
+    return;
+  }
+
+  msg.style.color = "var(--green)";
+  msg.textContent = `${d.name || sku} — ${skus.length} size(s). Note: links only load at go-live; before the drop they show Nike's error page.`;
+
+  skus.forEach((s) => {
+    const sizeText = s.localizedSize || s.nikeSize || "?";
+    const row   = el("div", { className: "gs-link-row" });
+    const label = el("span", { className: "gs-link-size" }, sizeText);
+    const input = el("input", { className: "inp gs-link-url", type: "text", value: buildDirectCheckoutUrl(d, s.id), readOnly: true });
+    const copy  = el("button", { className: "btn btn-mini btn-dark" }, "COPY");
+    copy.addEventListener("click", () => {
+      // Fresh checkoutId every copy — a reused session is a common Oops cause.
+      const fresh = buildDirectCheckoutUrl(d, s.id);
+      input.value = fresh;
+      const done = () => { copy.textContent = "COPIED"; setTimeout(() => { copy.textContent = "COPY"; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fresh).then(done).catch(() => { input.select(); document.execCommand("copy"); done(); });
+      } else { input.select(); document.execCommand("copy"); done(); }
+    });
+    row.appendChild(label); row.appendChild(input); row.appendChild(copy);
+    list.appendChild(row);
+  });
+
+  // Copy-all row.
+  const actions = el("div", { className: "gs-link-actions" });
+  const copyAll = el("button", { className: "btn btn-mini btn-purple" }, "COPY ALL LINKS");
+  copyAll.addEventListener("click", () => {
+    const all = skus.map(s => `${s.localizedSize || s.nikeSize}\t${buildDirectCheckoutUrl(d, s.id)}`).join("\n");
+    const done = () => { copyAll.textContent = "COPIED ALL"; setTimeout(() => { copyAll.textContent = "COPY ALL LINKS"; }, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(all).then(done).catch(done);
+    else done();
+  });
+  actions.appendChild(copyAll);
+  list.appendChild(actions);
+}
+
 // Fetch handler for the single-product panel.
 async function fetchSingleMeta() {
   const sku = ($("dropKeyword").value || "").trim();
@@ -2733,6 +2794,10 @@ function buildConfig() {
       // Self-learning auto-tune: how many seconds early to open accounts before
       // the drop (0/absent = background default of 30s).
       prepLeadSec: _prepLeadSec || 0,
+      // Warm-page-then-flip-to-checkout: launch page first, switch to the gs
+      // checkout link N minutes before the drop.
+      warmFlipEnabled: !!($("warmFlipToggle") && $("warmFlipToggle").checked),
+      flipLeadMin: $("flipLeadMin") ? (parseFloat($("flipLeadMin").value) || 7) : 7,
     },
     accounts: accounts.map(a => ({
       id: a.id,
@@ -2959,7 +3024,7 @@ async function assignCheckoutUrls(msgEl) {
   await saveAll(true);
   if (msgEl) {
     if (ok && !fail) {
-      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s). They only load at go-live — before the drop, LAUNCH ALL pre-warms on the launch page (opening the gs.nike.com link early just shows Nike's error page).`, "#1db954", 8000);
+      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — LAUNCH ALL opens straight onto them, skipping the size screen. (They only resolve at go-live; opening early shows Nike's error page — that's normal.)`, "#1db954", 8000);
     } else if (ok) {
       flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
     } else if (notLaunch) {
@@ -2996,27 +3061,65 @@ function launchTargetsFor(acct) {
   return [{ checkoutUrl: (acct.checkoutUrl || "").trim(), url: resolvedUrl(acct), dropAtMs: acct.dropAtMs || 0, size: acct.size || "" }];
 }
 
+// URL-safe base64, for embedding a full gs checkout URL inside a hash param.
+function b64url(str) {
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function warmFlipEnabled() {
+  return !!($("warmFlipToggle") && $("warmFlipToggle").checked);
+}
+function flipLeadMs() {
+  const m = $("flipLeadMin") ? parseFloat($("flipLeadMin").value) : NaN;
+  const min = isNaN(m) ? 7 : Math.max(0.5, Math.min(60, m));
+  return Math.round(min * 60 * 1000);
+}
+
 // Build the boot URL for one launch target.
+//
+// WARM → FLIP (default): open the launch PAGE first so it warms Kasada / keeps
+// the profile present, and hand it the fully-marked gs.nike.com checkout URL to
+// switch to a few minutes before the drop. The checkout page then loads FRESH,
+// so its Kasada token is current at submit time and it never rots into
+// gs.nike.com/error. Needs a checkout URL, a launch page, and a future drop.
+//
+// Otherwise the direct gs.nike.com checkout link is opened straight away (the
+// fast flow — it only resolves at go-live; opening early shows Nike's error
+// page, which is expected).
 function bootUrlForTarget(acct, target) {
   const checkout = (target.checkoutUrl || "").trim();
   const page     = (target.url || "").trim();
+
   // Resolve this target's drop time (from the target, else the Drop Time field).
   let t = target.dropAtMs || 0;
   if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
-  // A gs.nike.com direct-checkout link has NO live checkout session until the
-  // product goes on sale — opening it early just lands on gs.nike.com/error.
-  // So before the drop we open the launch PAGE (pre-warms Kasada; the content
-  // script waits + clicks SUBMIT at drop time), and only switch to the fast
-  // direct link from ~60s before go-live onward. Falls back to whatever exists.
-  const DIRECT_LEAD_MS = 60 * 1000;
-  const tooEarlyForDirect = t && Date.now() < (t - DIRECT_LEAD_MS);
-  let url = (checkout && !tooEarlyForDirect) ? checkout : (page || checkout);
+
+  // Append our #snkrsBoot / #snkrsDrop markers to a URL.
+  const boot = (u) => {
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
+    if (t) params.push(`snkrsDrop=${t}`);
+    const sep = u.includes("#") ? "&" : "#";
+    return `${u}${sep}${params.join("&")}`;
+  };
+
+  if (warmFlipEnabled() && checkout && page && t && Date.now() < t) {
+    const gsBoot = boot(checkout); // gs URL carrying its own boot/drop markers
+    let pageUrl = page;
+    if (!/^https?:\/\//i.test(pageUrl)) pageUrl = "https://" + pageUrl;
+    const params = [
+      `snkrsBoot=${encodeURIComponent(acct.profileDir)}`,
+      `snkrsDrop=${t}`,
+      `snkrsGs=${b64url(gsBoot)}`,
+      `snkrsFlip=${flipLeadMs()}`,
+    ];
+    const sep = pageUrl.includes("#") ? "&" : "#";
+    return `${pageUrl}${sep}${params.join("&")}`;
+  }
+
+  const url = checkout || page;
   if (!url) return null;
-  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-  const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
-  if (t) params.push(`snkrsDrop=${t}`);
-  const sep = url.includes("#") ? "&" : "#";
-  return `${url}${sep}${params.join("&")}`;
+  return boot(url);
 }
 
 function validateForLaunch(acct, msgEl) {
@@ -3192,6 +3295,8 @@ function applyConfigToUI(cfg) {
   }
 
   _prepLeadSec = Number(opts.prepLeadSec) || 0;
+  if ($("warmFlipToggle")) $("warmFlipToggle").checked = opts.warmFlipEnabled ?? true;
+  if ($("flipLeadMin")) $("flipLeadMin").value = opts.flipLeadMin ?? 7;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
   $("optPoller").checked = opts.statusPollerEnabled ?? true;
@@ -3490,6 +3595,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderAccounts();
   });
   if ($("fetchSingleMetaBtn")) $("fetchSingleMetaBtn").addEventListener("click", fetchSingleMeta);
+  if ($("gsLinkGenBtn")) $("gsLinkGenBtn").addEventListener("click", generateGsLinks);
+  if ($("gsLinkSku")) $("gsLinkSku").addEventListener("keydown", (e) => { if (e.key === "Enter") generateGsLinks(); });
   if ($("autoTuneApplyBtn")) $("autoTuneApplyBtn").addEventListener("click", applyAutoTune);
   $("randomAssignBtn").addEventListener("click", randomAssign);
   $("directUrlsBtn").addEventListener("click", () => assignCheckoutUrls($("assignMsg")));

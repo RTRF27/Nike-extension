@@ -78,12 +78,14 @@
     // checkout right at drop rather than hammering /error before the launch is
     // active (which just errors again).
     const dropFromUrl = (u) => { const m = (u || "").match(/snkrsDrop=(\d+)/); return m ? parseInt(m[1], 10) : NaN; };
+    const MAX_TRIES = 8;
     const retryWith = (url) => {
       if (!url) { logBG(`⚠️ No saved checkout URL to retry — fix this profile manually.`); return; }
-      if (tries >= 5) { logBG(`⚠️ Retried ${tries}× and still erroring — needs manual attention (click it in the dashboard).`); return; }
+      if (tries >= MAX_TRIES) { logBG(`⚠️ Retried ${tries}× and still erroring — needs manual attention (click it in the dashboard).`); return; }
       tries++; sessionStorage.setItem("snkrsErrTries", String(tries));
       const dMs = dropFromUrl(url);
-      const backoff = 1500 + tries * 2000;
+      // Near-immediate first retry (let the /error page settle), then ramp up.
+      const backoff = 600 + (tries - 1) * 1200;
       // If drop is in the future, retry at ~PREP before drop (fresh Kasada);
       // otherwise back off and retry now.
       let delay = backoff;
