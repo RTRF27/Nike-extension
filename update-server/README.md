@@ -29,13 +29,22 @@ two ways forward:
 ### Option A — keep Load-unpacked (works today, no managed machine)
 This is the simplest reliable path on a personal PC:
 1. Load the extension unpacked in each profile once.
-2. To update **all** profiles at once: `git pull`, then **fully quit Chrome**
-   (Task Manager → end every `chrome.exe`) and reopen. Every profile reloads the
-   extension from the folder — one restart syncs all of them.
+2. To update **all** profiles at once, either:
+   - **Dashboard → Setup → Preflight → ⟳ UPDATE ALL** (after `git pull`): opens
+     each profile with a reload marker so its bot hot-reloads the latest code
+     from the folder — **no Chrome restart**. Do it between drops. *(This only
+     works once every profile is already on the build that added the button, so
+     the very first time you still need the full restart below.)*
+   - or `git pull`, then **fully quit Chrome** (Task Manager → end every
+     `chrome.exe`) and reopen — every profile reloads from the folder.
 3. The dashboard's **🔍 DIAGNOSE** shows any profile still on an old version.
 
-You don't get silent background auto-update, but "one full restart updates
-everything" removes the 14×-reload pain.
+You don't get silent background auto-update, but one click (or one restart)
+updates everything — no 14×-reload.
+
+> The dashboard reloads its own profile last. Run the dashboard in a profile
+> that isn't one of your bot accounts so a mid-update reload can't interrupt it;
+> if it does, just click UPDATE ALL again.
 
 ### Option B — enroll in Chrome Browser Cloud Management (free) → force-install works
 Makes your browser "managed" so the self-hosted force-install is allowed:

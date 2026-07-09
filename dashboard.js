@@ -761,6 +761,42 @@ async function markWarm(profileDir) {
   warmTimes[profileDir] = Date.now();
   await chrome.storage.local.set({ [WARM_KEY]: warmTimes });
 }
+// ── UPDATE ALL: hot-reload the extension in every profile ─────
+// For machines that can't force-install (personal/unmanaged), this is the
+// one-click updater: after a `git pull`, it opens each profile with a reload
+// marker so its background calls chrome.runtime.reload() and re-reads the
+// latest unpacked code from the folder — no Chrome restart. Do it BETWEEN
+// drops (reloading mid-checkout would interrupt it).
+const NIKE_RELOAD_URL = "https://www.nike.com/sg/launch/"; // bootstrap runs here at document_start
+async function updateAllProfiles() {
+  const msg = $("preflightMsg");
+  const withProfile = accounts.filter(a => a.profileDir);
+  if (!withProfile.length) { flashTemp(msg, "No profiles to update.", "var(--orange)", 4000); return; }
+  if (!hostOk && !(await pingHost())) { flashTemp(msg, "Launcher offline — can't reach profiles.", "var(--orange)", 5000); return; }
+  if (!confirm(
+    "Update the extension in ALL profiles now?\n\n" +
+    "Pull the latest first (git pull), then this reloads every profile's bot from the folder.\n\n" +
+    "Do this BETWEEN drops — reloading during a live checkout would interrupt it.\n\n" +
+    "This dashboard's own profile reloads last (the page will refresh)."
+  )) return;
+
+  const ts = Date.now();
+  flash(msg, `Sending update to ${withProfile.length} profile(s)…`, "#888");
+  let ok = 0, lastErr = "";
+  for (const a of withProfile) {
+    const url = `${NIKE_RELOAD_URL}#snkrsReload=${ts}`;
+    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url });
+    if (resp.ok) ok++; else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 400));
+  }
+  flashTemp(msg, ok === withProfile.length
+    ? `⟳ Update sent to ${ok} profile(s) — each reloads to the current version. This dashboard reloads in 5s; reopen it after.`
+    : `Sent to ${ok}/${withProfile.length}. Last error: ${lastErr}`,
+    ok ? "var(--green)" : "var(--red)", 9000);
+  // Reload our OWN profile last so the dashboard picks up new code too.
+  if (ok) setTimeout(() => { try { chrome.runtime.reload(); } catch (e) {} }, 5000);
+}
+
 async function warmAll() {
   const msg = $("preflightMsg");
   const withProfile = accounts.filter(a => a.profileDir);
@@ -3570,6 +3606,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   startPreflightPolling();
   if ($("warmAllBtn")) $("warmAllBtn").addEventListener("click", warmAll);
+  if ($("updateAllBtn")) $("updateAllBtn").addEventListener("click", updateAllProfiles);
   {
     const w = await chrome.storage.local.get(WARM_KEY);
     if (w[WARM_KEY]) warmTimes = w[WARM_KEY];

@@ -5,6 +5,7 @@
 const SETTINGS_KEY = "snkrsBotSettings";
 const DROP_ALARM_NAME = "snkrsDropAlarm";
 const SELF_PROFILE_KEY = "snkrsSelfProfileDir";
+const RELOAD_HANDLED_KEY = "snkrsReloadHandledTs"; // last UPDATE-ALL ts this profile reloaded for
 const EXT_VERSION = chrome.runtime.getManifest().version;
 
 const defaultSettings = {
@@ -1156,6 +1157,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "reset_card_fill") {
     const tabId = sender?.tab?.id;
     if (tabId != null) delete cardFillCache[tabId];
+    return false;
+  }
+
+  // UPDATE ALL: hot-reload THIS profile's extension from disk (picks up the
+  // latest unpacked code — the update path for machines that can't force-install).
+  // Deduped by a monotonic timestamp persisted in storage.local so a profile
+  // reloads at most once per click and never loops (the reloaded instance sees
+  // ts == lastHandled and does nothing).
+  if (msg.type === "check_reload") {
+    const ts = Number(msg.ts) || 0;
+    if (!ts) return false;
+    (async () => {
+      const d = await chrome.storage.local.get(RELOAD_HANDLED_KEY);
+      const last = Number(d[RELOAD_HANDLED_KEY]) || 0;
+      if (ts > last) {
+        await chrome.storage.local.set({ [RELOAD_HANDLED_KEY]: ts });
+        // Small delay so the dedup write flushes before the worker restarts.
+        setTimeout(() => { try { chrome.runtime.reload(); } catch (e) {} }, 300);
+      }
+    })();
     return false;
   }
   if (msg.type === "get_settings") {

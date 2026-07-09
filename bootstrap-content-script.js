@@ -24,6 +24,17 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
 
+  // ── UPDATE ALL (#snkrsReload=<ts>) ──────────────────────────
+  // The dashboard's "UPDATE ALL PROFILES" opens each profile here with a reload
+  // timestamp. Ask the background to hot-reload the extension from disk (picks
+  // up the latest unpacked code without restarting Chrome). Deduped by ts in the
+  // background so it fires at most once. This tab is then just a leftover page.
+  const reloadTs = getMarker("snkrsReload");
+  if (reloadTs) {
+    try { chrome.runtime.sendMessage({ type: "check_reload", ts: Number(reloadTs) }); } catch (e) {}
+    return; // extension is about to reload — don't run the normal boot flow
+  }
+
   // ── Preflight visit (#snkrsPreflight=<profileDir>) ──────────
   // The dashboard's Preflight page opens each profile here to health-check
   // it before a drop. We collect what only a nike.com PAGE can see — the
