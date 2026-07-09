@@ -212,6 +212,11 @@ function renderUpcoming(drops, note) {
       const img = document.createElement("img");
       img.className = "upcoming-img";
       img.src = d.imageUrl; img.loading = "lazy"; img.alt = d.title || "";
+      if (d.url) {
+        img.classList.add("clickable");
+        img.title = "Open product page";
+        img.addEventListener("click", () => window.open(d.url, "_blank", "noopener"));
+      }
       card.appendChild(img);
     }
 
@@ -432,6 +437,13 @@ function renderProductPreview(box, meta, pageUrl) {
   info.appendChild(el("div", { className: "product-preview-name" }, (meta && meta.name) || (meta && meta.sku) || "Product"));
   if (meta && meta.sku) info.appendChild(el("div", { className: "product-preview-sku" }, meta.sku));
   if (meta && meta.dropTimeISO) info.appendChild(el("div", { className: "product-preview-date" }, "📅 " + fmtUpcomingDate(meta.dropTimeISO)));
+  // DRAW = raffle: you can't direct-checkout, you enter the draw. Flag it so the
+  // user doesn't expect BUILD DIRECT CHECKOUT URLS to work for this product.
+  if (meta && meta.method) {
+    const isDraw = /draw/i.test(meta.method);
+    info.appendChild(el("div", { className: "product-preview-date" },
+      isDraw ? "🎟️ DRAW (raffle) — enter, don't direct-checkout" : `🛒 ${meta.method} (first-come buy)`));
+  }
   if (url) info.appendChild(el("div", { className: "product-preview-open" }, "▶ click image to open product page"));
   box.appendChild(info);
 }
@@ -2947,7 +2959,7 @@ async function assignCheckoutUrls(msgEl) {
   await saveAll(true);
   if (msgEl) {
     if (ok && !fail) {
-      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches skip the size screen.`, "#1db954", 6000);
+      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s). They only load at go-live — before the drop, LAUNCH ALL pre-warms on the launch page (opening the gs.nike.com link early just shows Nike's error page).`, "#1db954", 8000);
     } else if (ok) {
       flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
     } else if (notLaunch) {
@@ -2986,12 +2998,22 @@ function launchTargetsFor(acct) {
 
 // Build the boot URL for one launch target.
 function bootUrlForTarget(acct, target) {
-  let url = target.checkoutUrl || target.url || "";
+  const checkout = (target.checkoutUrl || "").trim();
+  const page     = (target.url || "").trim();
+  // Resolve this target's drop time (from the target, else the Drop Time field).
+  let t = target.dropAtMs || 0;
+  if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
+  // A gs.nike.com direct-checkout link has NO live checkout session until the
+  // product goes on sale — opening it early just lands on gs.nike.com/error.
+  // So before the drop we open the launch PAGE (pre-warms Kasada; the content
+  // script waits + clicks SUBMIT at drop time), and only switch to the fast
+  // direct link from ~60s before go-live onward. Falls back to whatever exists.
+  const DIRECT_LEAD_MS = 60 * 1000;
+  const tooEarlyForDirect = t && Date.now() < (t - DIRECT_LEAD_MS);
+  let url = (checkout && !tooEarlyForDirect) ? checkout : (page || checkout);
   if (!url) return null;
   if (!/^https?:\/\//i.test(url)) url = "https://" + url;
   const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
-  let t = target.dropAtMs || 0;
-  if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
   if (t) params.push(`snkrsDrop=${t}`);
   const sep = url.includes("#") ? "&" : "#";
   return `${url}${sep}${params.join("&")}`;

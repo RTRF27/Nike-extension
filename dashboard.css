@@ -912,6 +912,8 @@ select.inp { cursor: pointer; }
   width: 100%; aspect-ratio: 1/1; object-fit: cover;
   background: var(--panel3); display: block;
 }
+.upcoming-img.clickable { cursor: pointer; transition: opacity .12s ease; }
+.upcoming-img.clickable:hover { opacity: .85; }
 .upcoming-body { padding: 14px; display: flex; flex-direction: column; gap: 5px; flex: 1; }
 .upcoming-name {
   font-family: 'Barlow Condensed', sans-serif;

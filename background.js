@@ -294,7 +294,10 @@ async function resolveLaunchData(sku, country) {
     // Squarish product image + a real /launch/t/ page URL, so the dashboard can
     // show a thumbnail preview that confirms the exact product being targeted.
     const imageUrl = _threadImage(obj);
-    return { launchId, slug, skus, name, dropTimeISO, imageUrl };
+    // Launch method (DRAW = raffle, LEO/inline = first-come buy). Direct
+    // checkout links only apply to buy-type launches; DRAWs must be entered.
+    const method = (pi.launchView && pi.launchView.method) || "";
+    return { launchId, slug, skus, name, dropTimeISO, imageUrl, method };
   }
 
   let lastStatus = 0, netErr = "", partial = null;
@@ -315,7 +318,7 @@ async function resolveLaunchData(sku, country) {
       return {
         ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug,
         skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO,
-        imageUrl: ex.imageUrl || "",
+        imageUrl: ex.imageUrl || "", method: ex.method || "",
         url: ex.slug ? `https://www.nike.com/${country.toLowerCase()}/launch/t/${ex.slug}` : "",
       };
     }
