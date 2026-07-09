@@ -306,7 +306,7 @@ function extensionDirValid(dir) {
 // chrome invocation opens them all as tabs in that profile — reliably, even
 // when the profile's Chrome is cold-starting (separate rapid launches can race
 // and get dropped, which is why multi-product only opened one tab).
-function launchProfile(profileDir, urlOrUrls, extensionDir) {
+function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt) {
   const chrome = findChrome();
   if (!chrome) {
     return { ok: false, error: "Chrome executable not found. Set SNKRS_CHROME_PATH." };
@@ -314,6 +314,19 @@ function launchProfile(profileDir, urlOrUrls, extensionDir) {
   if (!profileDir) return { ok: false, error: "Missing profileDir." };
 
   const args = [`--profile-directory=${profileDir}`];
+
+  // Small / positioned window (opt-in). The dashboard sends window.size ("w,h")
+  // and window.position ("x,y") to tile profiles across the screen instead of
+  // opening full-size; env vars are a fallback. --new-window ensures the size
+  // applies to a fresh window (a profile with a window already open reuses it,
+  // so Chrome would otherwise ignore the sizing).
+  const winSize = (windowOpt && windowOpt.size) || process.env.SNKRS_WINDOW_SIZE || "";
+  const winPos  = (windowOpt && windowOpt.position) || process.env.SNKRS_WINDOW_POSITION || "";
+  if (winSize || winPos) {
+    args.push("--new-window");
+    if (/^\d+,\d+$/.test(winSize))      args.push(`--window-size=${winSize}`);
+    if (/^-?\d+,-?\d+$/.test(winPos))   args.push(`--window-position=${winPos}`);
+  }
 
   // OPTIONAL (opt-in): load the extension into the launched profile straight
   // from the shared folder. This is OFF by default because it is NOT reliable
@@ -379,7 +392,7 @@ function handle(msg) {
         return { ok: false, error: String(e && e.message || e) };
       }
     case "launch":
-      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir);
+      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir, msg.window);
     case "getOrders":
       return { ok: true, orders: readOrders() };
     case "setOrders":

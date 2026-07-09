@@ -2798,6 +2798,10 @@ function buildConfig() {
       // checkout link N minutes before the drop.
       warmFlipEnabled: !!($("warmFlipToggle") && $("warmFlipToggle").checked),
       flipLeadMin: $("flipLeadMin") ? (parseFloat($("flipLeadMin").value) || 7) : 7,
+      // Small tiled launch windows instead of full-size.
+      tileWindows: !!($("tileWindowsToggle") && $("tileWindowsToggle").checked),
+      tileW: $("tileW") ? (parseInt($("tileW").value, 10) || 500) : 500,
+      tileH: $("tileH") ? (parseInt($("tileH").value, 10) || 680) : 680,
     },
     accounts: accounts.map(a => ({
       id: a.id,
@@ -3069,6 +3073,34 @@ function b64url(str) {
 function warmFlipEnabled() {
   return !!($("warmFlipToggle") && $("warmFlipToggle").checked);
 }
+
+// ── Small tiled launch windows ────────────────────────────────
+function tileWindowsEnabled() {
+  return !!($("tileWindowsToggle") && $("tileWindowsToggle").checked);
+}
+function tileWH() {
+  const w = $("tileW") ? parseInt($("tileW").value, 10) : NaN;
+  const h = $("tileH") ? parseInt($("tileH").value, 10) : NaN;
+  return {
+    w: isNaN(w) ? 500 : Math.max(300, Math.min(2000, w)),
+    h: isNaN(h) ? 680 : Math.max(300, Math.min(2000, h)),
+  };
+}
+// Return { size, position } for the index-th launched profile, tiled across the
+// screen — or undefined when tiling is off (Chrome then sizes the window itself).
+function windowFor(index) {
+  if (!tileWindowsEnabled()) return undefined;
+  const { w, h } = tileWH();
+  const availW = (window.screen && screen.availWidth)  || 1920;
+  const availH = (window.screen && screen.availHeight) || 1040;
+  const cols = Math.max(1, Math.floor(availW / w));
+  const rows = Math.max(1, Math.floor(availH / h));
+  const per  = cols * rows;
+  const idx  = ((index % per) + per) % per;   // wrap; overlaps once the grid fills
+  const x = (idx % cols) * w;
+  const y = Math.floor(idx / cols) * h;
+  return { size: `${w},${h}`, position: `${x},${y}` };
+}
 function flipLeadMs() {
   const m = $("flipLeadMin") ? parseFloat($("flipLeadMin").value) : NaN;
   const min = isNaN(m) ? 7 : Math.max(0.5, Math.min(60, m));
@@ -3143,7 +3175,8 @@ async function launchAccount(acct, msgEl) {
   const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
   flash(msgEl, `Opening ${urls.length} tab(s)…`, "#888");
   // All tabs in ONE chrome command so they reliably open together.
-  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+  const idx = Math.max(0, accounts.findIndex(a => a.id === acct.id));
+  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: windowFor(idx) });
   if (resp.ok) {
     flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${urls.length} tab(s).`, "#1db954");
   } else if (resp.hostMissing) {
@@ -3197,18 +3230,20 @@ async function launchAll() {
 
   flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
   let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
+  let winIdx = 0;
   for (const acct of all) {
+    const win = windowFor(winIdx); winIdx++;
     const targets = launchTargetsFor(acct);
     if (!targets.length) {
       // Not configured — open a warm-up tab (idle, just warms Kasada/cookies).
-      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL });
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL, window: win });
       if (resp.ok) { profOk++; warmCount++; } else lastErr = resp.error || "unknown";
       await new Promise(r => setTimeout(r, 400));
       continue;
     }
     const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
     // All of this account's product tabs open in ONE chrome command.
-    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win });
     if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 450)); // stagger BETWEEN profiles
   }
@@ -3297,6 +3332,9 @@ function applyConfigToUI(cfg) {
   _prepLeadSec = Number(opts.prepLeadSec) || 0;
   if ($("warmFlipToggle")) $("warmFlipToggle").checked = opts.warmFlipEnabled ?? true;
   if ($("flipLeadMin")) $("flipLeadMin").value = opts.flipLeadMin ?? 7;
+  if ($("tileWindowsToggle")) $("tileWindowsToggle").checked = opts.tileWindows ?? true;
+  if ($("tileW")) $("tileW").value = opts.tileW ?? 500;
+  if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
   $("optPoller").checked = opts.statusPollerEnabled ?? true;
