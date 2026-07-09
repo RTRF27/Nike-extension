@@ -349,7 +349,7 @@ function buildSizePool(container, selected, onChange) {
 function applyMultiUI() {
   $("singleProductPanel").style.display = multiProduct ? "none" : "";
   $("multiProductPanel").style.display  = multiProduct ? "" : "none";
-  $("dropModeTag").textContent = multiProduct ? "ACCOUNTS SPLIT ACROSS PRODUCTS" : "EVERYONE COPS THE SAME DROP";
+  $("dropModeTag").textContent = multiProduct ? "EVERY ACCOUNT COPS ALL PRODUCTS" : "EVERYONE COPS THE SAME DROP";
   if (multiProduct && !products.length) { products.push(newProduct()); }
   renderProducts();
 }
@@ -371,11 +371,22 @@ function buildProductRow(p, idx) {
   const urlEl  = row.querySelector(".p-url");
   const kwEl   = row.querySelector(".p-keyword");
   const poolEl = row.querySelector(".p-sizepool");
+  const fetchBtn = row.querySelector(".p-fetch");
+  const preview  = row.querySelector(".p-preview");
   urlEl.value = p.url || "";
   kwEl.value  = p.keyword || "";
   buildSizePool(poolEl, p.sizePool || [], (s) => { p.sizePool = s; });
   urlEl.addEventListener("input", () => { p.url = urlEl.value.trim(); });
   kwEl.addEventListener("input",  () => { p.keyword = kwEl.value.trim(); });
+  fetchBtn.addEventListener("click", async () => {
+    const sku = (p.keyword || "").trim();
+    if (!sku) { previewError(preview, "Enter this product's SKU first."); return; }
+    previewLoading(preview, sku);
+    const meta = await resolveProductMeta(sku);
+    if (!meta.ok) { previewError(preview, `Couldn't resolve ${sku}: ${meta.error || "not found"}.`); return; }
+    renderProductPreview(preview, meta);
+    if (!(p.url || "").trim() && meta.url) { p.url = meta.url; urlEl.value = meta.url; }
+  });
   row.querySelector(".p-remove").addEventListener("click", () => {
     products = products.filter(x => x.id !== p.id);
     renderProducts();
@@ -387,6 +398,64 @@ function renderDropUI() {
   buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
   $("multiProductToggle").checked = multiProduct;
   applyMultiUI();
+}
+
+// ── Product lookup + thumbnail preview ────────────────────────
+// Resolve a SKU to its real product (name, image, /launch/t/ URL, drop time)
+// via Nike's feed. Confirms visually that the exact item is being targeted —
+// so a collection page can never silently cop the top-most product.
+function resolveProductMeta(sku) {
+  return new Promise((resolve) => {
+    const clean = (sku || "").trim().toUpperCase();
+    if (!clean) { resolve({ ok: false, error: "no SKU" }); return; }
+    chrome.runtime.sendMessage({ type: "resolve_launch", sku: clean, country: DIRECT_COUNTRY }, (res) => {
+      if (chrome.runtime.lastError) { resolve({ ok: false, error: chrome.runtime.lastError.message }); return; }
+      resolve(res || { ok: false, error: "no response from background" });
+    });
+  });
+}
+
+// Render a thumbnail card into `box`. The image is clickable → opens the
+// product's launch page in a new tab.
+function renderProductPreview(box, meta, pageUrl) {
+  box.innerHTML = "";
+  box.style.display = "";
+  const url = (meta && meta.url) || pageUrl || "";
+  const img = el("img", { className: "product-thumb", src: (meta && meta.imageUrl) || "", alt: (meta && meta.name) || "" });
+  if (url) {
+    img.classList.add("clickable");
+    img.title = "Open the product page";
+    img.addEventListener("click", () => window.open(url, "_blank", "noopener"));
+  }
+  box.appendChild(img);
+  const info = el("div", { className: "product-preview-info" });
+  info.appendChild(el("div", { className: "product-preview-name" }, (meta && meta.name) || (meta && meta.sku) || "Product"));
+  if (meta && meta.sku) info.appendChild(el("div", { className: "product-preview-sku" }, meta.sku));
+  if (meta && meta.dropTimeISO) info.appendChild(el("div", { className: "product-preview-date" }, "📅 " + fmtUpcomingDate(meta.dropTimeISO)));
+  if (url) info.appendChild(el("div", { className: "product-preview-open" }, "▶ click image to open product page"));
+  box.appendChild(info);
+}
+
+function previewLoading(box, sku) {
+  box.style.display = "";
+  box.innerHTML = `<span class="hint">Looking up ${sku}…</span>`;
+}
+function previewError(box, text) {
+  box.style.display = "";
+  box.innerHTML = `<span class="hint" style="color:#fa5400">${text}</span>`;
+}
+
+// Fetch handler for the single-product panel.
+async function fetchSingleMeta() {
+  const sku = ($("dropKeyword").value || "").trim();
+  const box = $("singleProductPreview");
+  if (!sku) { previewError(box, "Enter the item's SKU (e.g. IH1610-052) first, then Fetch."); return; }
+  previewLoading(box, sku);
+  const meta = await resolveProductMeta(sku);
+  if (!meta.ok) { previewError(box, `Couldn't resolve ${sku}: ${meta.error || "not found"}. Sizes/details often publish closer to drop time.`); return; }
+  renderProductPreview(box, meta);
+  // Auto-fill the product URL if the user only gave a SKU.
+  if (!($("dropUrl").value || "").trim() && meta.url) $("dropUrl").value = meta.url;
 }
 
 // ── Random assignment of sizes / products to accounts ─────────
@@ -3354,15 +3423,51 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderDropReplay();
     flashTemp($("replayMsg"), "Replay cleared.", "#888");
   });
+  // Carry the single-panel entry into PRODUCT 1 (so a typed/loaded URL is never
+  // lost when switching to multi). Returns product[0] after seeding.
+  function carrySingleIntoProducts() {
+    const su = ($("dropUrl").value || "").trim();
+    const sk = ($("dropKeyword").value || "").trim();
+    if (!products.length) products.push(newProduct());
+    const p0 = products[0];
+    if (!p0.url && su) p0.url = su;
+    if (!p0.keyword && sk) p0.keyword = sk;
+    if (!(p0.sizePool || []).length && singleSizePool.length) p0.sizePool = singleSizePool.slice();
+    return p0;
+  }
+
   $("multiProductToggle").addEventListener("change", () => {
-    multiProduct = $("multiProductToggle").checked;
+    const goingMulti = $("multiProductToggle").checked;
+    if (goingMulti) {
+      carrySingleIntoProducts();
+    } else if (products.length === 1) {
+      // Coming back to a single product — pull it back into the fields so nothing
+      // silently disappears from view.
+      const p0 = products[0];
+      if (p0.url) $("dropUrl").value = p0.url;
+      if (p0.keyword) $("dropKeyword").value = p0.keyword;
+      if ((p0.sizePool || []).length) singleSizePool = p0.sizePool.slice();
+    }
+    multiProduct = goingMulti;
     applyMultiUI();
+    buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
     renderAccounts(); // refresh assigned-product notes
   });
   $("addProductBtn").addEventListener("click", () => {
     products.push(newProduct());
     renderProducts();
   });
+  // One-click: single → multi carrying the current entry as PRODUCT 1 and adding
+  // a blank PRODUCT 2 (e.g. the jacket + the shirt). No toggle dance.
+  if ($("toMultiBtn")) $("toMultiBtn").addEventListener("click", () => {
+    carrySingleIntoProducts();
+    if (products.length < 2) products.push(newProduct());
+    multiProduct = true;
+    $("multiProductToggle").checked = true;
+    applyMultiUI();
+    renderAccounts();
+  });
+  if ($("fetchSingleMetaBtn")) $("fetchSingleMetaBtn").addEventListener("click", fetchSingleMeta);
   if ($("autoTuneApplyBtn")) $("autoTuneApplyBtn").addEventListener("click", applyAutoTune);
   $("randomAssignBtn").addEventListener("click", randomAssign);
   $("directUrlsBtn").addEventListener("click", () => assignCheckoutUrls($("assignMsg")));

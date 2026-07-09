@@ -291,7 +291,10 @@ async function resolveLaunchData(sku, country) {
     const dropTimeISO = lv.startEntryDate ||
                         (pi.merchProduct && pi.merchProduct.commerceStartDate) ||
                         lv.stopEntryDate || "";
-    return { launchId, slug, skus, name, dropTimeISO };
+    // Squarish product image + a real /launch/t/ page URL, so the dashboard can
+    // show a thumbnail preview that confirms the exact product being targeted.
+    const imageUrl = _threadImage(obj);
+    return { launchId, slug, skus, name, dropTimeISO, imageUrl };
   }
 
   let lastStatus = 0, netErr = "", partial = null;
@@ -309,7 +312,12 @@ async function resolveLaunchData(sku, country) {
     // Accept only a COMPLETE record. If an endpoint returns the product but
     // without launch fields (e.g. v2), remember it and keep trying others (v3).
     if (ex.launchId && ex.slug && ex.skus.length) {
-      return { ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug, skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO };
+      return {
+        ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug,
+        skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO,
+        imageUrl: ex.imageUrl || "",
+        url: ex.slug ? `https://www.nike.com/${country.toLowerCase()}/launch/t/${ex.slug}` : "",
+      };
     }
     partial = partial || ex;
   }

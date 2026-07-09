@@ -593,6 +593,28 @@ select.inp { cursor: pointer; }
   font-size: 12px; font-weight: 900; letter-spacing: 2px; color: var(--purple2);
 }
 
+/* ── PRODUCT PREVIEW (thumbnail confirms the exact SKU) ── */
+.product-preview {
+  display: flex; align-items: center; gap: 12px; margin-top: 10px;
+  padding: 10px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: rgba(16, 13, 29, .55);
+}
+.product-thumb {
+  width: 56px; height: 56px; flex: 0 0 56px; object-fit: cover;
+  border-radius: 8px; background: var(--panel3); display: block;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.product-thumb.clickable { cursor: pointer; }
+.product-thumb.clickable:hover { transform: scale(1.04); box-shadow: 0 0 0 2px var(--purple2); }
+.product-preview-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.product-preview-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px; font-weight: 700; letter-spacing: .5px; line-height: 1.15;
+}
+.product-preview-sku { font-family: 'Courier New', monospace; font-size: 10px; color: var(--purple2); }
+.product-preview-date { font-size: 11px; color: var(--grey); }
+.product-preview-open { font-size: 10px; color: var(--purple2); letter-spacing: .5px; }
+
 /* ── ASSIGNED-PRODUCT NOTE ── */
 .acct-assigned {
   margin-top: 10px; padding: 7px 11px;

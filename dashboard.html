@@ -195,7 +195,7 @@
             <div class="toggle">
               <div>
                 <div class="t-label">Multi-product drop</div>
-                <div class="t-hint">Split accounts across multiple products</div>
+                <div class="t-hint">Every account cops all the products you add (one tab each)</div>
               </div>
               <label class="switch"><input type="checkbox" id="multiProductToggle"><span class="track"></span></label>
             </div>
@@ -203,14 +203,17 @@
             <div id="singleProductPanel" style="margin-top:14px;">
               <label class="lbl" for="dropUrl">Product URL</label>
               <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
-              <label class="lbl" for="dropKeyword" style="margin-top:10px;">Keyword / SKU <span class="muted">(optional — for collection pages)</span></label>
-              <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IM3219-100">
+              <label class="lbl" for="dropKeyword" style="margin-top:10px;">Keyword / SKU <span class="muted">(targets ONE exact item on a collection page)</span></label>
+              <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IH1610-052">
+              <button id="fetchSingleMetaBtn" type="button" class="btn btn-mini btn-dark" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
+              <div id="singleProductPreview" class="product-preview" style="display:none;"></div>
               <label class="lbl" style="margin-top:14px;">Size pool <span class="muted">(randomly assigned to accounts)</span></label>
               <div class="size-pool" id="singleSizePool"></div>
+              <button id="toMultiBtn" type="button" class="btn btn-ghost" style="margin-top:14px; width:100%;">➕ ADD A SECOND PRODUCT (JACKET + SHIRT…)</button>
             </div>
 
             <div id="multiProductPanel" style="margin-top:14px; display:none;">
-              <p class="hint">Add each product with its URL, SKU and size range. Hit <strong>Randomly assign</strong> to spread accounts across them.</p>
+              <p class="hint">Every account cops <strong>all</strong> the products below — one checkout tab each. Give each its URL or SKU + size range, then hit <strong>Randomly assign</strong>.</p>
               <div id="productsList"></div>
               <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
             </div>
@@ -666,8 +669,10 @@
       </div>
       <label class="lbl">Product URL</label>
       <input type="text" class="inp p-url" placeholder="https://www.nike.com/sg/launch/t/...">
-      <label class="lbl" style="margin-top:8px;">SKU / keyword <span class="muted">(optional)</span></label>
-      <input type="text" class="inp p-keyword" placeholder="e.g. IM3219-100">
+      <label class="lbl" style="margin-top:8px;">SKU / keyword <span class="muted">(targets ONE exact item)</span></label>
+      <input type="text" class="inp p-keyword" placeholder="e.g. IH1610-052">
+      <button type="button" class="btn btn-mini btn-dark p-fetch" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
+      <div class="product-preview p-preview" style="display:none;"></div>
       <label class="lbl" style="margin-top:8px;">Size range</label>
       <div class="size-pool p-sizepool"></div>
     </div>
