@@ -18,9 +18,13 @@ if errorlevel 1 (
   pause & exit /b 1
 )
 
-echo Removing the Chrome force-install policy (HKLM + HKCU)...
+echo Removing the Chrome management policies (whole keys, HKLM + HKCU)...
+REM Delete the ENTIRE keys, not just value "1" — a leftover forcelist entry
+REM makes Chrome treat the browser as managed and DISABLE developer-mode
+REM (unpacked) extensions on restart, which is why the extension "disappears".
 for %%H in (HKLM HKCU) do (
-  reg delete "%%H\Software\Policies\Google\Chrome\ExtensionInstallForcelist" /v 1 /f >nul 2>&1
+  reg delete "%%H\Software\Policies\Google\Chrome\ExtensionInstallForcelist" /f >nul 2>&1
+  reg delete "%%H\Software\Policies\Google\Chrome\ExtensionInstallSources"   /f >nul 2>&1
 )
 
 echo Removing the logon task...
@@ -30,12 +34,19 @@ echo Stopping the update server (port %PORT%)...
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":%PORT%" ^| findstr LISTENING') do taskkill /PID %%P /F >nul 2>&1
 
 echo.
+echo Remaining Chrome policies (should be empty / none of ours)...
+reg query "HKLM\Software\Policies\Google\Chrome" 2>nul
+reg query "HKCU\Software\Policies\Google\Chrome" 2>nul
+
+echo.
 echo ============================================================
-echo  Auto-update removed.
-echo    1. Quit Chrome completely, reopen.
-echo    2. chrome://policy -^> Reload policies -^> confirm the
-echo       ExtensionInstallForcelist entry is gone.
-echo    3. The managed extension copy is removed by Chrome. To keep
-echo       using the bot, Load unpacked in each profile again.
+echo  Management policies removed.
+echo    1. Quit Chrome COMPLETELY (Task Manager -^> end every chrome.exe), reopen.
+echo    2. chrome://policy -^> Reload policies -^> ExtensionInstallForcelist GONE.
+echo    3. chrome://extensions -^> turn Developer mode ON (it should now STAY on;
+echo       if it still says "managed by your organization", another policy
+echo       remains — check the reg query output above).
+echo    4. Load unpacked the extension in each profile that lost it. It will now
+echo       persist across restarts.
 echo ============================================================
 pause
