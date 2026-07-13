@@ -196,6 +196,41 @@ the same steps in short:
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
 
+## Proxies & outcome notifications (v4.9)
+
+**Per-account proxies.** Nike de-dupes raffle entries by egress IP, so running
+many accounts from one IP wastes them. Each Chrome profile runs its own copy of
+the extension, so the background worker points **this profile** at its assigned
+proxy via `chrome.proxy` — it only affects that profile. Configure in
+**Settings → 🌐 Proxies**:
+
+- **Two sources.** Paste a **list** (`host:port:user:pass`, one per line) for a
+  sticky one-IP-per-account mapping, or a **single gateway** endpoint that
+  rotates the IP for every profile. Auth (`user:pass`) is answered via
+  `webRequest.onAuthRequired` (proxy challenges only — a site's own login is
+  never touched).
+- **Deterministic sticky assignment.** Accounts are sorted by `profileDir` and
+  round-robined over the list, so each account keeps the **same IP** across
+  restarts; the dashboard shows a live **IP-assignment preview** (credentials
+  masked) and warns when accounts outnumber proxies.
+- **Pre-drop test.** *Test first proxy* routes the dashboard profile through the
+  proxy, fetches its egress IP, confirms it **differs from your real IP**, then
+  restores the profile's real assignment. Turning proxies **off** clears them on
+  each profile's next boot.
+- This applies proxies you **rent** from a provider (IPRoyal, Smartproxy,
+  Oxylabs…) — it doesn't create residential IPs. Use SG IPs for SNKRS SG. Proxies
+  fix IP de-dupe; they don't by themselves defeat Akamai fingerprinting.
+
+**Outcome notifications.** **Settings → 🔔 Outcome Notifications** pushes a
+message the moment any account **wins / enters / carts / errors**, over a
+**Discord webhook and/or a Telegram bot**. Each profile sends its own event
+(deduped once per draw), so it works even with the dashboard closed. Pick which
+events ping; *Send test* confirms delivery.
+
+Both are default-**off** and add no work to the checkout path — the 29-assertion
+checkout suite is unchanged. Proxy/notification config plumbing is covered by
+`test-harness/dashboard-smoke.mjs`.
+
 ## Dashboard revamp (v4.0)
 
 CyberAIO-style **left sidebar** with four sections (all overlapping panels

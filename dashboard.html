@@ -593,6 +593,83 @@
 
           <section class="card">
             <div class="card-head">
+              <h2>🌐 PROXIES</h2>
+              <span class="card-tag">ONE IP PER ACCOUNT</span>
+            </div>
+            <p class="hint">Nike de-dupes raffle entries by IP. Give each account its own residential IP so every profile enters from a different address. Proxies are <strong>rented from a provider</strong> (IPRoyal, Smartproxy, Oxylabs…) — this applies them; it can't create them. Use SG IPs for SNKRS SG.</p>
+            <div class="toggle" style="border:none; padding:0 0 10px;">
+              <div>
+                <div class="t-label">Use proxies</div>
+                <div class="t-hint">Route each launched profile through its assigned IP</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="proxyEnabled"><span class="track"></span></label>
+            </div>
+            <label class="lbl" for="proxyMode">Proxy source</label>
+            <select id="proxyMode" class="inp">
+              <option value="list">List — one sticky IP per account (recommended)</option>
+              <option value="gateway">Single gateway — one rotating endpoint for all</option>
+            </select>
+            <div id="proxyListWrap" style="margin-top:10px;">
+              <label class="lbl" for="proxyList">Proxy list <span class="muted">(one per line: host:port:user:pass)</span></label>
+              <textarea id="proxyList" class="inp" rows="5" spellcheck="false" style="resize:vertical; font-family:monospace; font-size:12px;" placeholder="isp1.provider.com:8000:user:pass&#10;isp2.provider.com:8000:user:pass&#10;isp3.provider.com:8000:user:pass"></textarea>
+            </div>
+            <div id="proxyGatewayWrap" style="margin-top:10px; display:none;">
+              <label class="lbl" for="proxyGateway">Gateway endpoint <span class="muted">(host:port:user:pass)</span></label>
+              <input type="text" id="proxyGateway" class="inp" style="font-family:monospace;" placeholder="gate.provider.com:7000:user:pass">
+            </div>
+            <div style="margin-top:12px;">
+              <div class="lbl" style="margin:0 0 4px;">IP assignment preview</div>
+              <div id="proxyAssignPreview" class="assign-preview"><span class="muted">Add accounts to see IP assignments.</span></div>
+            </div>
+            <div class="actions" style="margin-top:12px;">
+              <button id="saveProxyBtn" class="btn btn-purple">SAVE PROXIES</button>
+              <button id="testProxyBtn" class="btn btn-dark">Test first proxy</button>
+            </div>
+            <div id="proxyTestMsg" class="status-msg" style="text-align:left;"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>🔔 OUTCOME NOTIFICATIONS</h2>
+              <span class="card-tag">WIN / CART / ERROR</span>
+            </div>
+            <p class="hint">Get pushed the moment any account wins, enters, or hits a problem — so you're not babysitting every window. Works with a Discord webhook and/or a Telegram bot.</p>
+            <div class="toggle" style="border:none; padding:0 0 10px;">
+              <div>
+                <div class="t-label">Notify on outcomes</div>
+                <div class="t-hint">Each account pings once per event</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="notifyEnabled"><span class="track"></span></label>
+            </div>
+            <label class="lbl" for="notifyWebhook">Discord webhook <span class="muted">(optional)</span></label>
+            <input type="text" id="notifyWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+            <div class="row" style="margin-top:10px; gap:8px;">
+              <div style="flex:1;">
+                <label class="lbl" for="notifyTgToken">Telegram bot token <span class="muted">(optional)</span></label>
+                <input type="text" id="notifyTgToken" class="inp" placeholder="123456:ABC-DEF...">
+              </div>
+              <div style="width:130px;">
+                <label class="lbl" for="notifyTgChat">Chat ID</label>
+                <input type="text" id="notifyTgChat" class="inp" placeholder="12345678">
+              </div>
+            </div>
+            <div class="lbl" style="margin-top:12px;">Notify me on…</div>
+            <div class="chk-grid">
+              <label class="chk"><input type="checkbox" id="notifyEvtWin" checked> 🎉 Won / order confirmed</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtEntered" checked> 📋 Draw entered</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtError" checked> ❌ Error / needs attention</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtSubmitting"> 🛒 Submitting order</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtLoss"> 💔 Not selected</label>
+            </div>
+            <div class="actions" style="margin-top:12px;">
+              <button id="saveNotifyBtn" class="btn btn-purple">SAVE</button>
+              <button id="testNotifyBtn" class="btn btn-dark">Send test</button>
+            </div>
+            <div id="notifyTestMsg" class="status-msg" style="text-align:left;"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
               <h2>🔔 NEW-DROP ALERTS</h2>
               <span class="card-tag">SNKRS MONITOR</span>
             </div>

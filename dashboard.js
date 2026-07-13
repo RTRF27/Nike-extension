@@ -2654,6 +2654,7 @@ function renderAccounts() {
   accounts.forEach((acct) => list.appendChild(buildAccountRow(acct)));
   updateProfileSourceNote();
   refreshOrderCheckerProfiles();
+  if (typeof renderProxyAssignments === "function") renderProxyAssignments();
 }
 
 function buildAccountRow(acct) {
@@ -2799,6 +2800,96 @@ function setDropTimeField(iso) {
   return true;
 }
 
+// ── Proxy + notification config (Settings) ────────────────────
+function proxyLines() {
+  const raw = ($("proxyList") && $("proxyList").value) || "";
+  return raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+
+function buildProxyConfig() {
+  const enabled = !!($("proxyEnabled") && $("proxyEnabled").checked);
+  const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+  const list = proxyLines();
+  const gateway = (($("proxyGateway") && $("proxyGateway").value) || "").trim();
+  return {
+    enabled,
+    mode,
+    list,
+    gateway,
+    // Flag so a launched profile knows to CLEAR its proxy when we turn this off
+    // (rather than only ever setting one).
+    hadProxy: enabled || list.length > 0 || !!gateway,
+  };
+}
+
+function buildNotifyConfig() {
+  const evt = (id) => !!($(id) && $(id).checked);
+  return {
+    enabled: !!($("notifyEnabled") && $("notifyEnabled").checked),
+    webhook: (($("notifyWebhook") && $("notifyWebhook").value) || "").trim(),
+    telegramToken: (($("notifyTgToken") && $("notifyTgToken").value) || "").trim(),
+    telegramChatId: (($("notifyTgChat") && $("notifyTgChat").value) || "").trim(),
+    events: {
+      win:        evt("notifyEvtWin"),
+      success:    evt("notifyEvtWin"),   // "Won / order confirmed" is one toggle
+      entered:    evt("notifyEvtEntered"),
+      submitting: evt("notifyEvtSubmitting"),
+      error:      evt("notifyEvtError"),
+      loss:       evt("notifyEvtLoss"),
+      limit:      evt("notifyEvtError"), // group entry-limit under "problems"
+    },
+  };
+}
+
+// Show the list box or the single-gateway box depending on the chosen mode.
+function syncProxyModeUI() {
+  const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+  const listWrap = $("proxyListWrap");
+  const gwWrap = $("proxyGatewayWrap");
+  if (listWrap) listWrap.style.display = mode === "list" ? "" : "none";
+  if (gwWrap) gwWrap.style.display = mode === "gateway" ? "" : "none";
+}
+
+// Mask credentials so the preview never shows the password.
+function maskProxy(str) {
+  const s = String(str || "").trim();
+  if (!s) return "";
+  // Strip scheme + any user:pass@, then keep host:port from either style.
+  let body = s.replace(/^(https?|socks5|socks4):\/\//i, "");
+  const at = body.lastIndexOf("@");
+  if (at >= 0) body = body.slice(at + 1);
+  const parts = body.split(":");
+  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : body;
+}
+
+// Preview which account gets which IP — same deterministic sticky mapping the
+// background uses (accounts sorted by profileDir, round-robin over the list).
+function renderProxyAssignments() {
+  const el = $("proxyAssignPreview");
+  if (!el) return;
+  const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+  const withDir = (accounts || []).filter(a => a && a.profileDir);
+  if (!withDir.length) { el.innerHTML = '<span class="muted">Add accounts (with a Chrome profile) to see IP assignments.</span>'; return; }
+  let rows = "";
+  if (mode === "gateway") {
+    const gw = maskProxy(($("proxyGateway") && $("proxyGateway").value) || "");
+    if (!gw) { el.innerHTML = '<span class="muted">Enter a gateway endpoint above.</span>'; return; }
+    rows = withDir.map(a => `<div class="pa-row"><span>${escapeHtml(a.label || a.profileDir)}</span><span class="muted">→ ${escapeHtml(gw)} <em>(rotating)</em></span></div>`).join("");
+  } else {
+    const list = proxyLines();
+    if (!list.length) { el.innerHTML = '<span class="muted">Paste one proxy per line above.</span>'; return; }
+    const sorted = withDir.slice().sort((a, b) => a.profileDir.localeCompare(b.profileDir));
+    rows = sorted.map((a, i) => {
+      const p = maskProxy(list[i % list.length]);
+      return `<div class="pa-row"><span>${escapeHtml(a.label || a.profileDir)}</span><span class="muted">→ ${escapeHtml(p)}</span></div>`;
+    }).join("");
+    if (withDir.length > list.length) {
+      rows += `<div class="pa-row muted" style="margin-top:4px;">⚠ ${withDir.length} accounts share ${list.length} proxies — some reuse the same IP.</div>`;
+    }
+  }
+  el.innerHTML = rows;
+}
+
 function buildConfig() {
   return {
     drop: {
@@ -2839,6 +2930,8 @@ function buildConfig() {
       tileW: $("tileW") ? (parseInt($("tileW").value, 10) || 500) : 500,
       tileH: $("tileH") ? (parseInt($("tileH").value, 10) || 680) : 680,
     },
+    proxies: buildProxyConfig(),
+    notify:  buildNotifyConfig(),
     accounts: accounts.map(a => ({
       id: a.id,
       label: a.label || "",
@@ -3378,6 +3471,30 @@ function applyConfigToUI(cfg) {
   $("logWebhook").value = opts.logWebhook || "";
   $("alertWebhook").value = opts.alertWebhook || "";
 
+  // Proxies
+  const px = cfg.proxies || {};
+  if ($("proxyEnabled")) $("proxyEnabled").checked = !!px.enabled;
+  if ($("proxyMode")) $("proxyMode").value = px.mode === "gateway" ? "gateway" : "list";
+  if ($("proxyList")) $("proxyList").value = Array.isArray(px.list) ? px.list.join("\n") : "";
+  if ($("proxyGateway")) $("proxyGateway").value = px.gateway || "";
+  if (typeof syncProxyModeUI === "function") syncProxyModeUI();
+  if (typeof renderProxyAssignments === "function") renderProxyAssignments();
+
+  // Outcome notifications
+  const nt = cfg.notify || {};
+  const nEvt = nt.events || {};
+  if ($("notifyEnabled")) $("notifyEnabled").checked = !!nt.enabled;
+  if ($("notifyWebhook")) $("notifyWebhook").value = nt.webhook || "";
+  if ($("notifyTgToken")) $("notifyTgToken").value = nt.telegramToken || "";
+  if ($("notifyTgChat")) $("notifyTgChat").value = nt.telegramChatId || "";
+  // Defaults when this is a fresh config with no notify block yet.
+  const dEvt = (k, def) => (k in nEvt) ? !!nEvt[k] : def;
+  if ($("notifyEvtWin")) $("notifyEvtWin").checked = dEvt("win", true);
+  if ($("notifyEvtEntered")) $("notifyEvtEntered").checked = dEvt("entered", true);
+  if ($("notifyEvtError")) $("notifyEvtError").checked = dEvt("error", true);
+  if ($("notifyEvtSubmitting")) $("notifyEvtSubmitting").checked = dEvt("submitting", false);
+  if ($("notifyEvtLoss")) $("notifyEvtLoss").checked = dEvt("loss", false);
+
   singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
   multiProduct = !!cfg.multiProduct;
   products = Array.isArray(cfg.products) ? cfg.products.map(p => ({
@@ -3777,6 +3894,71 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     });
   }
+  // ── Proxies ──
+  if ($("proxyMode")) $("proxyMode").addEventListener("change", () => { syncProxyModeUI(); renderProxyAssignments(); });
+  if ($("proxyList")) $("proxyList").addEventListener("input", renderProxyAssignments);
+  if ($("proxyGateway")) $("proxyGateway").addEventListener("input", renderProxyAssignments);
+  if ($("saveProxyBtn")) {
+    $("saveProxyBtn").addEventListener("click", async () => {
+      const msgEl = $("proxyTestMsg");
+      const px = buildProxyConfig();
+      if (px.enabled && px.mode === "list" && !px.list.length) { if (msgEl) flashTemp(msgEl, "Paste at least one proxy, or turn proxies off.", "var(--orange)", 4000); return; }
+      if (px.enabled && px.mode === "gateway" && !px.gateway) { if (msgEl) flashTemp(msgEl, "Enter the gateway endpoint, or turn proxies off.", "var(--orange)", 4000); return; }
+      if (msgEl) flash(msgEl, "Saving…", "#888");
+      await saveAll(true);
+      // Apply immediately in THIS profile so the change takes effect now; other
+      // profiles pick it up when they next boot / on their next restart.
+      chrome.runtime.sendMessage({ type: "apply_proxy_now" }, () => {
+        if (msgEl) flashTemp(msgEl, px.enabled ? "✓ Saved & applied. Launched profiles use their IP on next boot." : "✓ Saved. Proxies OFF — profiles use your normal IP on next boot.", "var(--green)", 6000);
+      });
+    });
+  }
+  if ($("testProxyBtn")) {
+    $("testProxyBtn").addEventListener("click", () => {
+      const msgEl = $("proxyTestMsg");
+      const list = proxyLines();
+      const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+      const proxy = mode === "gateway" ? (($("proxyGateway") && $("proxyGateway").value) || "").trim() : list[0];
+      if (!proxy) { if (msgEl) flashTemp(msgEl, "Enter a proxy to test first.", "var(--orange)", 4000); return; }
+      if (msgEl) flash(msgEl, "Testing egress IP through the proxy… (a few seconds)", "#888");
+      chrome.runtime.sendMessage({ type: "test_proxy", proxy }, (resp) => {
+        if (resp && resp.ok) {
+          const changed = resp.changed ? "✓ different from your real IP" : "⚠ same as your real IP — proxy may be bypassed";
+          const col = resp.changed ? "var(--green)" : "var(--orange)";
+          if (msgEl) flashTemp(msgEl, `✓ Proxy live — egress IP ${resp.ip} (${changed}).`, col, 9000);
+        } else {
+          if (msgEl) flashTemp(msgEl, "Proxy test failed: " + ((resp && resp.error) || "no response"), "var(--red)", 9000);
+        }
+      });
+    });
+  }
+
+  // ── Outcome notifications ──
+  if ($("saveNotifyBtn")) {
+    $("saveNotifyBtn").addEventListener("click", async () => {
+      const msgEl = $("notifyTestMsg");
+      const nt = buildNotifyConfig();
+      if (nt.enabled && !nt.webhook && !(nt.telegramToken && nt.telegramChatId)) {
+        if (msgEl) flashTemp(msgEl, "Add a Discord webhook or Telegram token+chat first.", "var(--orange)", 5000); return;
+      }
+      if (msgEl) flash(msgEl, "Saving…", "#888");
+      await saveAll(true);
+      if (msgEl) flashTemp(msgEl, nt.enabled ? "✓ Saved — every launched account will ping on these events." : "✓ Saved (notifications off).", "var(--green)", 5000);
+    });
+  }
+  if ($("testNotifyBtn")) {
+    $("testNotifyBtn").addEventListener("click", () => {
+      const msgEl = $("notifyTestMsg");
+      const cfg = buildNotifyConfig();
+      if (!cfg.webhook && !(cfg.telegramToken && cfg.telegramChatId)) { if (msgEl) flashTemp(msgEl, "Add a Discord webhook or Telegram token+chat first.", "var(--orange)", 5000); return; }
+      if (msgEl) flash(msgEl, "Sending test notification…", "#888");
+      chrome.runtime.sendMessage({ type: "test_outcome_notify", cfg }, (resp) => {
+        if (resp && resp.ok) { if (msgEl) flashTemp(msgEl, "✓ Sent — check Discord/Telegram.", "var(--green)", 6000); }
+        else { if (msgEl) flashTemp(msgEl, "Failed: " + ((resp && resp.error) || "no response"), "var(--red)", 6000); }
+      });
+    });
+  }
+
   // Re-route home action messages to the home action msg div
   // (saveAll and launchAll use statusMsg; we'll update home separately via storage listener)
 

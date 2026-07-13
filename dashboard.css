@@ -513,6 +513,26 @@ select.inp { cursor: pointer; }
   font-size: 13px; color: var(--green);
 }
 
+/* ── Proxy assignment preview + notification checkboxes ── */
+.assign-preview {
+  background: rgba(16, 13, 29, .55); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 10px 12px; max-height: 168px; overflow-y: auto;
+  font-size: 12.5px;
+}
+.pa-row {
+  display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+  padding: 3px 0; border-bottom: 1px dashed rgba(255,255,255,.05);
+}
+.pa-row:last-child { border-bottom: none; }
+.pa-row span:first-child { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pa-row em { font-style: normal; opacity: .7; }
+.chk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 6px; }
+.chk {
+  display: flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer;
+  user-select: none; padding: 3px 0;
+}
+.chk input { accent-color: var(--purple); width: 15px; height: 15px; }
+
 /* ── ACCOUNT ROWS ── */
 .acct {
   background: rgba(16, 13, 29, .55); border: 1px solid var(--line);

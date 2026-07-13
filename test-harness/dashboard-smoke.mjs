@@ -158,6 +158,60 @@ async function main() {
   await page.waitForTimeout(150);
   const setActive = await page.evaluate(() => document.getElementById("page-settings").classList.contains("active"));
   check("settings group opens", setActive);
+
+  // 6) Proxy manager: card present, mode toggle swaps inputs, buildProxyConfig
+  //    + sticky assignment preview work end to end.
+  const proxy = await page.evaluate(() => {
+    if (!document.getElementById("proxyEnabled")) return { present: false };
+    // Seed two accounts + a proxy list, then exercise the real functions.
+    accounts = [
+      { id: "a1", label: "Acct B", profileDir: "Profile 2" },
+      { id: "a2", label: "Acct A", profileDir: "Profile 1" },
+    ];
+    document.getElementById("proxyEnabled").checked = true;
+    document.getElementById("proxyMode").value = "list";
+    document.getElementById("proxyList").value = "ip1.prov.com:8000:u:p\nip2.prov.com:8000:u:p";
+    syncProxyModeUI();
+    const listShown = document.getElementById("proxyListWrap").style.display !== "none";
+    // Switch to gateway → list hides, gateway shows.
+    document.getElementById("proxyMode").value = "gateway";
+    syncProxyModeUI();
+    const gwShown = document.getElementById("proxyGatewayWrap").style.display !== "none"
+                 && document.getElementById("proxyListWrap").style.display === "none";
+    // Back to list for the config + preview checks.
+    document.getElementById("proxyMode").value = "list";
+    syncProxyModeUI();
+    const cfg = buildProxyConfig();
+    renderProxyAssignments();
+    const rows = document.querySelectorAll("#proxyAssignPreview .pa-row").length;
+    // Deterministic sticky: sorted by profileDir → "Profile 1" (Acct A) gets ip1.
+    const previewText = document.getElementById("proxyAssignPreview").textContent;
+    return { present: true, listShown, gwShown, cfg, rows, previewText };
+  });
+  check("proxy card present in settings", proxy.present);
+  check("proxy mode toggles list ↔ gateway inputs", proxy.listShown && proxy.gwShown);
+  check("buildProxyConfig captures enabled + list", proxy.cfg && proxy.cfg.enabled === true && proxy.cfg.list.length === 2);
+  check("proxy assignment preview renders a row per account", proxy.rows === 2, "rows=" + proxy.rows);
+  check("sticky assignment maps first account (by profileDir) to first proxy",
+    /Acct A/.test(proxy.previewText) && /ip1\.prov\.com:8000/.test(proxy.previewText), proxy.previewText);
+  check("proxy preview masks credentials (no user:pass shown)", !/:u:p/.test(proxy.previewText), proxy.previewText);
+
+  // 7) Outcome notifications: card present, buildNotifyConfig reflects toggles.
+  const notify = await page.evaluate(() => {
+    if (!document.getElementById("notifyEnabled")) return { present: false };
+    document.getElementById("notifyEnabled").checked = true;
+    document.getElementById("notifyWebhook").value = "https://discord.com/api/webhooks/x/y";
+    document.getElementById("notifyEvtWin").checked = true;
+    document.getElementById("notifyEvtSubmitting").checked = false;
+    const cfg = buildNotifyConfig();
+    return { present: true, cfg };
+  });
+  check("notifications card present", notify.present);
+  check("buildNotifyConfig maps webhook + win/success toggle",
+    notify.cfg && notify.cfg.enabled && notify.cfg.webhook.includes("discord") &&
+    notify.cfg.events.win === true && notify.cfg.events.success === true &&
+    notify.cfg.events.submitting === false);
+
   check("no errors after full navigation", errors.length === 0, errors.slice(0, 3).join(" | "));
 
   await browser.close();

@@ -52,6 +52,200 @@ async function sendLog(message) {
   }).catch(console.warn);
 }
 
+// ============================================================
+// Per-profile PROXY support
+// ============================================================
+// Nike de-dupes raffle entries by egress IP, so running many accounts from one
+// IP wastes them. Each Chrome PROFILE runs its own copy of this extension (its
+// own service worker), so we can point THIS profile at its assigned proxy with
+// the chrome.proxy API — it only affects this profile. Authenticated proxies
+// (user:pass) are handled via webRequest.onAuthRequired below.
+//
+// Accepted proxy string forms (whitespace-trimmed):
+//   host:port
+//   host:port:user:pass
+//   scheme://host:port
+//   scheme://user:pass@host:port
+//   user:pass@host:port
+// scheme is one of http|https|socks5|socks4 (default http).
+const PROXY_CREDS_KEY = "snkrsProxyCreds";   // {username, password} for onAuthRequired
+
+function parseProxy(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  let s = raw.trim();
+  if (!s) return null;
+  let scheme = "http";
+  const schemeMatch = s.match(/^(https?|socks5|socks4):\/\//i);
+  if (schemeMatch) { scheme = schemeMatch[1].toLowerCase(); s = s.slice(schemeMatch[0].length); }
+  let username = "", password = "";
+  // Credentials before an @ (URL style).
+  const atIdx = s.lastIndexOf("@");
+  if (atIdx >= 0) {
+    const cred = s.slice(0, atIdx);
+    s = s.slice(atIdx + 1);
+    const ci = cred.indexOf(":");
+    if (ci >= 0) { username = cred.slice(0, ci); password = cred.slice(ci + 1); }
+    else username = cred;
+  }
+  // Remaining is host:port[:user:pass] (colon style).
+  const parts = s.split(":");
+  if (parts.length < 2) return null;
+  const host = parts[0];
+  const port = parseInt(parts[1], 10);
+  if (!host || !Number.isFinite(port)) return null;
+  if (!username && parts.length >= 4) { username = parts[2]; password = parts.slice(3).join(":"); }
+  return { scheme, host, port, username, password };
+}
+
+// Provide proxy credentials when Chrome challenges with a 407. We ONLY answer
+// proxy challenges (details.isProxy) so we never interfere with a site's own
+// login (Nike account 401s, etc.).
+let _proxyCreds = null;
+chrome.storage.local.get(PROXY_CREDS_KEY).then((d) => { _proxyCreds = d[PROXY_CREDS_KEY] || null; }).catch(() => {});
+try {
+  chrome.webRequest.onAuthRequired.addListener(
+    (details) => {
+      if (details.isProxy && _proxyCreds && _proxyCreds.username) {
+        return { authCredentials: { username: _proxyCreds.username, password: _proxyCreds.password || "" } };
+      }
+      return {};
+    },
+    { urls: ["<all_urls>"] },
+    ["blocking"]
+  );
+} catch (e) { /* webRequestAuthProvider missing on very old Chrome */ }
+
+async function applyProxy(proxyStr) {
+  const p = parseProxy(proxyStr);
+  if (!p) return clearProxy();
+  _proxyCreds = { username: p.username, password: p.password };
+  await chrome.storage.local.set({ [PROXY_CREDS_KEY]: _proxyCreds });
+  const single = { scheme: p.scheme, host: p.host, port: p.port };
+  return new Promise((resolve) => {
+    chrome.proxy.settings.set({
+      value: {
+        mode: "fixed_servers",
+        rules: { singleProxy: single, bypassList: ["<local>", "127.0.0.1", "localhost"] },
+      },
+      scope: "regular",
+    }, () => resolve({ ok: !chrome.runtime.lastError, applied: `${p.scheme}://${p.host}:${p.port}`, error: chrome.runtime.lastError && chrome.runtime.lastError.message }));
+  });
+}
+
+// Fetch our current public egress IP (used to prove a proxy is live and that
+// the IP actually changed). Races a couple of echo services for resilience.
+async function fetchEgressIp(timeoutMs) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs || 8000);
+  try {
+    const res = await fetch("https://api.ipify.org?format=json", { signal: ctl.signal, cache: "no-store" });
+    if (res.ok) { const j = await res.json(); if (j && j.ip) return j.ip; }
+    const res2 = await fetch("https://ipv4.icanhazip.com", { signal: ctl.signal, cache: "no-store" });
+    if (res2.ok) return (await res2.text()).trim();
+  } finally { clearTimeout(t); }
+  return null;
+}
+
+function clearProxy() {
+  _proxyCreds = null;
+  chrome.storage.local.remove(PROXY_CREDS_KEY).catch(() => {});
+  return new Promise((resolve) => {
+    chrome.proxy.settings.clear({ scope: "regular" }, () => resolve({ ok: !chrome.runtime.lastError, applied: null }));
+  });
+}
+
+// Work out which proxy string THIS profile should use from the shared config.
+//   proxies = {
+//     enabled: bool, mode: "list"|"gateway",
+//     list: ["host:port:user:pass", ...],   // one sticky IP per account
+//     gateway: "host:port:user:pass",       // one rotating endpoint for all
+//     assignments: { profileDir: "host:port:user:pass" }  // optional overrides
+//   }
+function resolveProxyForProfile(config, profileDir) {
+  const px = config && config.proxies;
+  if (!px || !px.enabled || !profileDir) return null;
+  if (px.assignments && px.assignments[profileDir]) return px.assignments[profileDir];
+  if (px.mode === "gateway") return (px.gateway || "").trim() || null;
+  const list = (Array.isArray(px.list) ? px.list : []).map(s => String(s || "").trim()).filter(Boolean);
+  if (!list.length) return null;
+  // Deterministic sticky round-robin: stable order by profileDir so each
+  // account keeps the SAME IP across restarts even without a saved assignment.
+  const accounts = Array.isArray(config.accounts) ? config.accounts : [];
+  const dirs = accounts.map(a => a && a.profileDir).filter(Boolean).sort();
+  let idx = dirs.indexOf(profileDir);
+  if (idx < 0) idx = 0;
+  return list[idx % list.length];
+}
+
+// Apply this profile's proxy from the freshly-fetched shared config.
+async function applyProxyFromConfig(config, profileDir) {
+  const target = resolveProxyForProfile(config, profileDir);
+  if (target) { await applyProxy(target); }
+  else if (config && config.proxies && config.proxies.hadProxy) { await clearProxy(); }
+}
+
+// ============================================================
+// OUTCOME NOTIFICATIONS (per-profile → Discord / Telegram)
+// ============================================================
+// Fire a push the moment an account reaches a notable state (won / entered /
+// carted / error), so the user isn't babysitting many windows. Each profile
+// sends its OWN event (it knows its account), deduped so one draw result pings
+// once. Config lives in the shared config so every profile reads the same
+// destination; we cache it in memory to avoid a host round-trip per log line.
+let _notifyCfg = null;                // { enabled, webhook, telegramToken, telegramChatId, events:{code:bool} }
+const _profileLabels = {};            // profileDir → friendly account label
+const _notifiedEvents = new Set();    // `${key}:${code}` already sent this worker session
+
+const NOTIFY_META = {
+  win:        { emoji: "🎉", label: "GOT 'EM — WON", important: true },
+  success:    { emoji: "✅", label: "Order submitted", important: true },
+  entered:    { emoji: "📋", label: "Draw entered", important: true },
+  submitting: { emoji: "🛒", label: "Submitting order", important: false },
+  loss:       { emoji: "💔", label: "Not selected", important: false },
+  limit:      { emoji: "⚠️", label: "Entry limit hit", important: false },
+  error:      { emoji: "❌", label: "Needs attention", important: false },
+};
+// States that default ON when the user hasn't customised the event list.
+const NOTIFY_DEFAULT_ON = { win: true, success: true, entered: true, error: true, submitting: false, loss: false, limit: true };
+
+function notifyEnabledFor(code) {
+  if (!_notifyCfg || !_notifyCfg.enabled) return false;
+  if (!(code in NOTIFY_META)) return false;
+  if (!_notifyCfg.webhook && !(_notifyCfg.telegramToken && _notifyCfg.telegramChatId)) return false;
+  const events = _notifyCfg.events || {};
+  return (code in events) ? !!events[code] : !!NOTIFY_DEFAULT_ON[code];
+}
+
+async function postNotify(text) {
+  const jobs = [];
+  if (_notifyCfg && _notifyCfg.webhook) {
+    jobs.push(fetch(_notifyCfg.webhook, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: text }),
+    }).catch(() => {}));
+  }
+  if (_notifyCfg && _notifyCfg.telegramToken && _notifyCfg.telegramChatId) {
+    const url = `https://api.telegram.org/bot${encodeURIComponent(_notifyCfg.telegramToken)}/sendMessage`;
+    jobs.push(fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: _notifyCfg.telegramChatId, text, parse_mode: "Markdown", disable_web_page_preview: true }),
+    }).catch(() => {}));
+  }
+  await Promise.all(jobs);
+}
+
+function maybeNotifyOutcome(profileDir, tabId, code, message) {
+  if (!notifyEnabledFor(code)) return;
+  const dedupKey = `${profileDir}#${tabId}:${code}`;
+  if (_notifiedEvents.has(dedupKey)) return;
+  _notifiedEvents.add(dedupKey);
+  const meta = NOTIFY_META[code];
+  const who = _profileLabels[profileDir] || profileDir || "account";
+  const detail = (message || "").replace(/[*_`]/g, "").slice(0, 140);
+  const text = `${meta.emoji} **${meta.label}** — \`${who}\`\n${detail}`;
+  postNotify(text);
+}
+
 // ── Upcoming SNKRS drops (preview + new-release alerts) ───────
 // Nike exposes its launch feed through the public product-feed API. We poll it
 // on an alarm, render it in the dashboard, and ping a Discord webhook whenever
@@ -433,6 +627,9 @@ chrome.runtime.onStartup.addListener(() => {
   armUpcomingPoll();
   rearmTabReloads();
   reportVersionToHost();
+  // Re-apply this profile's proxy + reload notify config after a browser
+  // restart, even before any Nike tab boots.
+  ensureCentralConfig();
 });
 chrome.runtime.onInstalled.addListener(() => {
   scheduleDropAlarm();
@@ -763,6 +960,43 @@ async function runPreflight(profileDir, page, accessToken) {
   return entry;
 }
 
+// Cache the shared config bits this profile needs at status/notify time so the
+// hot log path never has to round-trip the native host. Called whenever we
+// freshly fetch the shared config.
+function cacheCentralConfig(config, profileDir) {
+  if (!config) return;
+  _notifyCfg = config.notify || null;
+  const accounts = Array.isArray(config.accounts) ? config.accounts : [];
+  for (const a of accounts) {
+    if (a && a.profileDir) _profileLabels[a.profileDir] = a.label || a.profileDir;
+  }
+  if (profileDir && !_profileLabels[profileDir]) _profileLabels[profileDir] = profileDir;
+}
+
+// Lazily fetch + cache the shared config once per worker lifetime. The MV3
+// worker is recycled often; on a cold restart mid-drop _notifyCfg would be null
+// and the assigned proxy un-applied. This refreshes both without a fetch per
+// log line. Also (re)applies this profile's proxy.
+let _centralConfigDone = false;
+let _centralConfigInflight = null;
+async function ensureCentralConfig() {
+  if (_centralConfigDone) return;
+  if (_centralConfigInflight) return _centralConfigInflight;
+  _centralConfigInflight = (async () => {
+    try {
+      const dir = await getSelfProfileDir();
+      const resp = await nativeSend({ cmd: "getConfig" });
+      if (resp && resp.ok && resp.config) {
+        cacheCentralConfig(resp.config, dir);
+        await applyProxyFromConfig(resp.config, dir).catch(() => {});
+        _centralConfigDone = true;
+      }
+    } catch (e) { /* host offline — retry on next call */ }
+    finally { _centralConfigInflight = null; }
+  })();
+  return _centralConfigInflight;
+}
+
 // Build the per-profile settings object that the existing content scripts
 // already understand, from the central shared config + this account's row.
 function buildSettingsForProfile(config, profileDir) {
@@ -974,6 +1208,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: resp && resp.error || "host error" });
         return;
       }
+      // Cache the shared notification config + this account's label, and point
+      // this profile at its assigned proxy — all derived from the same config
+      // fetch so we don't spawn extra host processes.
+      cacheCentralConfig(resp.config, msg.profileDir);
+      applyProxyFromConfig(resp.config, msg.profileDir).catch(() => {});
       const settings = buildSettingsForProfile(resp.config, msg.profileDir);
       if (!settings) {
         sendResponse({ ok: false, error: "No matching account in shared config." });
@@ -1075,6 +1314,71 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // host through us if they prefer. {cmd} is forwarded verbatim.
   if (msg.type === "native") {
     nativeSend(msg.payload || {}).then(sendResponse);
+    return true;
+  }
+
+  // Proxy TEST: temporarily route THIS profile through the given proxy, fetch a
+  // public IP echo, then restore the previous proxy. Reports the egress IP so
+  // the user can confirm the proxy works (and that the IP actually changed)
+  // before the drop. Runs in the dashboard's own profile.
+  if (msg.type === "test_proxy") {
+    (async () => {
+      const parsed = parseProxy(msg.proxy || "");
+      if (!parsed) { sendResponse({ ok: false, error: "Could not parse proxy. Use host:port:user:pass." }); return; }
+      let baseline = null;
+      try {
+        // What's our IP WITHOUT the proxy (for comparison)?
+        baseline = await fetchEgressIp(6000).catch(() => null);
+        const ap = await applyProxy(msg.proxy);
+        if (!ap.ok) { await clearProxy(); sendResponse({ ok: false, error: ap.error || "Chrome rejected the proxy." }); return; }
+        // Small settle so the proxy setting takes effect before the fetch.
+        await new Promise(r => setTimeout(r, 400));
+        const ip = await fetchEgressIp(9000);
+        sendResponse({
+          ok: true, ip, baseline,
+          changed: !!(ip && baseline && ip !== baseline),
+          endpoint: `${parsed.scheme}://${parsed.host}:${parsed.port}`,
+          auth: !!parsed.username,
+        });
+      } catch (e) {
+        sendResponse({ ok: false, error: "No response through proxy: " + String(e && e.message || e) });
+      } finally {
+        // Restore whatever proxy THIS profile is actually assigned (or clear if
+        // none) — never leave the profile stuck on the test proxy, and never
+        // strip a real assigned proxy that a checkout run depends on.
+        _centralConfigDone = false;
+        await ensureCentralConfig().catch(() => clearProxy().catch(() => {}));
+      }
+    })();
+    return true;
+  }
+
+  // Re-apply this profile's proxy from the shared config immediately (used after
+  // the dashboard saves proxy settings, so the change takes effect without a
+  // restart in whichever profile the dashboard runs).
+  if (msg.type === "apply_proxy_now") {
+    (async () => {
+      _centralConfigDone = false;
+      await ensureCentralConfig();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  // Notification TEST: send a sample outcome message through whatever channels
+  // are configured, so the user can confirm Discord/Telegram delivery.
+  if (msg.type === "test_outcome_notify") {
+    (async () => {
+      _notifyCfg = msg.cfg || _notifyCfg;
+      if (!_notifyCfg || (!_notifyCfg.webhook && !(_notifyCfg.telegramToken && _notifyCfg.telegramChatId))) {
+        sendResponse({ ok: false, error: "No Discord webhook or Telegram token configured." });
+        return;
+      }
+      try {
+        await postNotify("🎉 **GOT 'EM — WON** — `Test account`\nThis is a test from your SNKRS Bot dashboard. Notifications are working.");
+        sendResponse({ ok: true });
+      } catch (e) { sendResponse({ ok: false, error: String(e && e.message || e) }); }
+    })();
     return true;
   }
 
@@ -1318,6 +1622,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           chrome.storage.local.set({ snkrsStatus: s });
           pushStatusToShared(key, entry); // throttled, best-effort
         });
+        // Notifications run OUT of the status write path so a cold-worker
+        // config fetch can never delay the live status board during a drop.
+        if (code) {
+          if (_centralConfigDone) maybeNotifyOutcome(profileDir, tabId, code, msg.message);
+          else ensureCentralConfig().then(() => maybeNotifyOutcome(profileDir, tabId, code, msg.message)).catch(() => {});
+        }
       });
     }
     return false;
