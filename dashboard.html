@@ -618,8 +618,12 @@
               <input type="text" id="proxyGateway" class="inp" style="font-family:monospace;" placeholder="gate.provider.com:7000:user:pass">
             </div>
             <div style="margin-top:12px;">
-              <div class="lbl" style="margin:0 0 4px;">IP assignment preview</div>
+              <div class="row" style="justify-content:space-between; align-items:center; margin:0 0 4px;">
+                <div class="lbl" style="margin:0;">IP assignment preview</div>
+                <button id="rotateProxiesBtn" class="btn btn-dark" style="padding:3px 10px; font-size:11px;" title="Move every account to a different IP and relaunch — for when a batch of proxies dies">⟳ Rotate all</button>
+              </div>
               <div id="proxyAssignPreview" class="assign-preview"><span class="muted">Add accounts to see IP assignments.</span></div>
+              <p class="hint" style="margin-top:6px;">A resi died? Hit <strong>⟳</strong> next to that account to swap it onto a fresh IP and relaunch it. Add spare lines to the list so there are unused IPs to swap in.</p>
             </div>
             <div class="actions" style="margin-top:12px;">
               <button id="saveProxyBtn" class="btn btn-purple">SAVE PROXIES</button>

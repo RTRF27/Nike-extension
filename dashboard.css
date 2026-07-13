@@ -526,6 +526,12 @@ select.inp { cursor: pointer; }
 .pa-row:last-child { border-bottom: none; }
 .pa-row span:first-child { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pa-row em { font-style: normal; opacity: .7; }
+.pa-swap {
+  background: rgba(139, 92, 246, .16); color: var(--purple); border: 1px solid var(--purple-dim);
+  border-radius: 6px; cursor: pointer; font-size: 12px; line-height: 1; padding: 2px 6px; margin-left: 6px;
+  transition: background .15s, transform .15s;
+}
+.pa-swap:hover { background: rgba(139, 92, 246, .32); transform: rotate(90deg); }
 .chk-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 6px; }
 .chk {
   display: flex; align-items: center; gap: 7px; font-size: 12.5px; cursor: pointer;

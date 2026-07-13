@@ -196,6 +196,27 @@ async function main() {
     /Acct A/.test(proxy.previewText) && /ip1\.prov\.com:8000/.test(proxy.previewText), proxy.previewText);
   check("proxy preview masks credentials (no user:pass shown)", !/:u:p/.test(proxy.previewText), proxy.previewText);
 
+  // 6b) Swap logic: with a spare proxy in the list, swapping an account moves it
+  //     onto the UNUSED spare (a dead resi is replaced, not rotated onto a busy IP).
+  const swap = await page.evaluate(() => {
+    // 3 proxies, 2 accounts → ip3 is a spare.
+    document.getElementById("proxyList").value = "ip1.prov.com:8000:u:p\nip2.prov.com:8000:u:p\nip3.prov.com:8000:u:p";
+    const list = proxyLines();
+    // Profile 1 (Acct A) defaults to ip1; Profile 2 (Acct B) to ip2. Swap Acct A.
+    const cur = currentProxyForDir("Profile 1");
+    const chosen = nextProxyAfter(cur, list, "Profile 1");
+    proxyAssignments["Profile 1"] = chosen;
+    renderProxyAssignments();
+    const cfg = buildProxyConfig();
+    const text = document.getElementById("proxyAssignPreview").textContent;
+    const hasSwapBtn = !!document.querySelector("#proxyAssignPreview .pa-swap");
+    return { cur, chosen, assignments: cfg.assignments, text, hasSwapBtn };
+  });
+  check("swap picks the unused spare proxy (ip3)", /ip3\.prov\.com/.test(swap.chosen), swap.chosen);
+  check("swap override persists into buildProxyConfig.assignments", swap.assignments && swap.assignments["Profile 1"] === swap.chosen);
+  check("swapped account shows the new IP + (swapped) tag", /ip3\.prov\.com/.test(swap.text) && /swapped/.test(swap.text), swap.text);
+  check("assignment rows render a ⟳ swap button", swap.hasSwapBtn);
+
   // 7) Outcome notifications: card present, buildNotifyConfig reflects toggles.
   const notify = await page.evaluate(() => {
     if (!document.getElementById("notifyEnabled")) return { present: false };

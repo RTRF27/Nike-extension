@@ -217,6 +217,12 @@ proxy via `chrome.proxy` — it only affects that profile. Configure in
   proxy, fetches its egress IP, confirms it **differs from your real IP**, then
   restores the profile's real assignment. Turning proxies **off** clears them on
   each profile's next boot.
+- **Live swap when a resi dies.** Residential IPs drop mid-session. Each row in
+  the assignment preview has a **⟳ Swap** button that moves that account onto the
+  next **unused** proxy in the list and **relaunches** the profile on the new IP
+  (add spare lines so there are fresh IPs to swap in). A **⟳ Rotate all** button
+  moves every account to a different IP at once — for when a whole batch/subnet
+  gets banned. Swaps are saved as per-account overrides so they persist.
 - This applies proxies you **rent** from a provider (IPRoyal, Smartproxy,
   Oxylabs…) — it doesn't create residential IPs. Use SG IPs for SNKRS SG. Proxies
   fix IP de-dupe; they don't by themselves defeat Akamai fingerprinting.

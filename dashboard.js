@@ -294,6 +294,7 @@ const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
+let proxyAssignments = {};     // {profileDir: "host:port:user:pass"} manual overrides (swap)
 let currentRunId  = null;      // ID of the most recently launched history entry
 let countdownTimer = null;
 
@@ -2811,15 +2812,96 @@ function buildProxyConfig() {
   const mode = ($("proxyMode") && $("proxyMode").value) || "list";
   const list = proxyLines();
   const gateway = (($("proxyGateway") && $("proxyGateway").value) || "").trim();
+  // Prune stale swap overrides: keep only overrides whose proxy is still in the
+  // current list (a proxy the user deleted can't stay assigned).
+  const inList = new Set(list);
+  const assignments = {};
+  for (const [dir, px] of Object.entries(proxyAssignments)) {
+    if (inList.has(px)) assignments[dir] = px;
+  }
+  proxyAssignments = assignments;
   return {
     enabled,
     mode,
     list,
     gateway,
+    assignments,
     // Flag so a launched profile knows to CLEAR its proxy when we turn this off
     // (rather than only ever setting one).
     hadProxy: enabled || list.length > 0 || !!gateway,
   };
+}
+
+// Deterministic DEFAULT proxy for an account — mirrors the background's sticky
+// mapping (accounts sorted by profileDir, round-robin over the list).
+function defaultProxyForDir(dir) {
+  const list = proxyLines();
+  if (!list.length) return "";
+  const dirs = (accounts || []).map(a => a && a.profileDir).filter(Boolean).sort();
+  let i = dirs.indexOf(dir);
+  if (i < 0) i = 0;
+  return list[i % list.length];
+}
+
+// The proxy an account is CURRENTLY on (a manual swap override wins).
+function currentProxyForDir(dir) {
+  if (proxyAssignments[dir]) return proxyAssignments[dir];
+  return defaultProxyForDir(dir);
+}
+
+// Pick the next proxy after `cur`, preferring one no other account is using so a
+// dead resi is actually REPLACED (not just rotated onto another in-use IP).
+function nextProxyAfter(cur, list, excludeDir) {
+  const used = new Set((accounts || [])
+    .map(a => a && a.profileDir).filter(d => d && d !== excludeDir)
+    .map(d => currentProxyForDir(d)));
+  const start = Math.max(0, list.indexOf(cur));
+  for (let step = 1; step <= list.length; step++) {
+    const cand = list[(start + step) % list.length];
+    if (cand === cur) continue;
+    if (!used.has(cand)) return cand;
+  }
+  // Every other proxy is already in use — still move off the (dead) current one.
+  return list[(start + 1) % list.length];
+}
+
+// Swap one account onto a fresh proxy and relaunch it there. Used drop-day when
+// a residential IP dies with the tab still open.
+async function swapProxyForAccount(dir) {
+  const list = proxyLines();
+  const msgEl = $("proxyTestMsg");
+  if (list.length < 2) { if (msgEl) flashTemp(msgEl, "Add more proxies to the list to have spares to swap in.", "var(--orange)", 5000); return; }
+  const acct = (accounts || []).find(a => a && a.profileDir === dir);
+  if (!acct) return;
+  const chosen = nextProxyAfter(currentProxyForDir(dir), list, dir);
+  proxyAssignments[dir] = chosen;
+  renderProxyAssignments();
+  // Persist the new assignment first so it sticks even if the profile isn't
+  // currently launch-valid; then boot the profile — its background re-applies
+  // the new proxy on boot (boot_fetch_settings).
+  await saveAll(true);
+  await launchAccount(acct, msgEl);
+  if (msgEl) flashTemp(msgEl, `⟳ ${escapeHtml(acct.label || dir)} → ${escapeHtml(maskProxy(chosen))} (relaunched on the new IP).`, "var(--green)", 7000);
+}
+
+// Rotate EVERY account onto its next proxy — for when a whole batch/subnet dies.
+async function rotateAllProxies() {
+  const list = proxyLines();
+  const msgEl = $("proxyTestMsg");
+  if (list.length < 2) { if (msgEl) flashTemp(msgEl, "Add more proxies to rotate between.", "var(--orange)", 5000); return; }
+  const withDir = (accounts || []).filter(a => a && a.profileDir);
+  if (!withDir.length) return;
+  if (!confirm(`Rotate all ${withDir.length} account(s) to a different IP and relaunch them?`)) return;
+  for (const a of withDir) {
+    const cur = currentProxyForDir(a.profileDir);
+    const idx = Math.max(0, list.indexOf(cur));
+    proxyAssignments[a.profileDir] = list[(idx + 1) % list.length];
+  }
+  renderProxyAssignments();
+  await saveAll(true);
+  let ok = 0;
+  for (const a of withDir) { await launchAccount(a, msgEl); ok++; }
+  if (msgEl) flashTemp(msgEl, `⟳ Rotated ${withDir.length} account(s) — relaunched on new IPs.`, "var(--green)", 7000);
 }
 
 function buildNotifyConfig() {
@@ -2879,12 +2961,18 @@ function renderProxyAssignments() {
     const list = proxyLines();
     if (!list.length) { el.innerHTML = '<span class="muted">Paste one proxy per line above.</span>'; return; }
     const sorted = withDir.slice().sort((a, b) => a.profileDir.localeCompare(b.profileDir));
-    rows = sorted.map((a, i) => {
-      const p = maskProxy(list[i % list.length]);
-      return `<div class="pa-row"><span>${escapeHtml(a.label || a.profileDir)}</span><span class="muted">→ ${escapeHtml(p)}</span></div>`;
+    const canSwap = list.length >= 2;
+    rows = sorted.map((a) => {
+      const cur = currentProxyForDir(a.profileDir);
+      const swapped = !!proxyAssignments[a.profileDir];
+      const swapBtn = canSwap
+        ? `<button class="pa-swap" data-dir="${escapeHtml(a.profileDir)}" title="Swap this account to a fresh IP and relaunch it">⟳</button>`
+        : "";
+      return `<div class="pa-row"><span>${escapeHtml(a.label || a.profileDir)}</span>` +
+             `<span class="muted">→ ${escapeHtml(maskProxy(cur))}${swapped ? ' <em>(swapped)</em>' : ''} ${swapBtn}</span></div>`;
     }).join("");
     if (withDir.length > list.length) {
-      rows += `<div class="pa-row muted" style="margin-top:4px;">⚠ ${withDir.length} accounts share ${list.length} proxies — some reuse the same IP.</div>`;
+      rows += `<div class="pa-row muted" style="margin-top:4px;">⚠ ${withDir.length} accounts share ${list.length} proxies — some reuse the same IP. Add spare lines so ⟳ Swap has fresh IPs.</div>`;
     }
   }
   el.innerHTML = rows;
@@ -3477,6 +3565,7 @@ function applyConfigToUI(cfg) {
   if ($("proxyMode")) $("proxyMode").value = px.mode === "gateway" ? "gateway" : "list";
   if ($("proxyList")) $("proxyList").value = Array.isArray(px.list) ? px.list.join("\n") : "";
   if ($("proxyGateway")) $("proxyGateway").value = px.gateway || "";
+  proxyAssignments = (px.assignments && typeof px.assignments === "object") ? { ...px.assignments } : {};
   if (typeof syncProxyModeUI === "function") syncProxyModeUI();
   if (typeof renderProxyAssignments === "function") renderProxyAssignments();
 
@@ -3898,6 +3987,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("proxyMode")) $("proxyMode").addEventListener("change", () => { syncProxyModeUI(); renderProxyAssignments(); });
   if ($("proxyList")) $("proxyList").addEventListener("input", renderProxyAssignments);
   if ($("proxyGateway")) $("proxyGateway").addEventListener("input", renderProxyAssignments);
+  // Per-account ⟳ swap (delegated — the preview re-renders on every change).
+  if ($("proxyAssignPreview")) {
+    $("proxyAssignPreview").addEventListener("click", (e) => {
+      const btn = e.target.closest(".pa-swap");
+      if (btn && btn.dataset.dir) swapProxyForAccount(btn.dataset.dir);
+    });
+  }
+  if ($("rotateProxiesBtn")) $("rotateProxiesBtn").addEventListener("click", rotateAllProxies);
   if ($("saveProxyBtn")) {
     $("saveProxyBtn").addEventListener("click", async () => {
       const msgEl = $("proxyTestMsg");
