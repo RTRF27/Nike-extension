@@ -51,65 +51,83 @@
     // then falls back to scraping the rendered settings page. All best-effort:
     // anything it can't read is simply left blank and the account's region can
     // be set manually in the dashboard.
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+    // Deep-scan an arbitrary JSON object for the first value whose KEY matches
+    // keyRe and whose value looks right (valPred).
+    const deepFind = (obj, keyRe, valPred, depth = 0) => {
+      if (!obj || typeof obj !== "object" || depth > 6) return "";
+      for (const k of Object.keys(obj)) {
+        const v = obj[k];
+        if (keyRe.test(k) && (typeof v === "string" || typeof v === "number")) {
+          const sv = String(v).trim();
+          if (sv && (!valPred || valPred(sv))) return sv;
+        }
+      }
+      for (const k of Object.keys(obj)) {
+        const v = obj[k];
+        if (v && typeof v === "object") { const r = deepFind(v, keyRe, valPred, depth + 1); if (r) return r; }
+      }
+      return "";
+    };
+
+    // One pass at Nike's identity API (from the PAGE context, where the session
+    // cookies + anti-bot tokens are valid — the background's cookieless call
+    // just 403s). The API answer doesn't change, so this is tried once.
+    async function readProfileApi(accessToken, out) {
+      if (!accessToken) return;
+      const endpoints = [
+        "https://api.nike.com/identity/user/v3/me",
+        "https://api.nike.com/identity/user/v1/users/me",
+      ];
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url, {
+            headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+            credentials: "include", cache: "no-store",
+          });
+          if (!res.ok) continue;
+          const body = await res.json();
+          out.profileFetched = true;
+          out.phone = out.phone || deepFind(body, /phone/i, s => /\d{6,}/.test(s));
+          out.country = out.country || deepFind(body, /^country$|countrycode|region/i, s => s.length <= 24);
+          out.addressLine1 = out.addressLine1 || deepFind(body, /addressline1|address1|^line1$/i);
+          if (out.phone && out.addressLine1) return;
+        } catch (e) { /* try next endpoint */ }
+      }
+    }
+
+    // One DOM scrape of the settings page (phone + country render as plain text).
+    function readProfileDom(out) {
+      try {
+        const bodyText = document.body ? document.body.innerText || "" : "";
+        if (!out.phone) {
+          const m = bodyText.match(/phone\s*number[^\d+]*([+\d][\d\s\-()]{6,})/i)
+                 || bodyText.match(/(\+?\d[\d\s\-()]{7,}\d)/);
+          if (m) out.phone = m[1].trim();
+        }
+        if (!out.country) {
+          const cm = bodyText.match(/country\/?region[^A-Za-z]*([A-Za-z ]{3,24})/i);
+          if (cm) out.country = cm[1].trim();
+        }
+      } catch (e) {}
+    }
+
+    // The settings page is a slow React app — when many profiles open at once it
+    // often hasn't rendered the phone before we read. So POLL: try the API once,
+    // then re-scrape the DOM every ~700ms for up to ~16s until the phone appears.
+    // This is why a preflight tab can take a few seconds before it closes.
     async function readProfile(accessToken) {
       const out = { phone: "", country: "", addressLine1: "", profileFetched: false };
-
-      // Deep-scan an arbitrary JSON object for the first value whose KEY matches
-      // keyRe and whose value looks right (valPred).
-      const deepFind = (obj, keyRe, valPred, depth = 0) => {
-        if (!obj || typeof obj !== "object" || depth > 6) return "";
-        for (const k of Object.keys(obj)) {
-          const v = obj[k];
-          if (keyRe.test(k) && (typeof v === "string" || typeof v === "number")) {
-            const sv = String(v).trim();
-            if (sv && (!valPred || valPred(sv))) return sv;
-          }
-        }
-        for (const k of Object.keys(obj)) {
-          const v = obj[k];
-          if (v && typeof v === "object") { const r = deepFind(v, keyRe, valPred, depth + 1); if (r) return r; }
-        }
-        return "";
-      };
-
-      if (accessToken) {
-        const endpoints = [
-          "https://api.nike.com/identity/user/v3/me",
-          "https://api.nike.com/identity/user/v1/users/me",
-        ];
-        for (const url of endpoints) {
-          try {
-            const res = await fetch(url, {
-              headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-              credentials: "include", cache: "no-store",
-            });
-            if (!res.ok) continue;
-            const body = await res.json();
-            out.profileFetched = true;
-            out.phone = out.phone || deepFind(body, /phone/i, s => /\d{6,}/.test(s));
-            out.country = out.country || deepFind(body, /^country$|countrycode|region/i, s => s.length <= 24);
-            out.addressLine1 = out.addressLine1 || deepFind(body, /addressline1|address1|^line1$/i);
-            if (out.phone && out.addressLine1) break;
-          } catch (e) { /* try next endpoint */ }
-        }
+      await readProfileApi(accessToken, out);
+      const deadline = Date.now() + 16000;
+      while (!out.phone && Date.now() < deadline) {
+        readProfileDom(out);
+        if (out.phone) break;
+        await sleep(700);
       }
-
-      // DOM fallback (settings page renders phone + country in plain text).
-      if (!out.phone || !out.country) {
-        try {
-          const bodyText = document.body ? document.body.innerText || "" : "";
-          if (!out.phone) {
-            // Look near a "Phone Number" label, else any phone-shaped run.
-            const m = bodyText.match(/phone\s*number[^\d+]*([+\d][\d\s\-()]{6,})/i)
-                   || bodyText.match(/(\+?\d[\d\s\-()]{7,}\d)/);
-            if (m) out.phone = m[1].trim();
-          }
-          if (!out.country) {
-            const cm = bodyText.match(/country\/?region[^A-Za-z]*([A-Za-z ]{3,24})/i);
-            if (cm) out.country = cm[1].trim();
-          }
-        } catch (e) {}
-      }
+      // One last DOM pass for country even if the phone came from the API.
+      if (!out.country) readProfileDom(out);
       return out;
     }
 
@@ -160,9 +178,10 @@
       }, () => { chrome.runtime.lastError; });
     };
 
-    // Let the SPA hydrate (the nav/Sign-In button + settings fields render late).
-    if (document.readyState === "complete") setTimeout(collectAndSend, 4000);
-    else window.addEventListener("load", () => setTimeout(collectAndSend, 4000));
+    // Start soon — readProfile() polls the DOM for up to ~16s itself, so we no
+    // longer need a big fixed delay to wait for the SPA to hydrate.
+    if (document.readyState === "complete") setTimeout(collectAndSend, 1200);
+    else window.addEventListener("load", () => setTimeout(collectAndSend, 1200));
     return; // a preflight tab never boots the drop config
   }
 
