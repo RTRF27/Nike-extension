@@ -305,7 +305,7 @@ let timelinePollTimer = null;
 const WARM_KEY = "snkrsWarmTimes";
 let warmTimes = {};            // {profileDir: epochMs of last warm-up we opened}
 
-const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/profile"; // logged-in-only page — good login signal
+const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/settings"; // logged-in-only page; renders phone + country for region detection
 let preflightResults = {};     // {profileDir: {ts,version,checks:{...}}}
 let profileVersions = {};      // {profileDir: {version,ts}}
 let latestVersion = "";        // repo manifest version reported by the host
@@ -694,11 +694,13 @@ function cmpVer(a, b) {
   return 0;
 }
 
-// The seven checks shown per profile, in display order.
+// The checks shown per profile, in display order. "region" (SG/MY from the
+// account's phone) and "address" (printed, informational) sit together.
 const PF_CHECK_DEFS = [
   { key: "version", label: "Version" },
   { key: "host",    label: "Host" },
   { key: "login",   label: "Nike login" },
+  { key: "region",  label: "Region" },
   { key: "address", label: "Address" },
   { key: "card",    label: "Card" },
   { key: "cookies", label: "Cookies" },
@@ -722,11 +724,15 @@ function localChecksFor(acct) {
   return checks;
 }
 
+// Informational rows — shown for reference, never affect the pass/fail verdict.
+const PF_INFO_KEYS = new Set(["region", "address"]);
+
 // Reduce one profile's per-check map to a card verdict: red (any hard fail),
 // amber (any unknown/warning), green (all good), or pending.
 function preflightVerdict(checks) {
   let anyBad = false, anyWarn = false, seen = 0;
   for (const def of PF_CHECK_DEFS) {
+    if (PF_INFO_KEYS.has(def.key)) continue; // region/address are informational
     const c = checks[def.key];
     if (!c) continue;
     seen++;
@@ -753,6 +759,35 @@ function mergedChecksFor(acct) {
     merged.cookies = { ...merged.cookies, detail: `${merged.cookies.detail} · warmed ${ago}` };
   }
   return merged;
+}
+
+// The region an account counts as: a manual override (SG/MY) wins, otherwise
+// the region auto-detected from its phone during Preflight.
+function effectiveRegionFor(acct) {
+  const ov = acct && acct.regionOverride;
+  if (ov === "SG" || ov === "MY") return ov;
+  const rec = preflightResults[acct.profileDir];
+  return (rec && rec.region) || "";
+}
+
+// Arm ONLY the accounts of one region (SG or MY) and unarm the rest — so a
+// Singapore drop opens just the SG accounts, a Malaysia drop just the MY ones.
+async function armRegionOnly(region) {
+  const withDir = accounts.filter(a => a.profileDir);
+  const matched = withDir.filter(a => effectiveRegionFor(a) === region);
+  const msgEl = $("preflightRegionMsg") || $("statusMsg");
+  if (!matched.length) {
+    flashTemp(msgEl,
+      `No ${region} accounts detected yet — run Preflight, or set Region manually on the Profiles page.`, "var(--orange)", 6000);
+    return;
+  }
+  accounts.forEach(a => { a.autoLaunch = !!a.profileDir && effectiveRegionFor(a) === region; });
+  renderAccounts();
+  renderPreflight();
+  await saveAll(true);
+  flashTemp($("preflightRegionMsg") || $("statusMsg"),
+    `⏰ Armed ${matched.length} ${region} account(s); unarmed the rest. Ready for the ${region === "SG" ? "Singapore" : "Malaysia"} drop.`,
+    "var(--green)", 6000);
 }
 
 // ── Warm-up: open the SNKRS feed (no boot marker → bot idle) so each profile's
@@ -865,6 +900,13 @@ function renderPreflight() {
     const card = el("div", { className: `pf-card ${verdict}` });
     const head = el("div", { className: "pf-card-head" });
     head.appendChild(el("span", { className: "pf-card-name" }, acct.label || acct.profileDir));
+    // Region tag (SG/MY/?) — manual override or phone-detected.
+    const reg = effectiveRegionFor(acct);
+    const overridden = acct.regionOverride === "SG" || acct.regionOverride === "MY";
+    const regCls = reg === "SG" ? "sg" : reg === "MY" ? "my" : "unknown";
+    head.appendChild(el("span", { className: `pf-region ${regCls}`,
+      title: overridden ? "Region set manually" : "Region detected from phone number" },
+      (reg === "SG" ? "🇸🇬 SG" : reg === "MY" ? "🇲🇾 MY" : "? REGION") + (overridden ? " ·set" : "")));
     const verdictText = pendingRun ? "CHECKING…"
       : timedOut ? "NO RESPONSE"
       : verdict === "green" ? "READY"
@@ -914,11 +956,32 @@ function renderPreflight() {
   if (summary) {
     const chip = (n, label, color) =>
       `<div class="pf-chip" style="color:${color}"><span class="n">${n}</span><span>${label}</span></div>`;
+    const rc = { SG: 0, MY: 0, unknown: 0 };
+    for (const acct of withProfile) { const r = effectiveRegionFor(acct); rc[r === "SG" ? "SG" : r === "MY" ? "MY" : "unknown"]++; }
     summary.innerHTML =
       chip(counts.green, "READY", "var(--green)") +
       chip(counts.amber, "REVIEW", "var(--orange)") +
       chip(counts.red, "BLOCKED", "var(--red)") +
-      (counts.pending ? chip(counts.pending, "CHECKING", "var(--purple2)") : "");
+      (counts.pending ? chip(counts.pending, "CHECKING", "var(--purple2)") : "") +
+      `<div class="pf-chip-sep"></div>` +
+      chip(rc.SG, "🇸🇬 SG", "var(--green)") +
+      chip(rc.MY, "🇲🇾 MY", "var(--purple2)") +
+      (rc.unknown ? chip(rc.unknown, "? REGION", "#8a8a9e") : "");
+  }
+
+  // Arm-by-region toolbar (SG-only / MY-only) so a Singapore or Malaysia drop
+  // opens just the matching accounts.
+  const bar = $("preflightRegionBar");
+  if (bar) {
+    const rc = { SG: 0, MY: 0 };
+    for (const acct of withProfile) { const r = effectiveRegionFor(acct); if (r === "SG") rc.SG++; else if (r === "MY") rc.MY++; }
+    bar.innerHTML =
+      `<span class="pf-bar-lbl">Arm for a drop:</span>` +
+      `<button id="armSGBtn" class="btn btn-mini btn-dark">⏰ ARM SG ONLY (${rc.SG})</button>` +
+      `<button id="armMYBtn" class="btn btn-mini btn-dark">⏰ ARM MY ONLY (${rc.MY})</button>` +
+      `<span id="preflightMsg" class="status-msg" style="margin:0 0 0 10px; text-align:left; display:inline-block;"></span>`;
+    const sg = $("armSGBtn"); if (sg) sg.addEventListener("click", () => armRegionOnly("SG"));
+    const my = $("armMYBtn"); if (my) my.addEventListener("click", () => armRegionOnly("MY"));
   }
 }
 
@@ -2667,6 +2730,7 @@ function buildAccountRow(acct) {
   const manualEl    = row.querySelector(".f-profile-manual");
   const sizeEl      = row.querySelector(".f-size");
   const autoEl      = row.querySelector(".f-autolaunch");
+  const regionEl    = row.querySelector(".f-region");
   const cardSel     = row.querySelector(".f-card-select");
   const msgEl       = row.querySelector(".acct-msg");
   const assignedEl  = row.querySelector(".f-assigned");
@@ -2677,6 +2741,7 @@ function buildAccountRow(acct) {
 
   labelEl.value = acct.label || "";
   autoEl.checked = !!acct.autoLaunch;
+  if (regionEl) regionEl.value = (acct.regionOverride === "SG" || acct.regionOverride === "MY") ? acct.regionOverride : "auto";
   fillSizeSelect(sizeEl, acct.size, acct.sizeType);
   fillProfileSelect(profileEl, manualEl, acct.profileDir);
 
@@ -2709,6 +2774,11 @@ function buildAccountRow(acct) {
 
   // ── Wire field → state ──
   labelEl.addEventListener("input", () => { acct.label = labelEl.value.trim(); });
+  if (regionEl) regionEl.addEventListener("change", () => {
+    acct.regionOverride = regionEl.value === "auto" ? "" : regionEl.value;
+    saveAll(true);
+    if (isVisible("preflight")) renderPreflight();
+  });
   sizeEl.addEventListener("change", () => {
     const { size, sizeType } = parseSizeValue(sizeEl.value);
     acct.size = size; acct.sizeType = sizeType;
@@ -3037,6 +3107,7 @@ function buildConfig() {
         checkoutUrl: t.checkoutUrl || "", dropAtMs: t.dropAtMs || 0,
       })) : [],
       autoLaunch: !!a.autoLaunch,
+      regionOverride: a.regionOverride || "",   // "" = auto (detect from phone)
       cardId: a.cardId || "",
       card: resolveCard(a.cardId),   // resolved card object the bot fills
     })),
@@ -3605,6 +3676,7 @@ function applyConfigToUI(cfg) {
     dropAtMs: a.dropAtMs || 0,
     targets: Array.isArray(a.targets) ? a.targets.map(t => ({ ...t })) : [],
     autoLaunch: !!a.autoLaunch,
+    regionOverride: a.regionOverride || "",
     cardId: a.cardId || "",
   }));
 }

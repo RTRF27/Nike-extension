@@ -45,7 +45,75 @@
   if (preflightProfile) {
     const keepOpen = !!getMarker("snkrsKeep");
 
-    const collectAndSend = () => {
+    // Pull phone / country / address from Nike — from the PAGE context, where
+    // the session cookies + anti-bot tokens are valid (the background's
+    // cookieless call to the same API just 403s). Tries the identity API first,
+    // then falls back to scraping the rendered settings page. All best-effort:
+    // anything it can't read is simply left blank and the account's region can
+    // be set manually in the dashboard.
+    async function readProfile(accessToken) {
+      const out = { phone: "", country: "", addressLine1: "", profileFetched: false };
+
+      // Deep-scan an arbitrary JSON object for the first value whose KEY matches
+      // keyRe and whose value looks right (valPred).
+      const deepFind = (obj, keyRe, valPred, depth = 0) => {
+        if (!obj || typeof obj !== "object" || depth > 6) return "";
+        for (const k of Object.keys(obj)) {
+          const v = obj[k];
+          if (keyRe.test(k) && (typeof v === "string" || typeof v === "number")) {
+            const sv = String(v).trim();
+            if (sv && (!valPred || valPred(sv))) return sv;
+          }
+        }
+        for (const k of Object.keys(obj)) {
+          const v = obj[k];
+          if (v && typeof v === "object") { const r = deepFind(v, keyRe, valPred, depth + 1); if (r) return r; }
+        }
+        return "";
+      };
+
+      if (accessToken) {
+        const endpoints = [
+          "https://api.nike.com/identity/user/v3/me",
+          "https://api.nike.com/identity/user/v1/users/me",
+        ];
+        for (const url of endpoints) {
+          try {
+            const res = await fetch(url, {
+              headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
+              credentials: "include", cache: "no-store",
+            });
+            if (!res.ok) continue;
+            const body = await res.json();
+            out.profileFetched = true;
+            out.phone = out.phone || deepFind(body, /phone/i, s => /\d{6,}/.test(s));
+            out.country = out.country || deepFind(body, /^country$|countrycode|region/i, s => s.length <= 24);
+            out.addressLine1 = out.addressLine1 || deepFind(body, /addressline1|address1|^line1$/i);
+            if (out.phone && out.addressLine1) break;
+          } catch (e) { /* try next endpoint */ }
+        }
+      }
+
+      // DOM fallback (settings page renders phone + country in plain text).
+      if (!out.phone || !out.country) {
+        try {
+          const bodyText = document.body ? document.body.innerText || "" : "";
+          if (!out.phone) {
+            // Look near a "Phone Number" label, else any phone-shaped run.
+            const m = bodyText.match(/phone\s*number[^\d+]*([+\d][\d\s\-()]{6,})/i)
+                   || bodyText.match(/(\+?\d[\d\s\-()]{7,}\d)/);
+            if (m) out.phone = m[1].trim();
+          }
+          if (!out.country) {
+            const cm = bodyText.match(/country\/?region[^A-Za-z]*([A-Za-z ]{3,24})/i);
+            if (cm) out.country = cm[1].trim();
+          }
+        } catch (e) {}
+      }
+      return out;
+    }
+
+    const collectAndSend = async () => {
       const login = { hasToken: false, tokenFresh: false, signInVisible: false, accountMenu: false };
       let accessToken = "";
       try {
@@ -81,16 +149,18 @@
           '[data-testid*="avatar" i], [aria-label*="account" i], img[alt*="avatar" i]');
       } catch (e) {}
 
+      const profile = await readProfile(accessToken);
+
       chrome.runtime.sendMessage({
         type: "preflight_page_checks",
         profileDir: preflightProfile,
-        page: { login },
+        page: { login, profile },
         accessToken,
         keepOpen,
       }, () => { chrome.runtime.lastError; });
     };
 
-    // Let the SPA hydrate (the nav/Sign-In button renders late).
+    // Let the SPA hydrate (the nav/Sign-In button + settings fields render late).
     if (document.readyState === "complete") setTimeout(collectAndSend, 4000);
     else window.addEventListener("load", () => setTimeout(collectAndSend, 4000));
     return; // a preflight tab never boots the drop config

@@ -1040,13 +1040,31 @@ select.inp { cursor: pointer; }
 .version-banner .vb-pill.good  { border-color: rgba(52,211,153,.45); color: var(--green); }
 .version-banner .vb-spacer { flex: 1 1 auto; }
 
-.pf-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 16px; }
+.pf-summary { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 16px; align-items: center; }
 .pf-chip {
   display: flex; align-items: center; gap: 7px; padding: 7px 13px;
   border-radius: 20px; border: 1px solid var(--line); background: var(--panel2);
   font-size: 12px; font-weight: 700; letter-spacing: .4px;
 }
 .pf-chip .n { font-size: 15px; font-weight: 800; }
+.pf-chip-sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+
+/* Region tag on each preflight card + arm-by-region toolbar */
+.pf-region {
+  font-size: 10.5px; font-weight: 800; letter-spacing: .5px; padding: 3px 8px; border-radius: 6px;
+  border: 1px solid var(--line); white-space: nowrap;
+}
+.pf-region.sg { color: var(--green);  background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.3); }
+.pf-region.my { color: var(--purple2); background: rgba(139,92,246,.14); border-color: rgba(139,92,246,.32); }
+.pf-region.unknown { color: #9a9ab0; background: rgba(255,255,255,.04); }
+.pf-region-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--radius);
+  background: rgba(139,92,246,.05);
+}
+.pf-bar-lbl { font-size: 12px; font-weight: 700; letter-spacing: .4px; color: var(--white); }
+.f-region-label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+.f-region { background: var(--panel2); color: var(--white); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
 
 .pf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
 .pf-card {

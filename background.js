@@ -2,6 +2,10 @@
 // Nike SNKRS Bot – Background Service Worker
 // ============================================================
 
+// Region (SG/MY) classifier — shared pure module, also used by Node tests.
+try { importScripts("region-util.js"); } catch (e) { /* loaded elsewhere / tests */ }
+const classifyRegion = (self.RegionUtil && self.RegionUtil.classifyRegionFromPhone) || (() => "");
+
 const SETTINGS_KEY = "snkrsBotSettings";
 const DROP_ALARM_NAME = "snkrsDropAlarm";
 const SELF_PROFILE_KEY = "snkrsSelfProfileDir";
@@ -903,39 +907,6 @@ function cmpVer(a, b) {
 // then write the whole result to the shared preflight folder and close the
 // tab. The dashboard aggregates the folder into the red/green checklist.
 
-// Best-effort: ask Nike who this token belongs to, and whether the account
-// has address data. 200 = definitely logged in. Anything else = "unknown",
-// never "failed" — the page signals still decide login.
-async function preflightIdentityCheck(accessToken) {
-  const out = { tokenAccepted: null, addressOk: null, detail: "" };
-  if (!accessToken) { out.detail = "no session token on page"; return out; }
-  try {
-    const res = await fetch("https://api.nike.com/identity/user/v1/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-      cache: "no-store",
-    });
-    if (res.status === 401 || res.status === 403) {
-      out.tokenAccepted = false;
-      out.detail = `token rejected (HTTP ${res.status})`;
-      return out;
-    }
-    if (!res.ok) { out.detail = `identity HTTP ${res.status}`; return out; }
-    out.tokenAccepted = true;
-    const body = await res.json();
-    // Look for anything address-shaped in the profile payload.
-    const json = JSON.stringify(body).toLowerCase();
-    if (/"(shippingaddress|addressline1|address1|postalcode|postcode)"/.test(json)) {
-      out.addressOk = true;
-      out.detail = "identity OK · address data present";
-    } else {
-      out.detail = "identity OK · no address in profile payload";
-    }
-  } catch (e) {
-    out.detail = "identity call failed: " + String(e && e.message || e);
-  }
-  return out;
-}
-
 async function runPreflight(profileDir, page, accessToken) {
   await rememberSelfProfileDir(profileDir);
 
@@ -968,12 +939,13 @@ async function runPreflight(profileDir, page, accessToken) {
     entry.checks.cookies = { ok: null, detail: "cookies API unavailable" };
   }
 
-  // 4) Login + delivery address: page signals + authenticated identity call.
-  const idc = await preflightIdentityCheck(accessToken);
+  // 4) Login: page signals only. (We used to also hit Nike's identity API from
+  //    here for the delivery address, but Akamai 403s that cookieless
+  //    background call for every account — so it was pure noise. Login is judged
+  //    from the page's own token/DOM signals, which are what actually work.)
   const pageLogin = page && page.login || {};
   let loginOk;
-  if (idc.tokenAccepted === true) loginOk = true;
-  else if (pageLogin.hasToken && pageLogin.tokenFresh) loginOk = true;
+  if (pageLogin.hasToken && pageLogin.tokenFresh) loginOk = true;
   else if (pageLogin.signInVisible && !pageLogin.hasToken) loginOk = false;
   else if (pageLogin.accountMenu) loginOk = true;
   else loginOk = pageLogin.hasToken ? null : false;
@@ -982,10 +954,29 @@ async function runPreflight(profileDir, page, accessToken) {
     detail: [
       pageLogin.hasToken ? (pageLogin.tokenFresh ? "session token valid" : "session token EXPIRED") : "no session token",
       pageLogin.signInVisible ? "Sign-In button visible" : "",
-      idc.tokenAccepted === true ? "API accepted token" : (idc.tokenAccepted === false ? "API rejected token" : ""),
     ].filter(Boolean).join(" · "),
   };
-  entry.checks.address = { ok: idc.addressOk, detail: idc.detail };
+
+  // 5) Profile info the PAGE read for us (phone / country / address line 1).
+  //    Phone drives region classification (SG vs MY); address is informational
+  //    (printed, never a pass/fail — it can't be reliably read for every acct).
+  const prof = (page && page.profile) || {};
+  const phone = (prof.phone || "").trim();
+  const region = classifyRegion(phone) || (/(singapore|^sg$)/i.test(prof.country || "") ? "SG" : /(malaysia|^my$)/i.test(prof.country || "") ? "MY" : "");
+  entry.phone = phone;
+  entry.country = prof.country || "";
+  entry.region = region;
+  entry.addressLine1 = prof.addressLine1 || "";
+  entry.checks.region = {
+    ok: region ? true : null,
+    detail: region
+      ? `${region === "SG" ? "🇸🇬 Singapore" : "🇲🇾 Malaysia"}${phone ? " · " + phone : ""}`
+      : (phone ? `unclassified · ${phone}` : "phone not read — set region manually"),
+  };
+  entry.checks.address = {
+    ok: prof.addressLine1 ? true : null,          // informational — never red
+    detail: prof.addressLine1 || (prof.profileFetched ? "no address on file" : "not read"),
+  };
 
   await nativeSend({ cmd: "setPreflight", profileDir, entry });
   return entry;

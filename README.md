@@ -196,6 +196,27 @@ the same steps in short:
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
 
+## Region tagging (SG vs MY) + address readout (v4.10)
+
+Nike runs **SNKRS SG** and **SNKRS MY** as separate storefronts, and which one an
+account should enter is best told by its **phone number**. Preflight now reads
+each account's phone (and address) from Nike **in the page context** — where the
+session cookies are valid — instead of the background's cookieless API call,
+which Akamai 403s for every account (that 403 was the old "Address" amber noise).
+
+- **Region auto-detect.** `region-util.js` classifies the phone: Singapore =
+  8 digits starting 8/9 (or `+65`), Malaysia = leading `0`, 9–11 digits
+  (e.g. `011-2109 9805`) or `+60`. Each Preflight card shows a **🇸🇬 SG / 🇲🇾 MY /
+  ? REGION** tag, and the summary tallies how many of each.
+- **Address is now printed, not graded.** The Address row shows delivery
+  address line 1 for reference and never turns the card red/amber.
+- **Manual override.** Each account row has a **🌏 Region** selector
+  (Auto / SG / MY) for anything the phone can't classify; the override wins.
+- **Arm by region.** **⏰ ARM SG ONLY** / **⏰ ARM MY ONLY** arm just the matching
+  accounts and unarm the rest, so a Singapore drop opens your SG accounts and a
+  Malaysia drop your MY accounts. Covered by `test-harness/region-test.mjs`
+  (15 assertions) + the dashboard smoke test.
+
 ## Proxies & outcome notifications (v4.9)
 
 **Per-account proxies.** Nike de-dupes raffle entries by egress IP, so running

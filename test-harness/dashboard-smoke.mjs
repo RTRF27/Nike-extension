@@ -233,6 +233,30 @@ async function main() {
     notify.cfg.events.win === true && notify.cfg.events.success === true &&
     notify.cfg.events.submitting === false);
 
+  // 8) Region tagging: preflight has region row + arm-by-region bar; the
+  //    manual override wins over any detected region.
+  await page.click('.side-item[data-nav="setup"]');
+  await page.waitForTimeout(120);
+  await page.click('#subNav .subtab:nth-child(4)'); // Preflight
+  await page.waitForTimeout(150);
+  const region = await page.evaluate(() => {
+    const hasBar = !!document.getElementById("preflightRegionBar");
+    const hasRegionDef = typeof PF_CHECK_DEFS !== "undefined" && PF_CHECK_DEFS.some(d => d.key === "region");
+    const hasTpl = !!document.querySelector("#accountRowTpl");
+    const tplHasRegion = hasTpl && !!document.getElementById("accountRowTpl").content.querySelector(".f-region");
+    // Override beats detection: an SG override with no preflight data → "SG".
+    accounts = [{ id: "r1", label: "Ov", profileDir: "Profile 9", regionOverride: "SG" }];
+    const eff = effectiveRegionFor(accounts[0]);
+    // Region is informational — an unknown region must NOT flip the verdict red.
+    const verdictInfoSafe = preflightVerdict({ version: { ok: true }, host: { ok: true }, login: { ok: true }, region: { ok: null }, address: { ok: null }, card: { ok: true }, cookies: { ok: true }, target: { ok: true } }) === "green";
+    return { hasBar, hasRegionDef, tplHasRegion, eff, verdictInfoSafe };
+  });
+  check("preflight has arm-by-region bar", region.hasBar);
+  check("preflight defs include a Region row", region.hasRegionDef);
+  check("account row template has a region selector", region.tplHasRegion);
+  check("manual region override wins (SG)", region.eff === "SG", region.eff);
+  check("region/address are informational (don't fail verdict)", region.verdictInfoSafe);
+
   check("no errors after full navigation", errors.length === 0, errors.slice(0, 3).join(" | "));
 
   await browser.close();

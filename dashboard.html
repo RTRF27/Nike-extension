@@ -347,6 +347,7 @@
       </p>
 
       <div id="preflightSummary" class="pf-summary"></div>
+      <div id="preflightRegionBar" class="pf-region-bar"></div>
       <div id="preflightGrid" class="pf-grid"></div>
       <div id="preflightEmpty" class="live-empty">
         No preflight run yet. Click <strong>RUN PREFLIGHT</strong> to check every profile.
@@ -767,6 +768,14 @@
         <div class="acct-toggles">
           <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
             <input type="checkbox" class="f-autolaunch"> ⏰ auto
+          </label>
+          <label class="chk f-region-label" title="Region for SG/MY drops. Auto = detected from the account's phone number during Preflight.">
+            🌏
+            <select class="f-region">
+              <option value="auto">Auto</option>
+              <option value="SG">🇸🇬 SG</option>
+              <option value="MY">🇲🇾 MY</option>
+            </select>
           </label>
         </div>
         <div class="acct-actions">
