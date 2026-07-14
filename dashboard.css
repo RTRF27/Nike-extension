@@ -513,6 +513,26 @@ select.inp { cursor: pointer; }
   font-size: 13px; color: var(--green);
 }
 
+/* ── Drop mode (DAN raffle / LEO FCFS) selector ── */
+.dropmode {
+  border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;
+  background: rgba(139,92,246,.05);
+}
+.dropmode-label { font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted, #9a9ab0); margin-bottom: 8px; }
+.dropmode-opts { display: flex; gap: 8px; flex-wrap: wrap; }
+.dropmode-opt { flex: 1; min-width: 150px; cursor: pointer; }
+.dropmode-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.dropmode-pill {
+  display: block; text-align: center; padding: 9px 10px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel2); font-size: 12.5px;
+  transition: border-color .15s, background .15s, box-shadow .15s;
+}
+.dropmode-opt input:checked + .dropmode-pill {
+  border-color: var(--purple); background: rgba(139,92,246,.16);
+  box-shadow: 0 0 0 1px var(--purple) inset;
+}
+.dropmode-opt:hover .dropmode-pill { border-color: var(--purple-dim); }
+
 /* ── Proxy assignment preview + notification checkboxes ── */
 .assign-preview {
   background: rgba(16, 13, 29, .55); border: 1px solid var(--line);

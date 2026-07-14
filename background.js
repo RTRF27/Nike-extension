@@ -1043,7 +1043,8 @@ function buildSettingsForProfile(config, profileDir) {
   return {
     enabled:             opts.enabled ?? true,
     testMode:            opts.testMode ?? false,
-    leoMode:             opts.leoMode ?? false,   // ⚡ FCFS speed checkout
+    leoMode:             opts.leoMode ?? false,   // ⚡ LEO = FCFS speed checkout
+    danJitterSec:        opts.danJitterSec ?? 0,  // DAN raffle human submit delay
     preferredSize:       account.size || "",
     preferredSizeType:   account.sizeType || "footwear",
     productKeyword:      keyword,

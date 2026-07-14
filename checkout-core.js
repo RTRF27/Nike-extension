@@ -339,6 +339,8 @@
       // with millisecond precision at the drop time. Default OFF → the raffle
       // path below is completely unchanged.
       this.leo = !!(this.d.isLeoMode && this.d.isLeoMode());
+      // DAN raffle: max random human delay (ms) added before SUBMIT. 0 = off.
+      this.jitterMs = this.leo ? 0 : Math.max(0, (this.d.getSubmitJitterMs && this.d.getSubmitJitterMs()) || 0);
     }
     // A wait that collapses to a short one in LEO mode (fast) but keeps the
     // original duration for the normal raffle flow.
@@ -577,6 +579,27 @@
             }
           }
           this._log(`🟢${tag} [3/3] DROP TIME — submitting now!`);
+        }
+      }
+
+      // ── DAN raffle human delay ────────────────────────────────
+      // A raffle isn't won on speed and stays open for ~20 min, so submitting
+      // the instant the clock ticks over (and from every account at the exact
+      // same millisecond) is an unnecessary bot tell. In DAN mode we wait a
+      // small RANDOM amount before clicking to look human and spread the load.
+      // LEO ignores this entirely (it submits on the dot). PANIC still bails.
+      if (!this.leo && this.jitterMs > 0) {
+        const j = randInt(0, this.jitterMs);
+        if (j > 0) {
+          this._log(`🎲${tag} [3/3] DAN raffle — human delay ~${(j / 1000).toFixed(1)}s before submit…`);
+          const end = Date.now() + j;
+          while (Date.now() < end) {
+            if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised during human delay. SUBMIT cancelled.`);
+              return this._abort();
+            }
+            await wait(Math.min(500, end - Date.now()));
+          }
         }
       }
 

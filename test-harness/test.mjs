@@ -252,6 +252,32 @@ async function main() {
       late.totalMs <= normal.totalMs + 500, `${late.totalMs}ms`);
   }
 
+  // ── 4c. DAN raffle human delay: submit lands AFTER the drop, within window ─
+  console.log("[machine] DAN raffle adds a bounded human delay before submit");
+  {
+    const page = await openFixture(context, fixture("saved-card.html"));
+    const out = await page.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const dropAt = Date.now(); // drop is now → only the jitter delays submit
+      let firstSubmit = 0;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: (e) => { if (e.code === "submitted" && !firstSubmit) firstSubmit = Date.now(); },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false,
+        isLeoMode: () => false, getSubmitJitterMs: () => 3000, getDropAt: () => dropAt,
+      });
+      const r = await machine.run();
+      return { submitted: r.submitted, delay: firstSubmit - dropAt };
+    });
+    eq("DAN: submitted", out.submitted, true);
+    // Pipeline itself takes ~1s; with up to 3s jitter the submit must land after
+    // the drop and comfortably inside the raffle window.
+    check("DAN: submit delayed past the drop (human spread)", out.delay >= 0, `delay ${out.delay}ms`);
+    check("DAN: delay within the bounded window", out.delay < 20000, `delay ${out.delay}ms`);
+    await page.close();
+  }
+
   // ── 5. PANIC: abort raised while holding must cancel SUBMIT ──
   console.log("[machine] panic abort during HOLDING cancels SUBMIT");
   {

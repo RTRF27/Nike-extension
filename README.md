@@ -196,33 +196,37 @@ the same steps in short:
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
 
-## LEO / speed checkout mode (v4.13)
+## Drop type: DAN (raffle) vs LEO (FCFS) — v4.13 / v4.14
 
-Raffle drops are decided by a draw, so a second of submit latency doesn't matter.
-**LEO / FCFS drops are decided by speed** — so there's now a dedicated fast
-checkout path, toggled per drop on the **Drop setup → Actions** card
-(**⚡ LEO / Speed mode**). Default OFF → the raffle flow is byte-for-byte
-unchanged.
+Pick the drop type per drop on the **Drop setup → Actions** card. Default **DAN**.
 
-When ON, the checkout state machine (`checkout-core.js`):
+**🎟️ DAN — Raffle (relaxed).** Draw-based drops stay open ~20 min and aren't won
+on speed, so the bot fills carefully and adds a small **random human delay**
+before submitting — configurable ("submit within N sec after drop", default 6 s,
+0 = instant). This spreads the accounts out instead of firing every submit at
+the exact same millisecond, which is an easy bot tell. This is the original,
+careful checkout flow plus the jitter.
 
-- **Submits on the dot.** For tabs already parked on checkout waiting for the
-  drop, the hold coarse-waits until ~40 ms out then **busy-spins** the final
-  stretch, so the SUBMIT click lands within a few ms of the drop time instead of
-  the ~120 ms that `setTimeout` granularity used to cost.
-- **Submits immediately when late.** A tab opened *after* the drop time skips the
-  hold entirely and clicks as soon as it's ready.
-- **Cuts the fill→submit lag.** The fixed multi-second settle/commit sleeps
-  (2 s page settle, the `1.6 s ×4` payment-commit loop, 1.2 s post-continue
-  waits) collapse to short ones, and the SUBMIT button is polled every 25 ms so
-  it's clicked the instant it's enabled.
+**⚡ LEO — FCFS (speed).** First-come-first-served drops are won on speed, so the
+state machine flips to a fast path:
 
-PANIC still cancels a held submit, and Test Mode still stops before clicking.
-Covered by `test-harness/test.mjs` against the **real captured gs.nike.com
-checkout DOM**: it asserts LEO is faster than the normal flow on the same page,
-never submits before the drop, lands within ~120 ms of it, and submits with no
-added hold when the tab is opened late. (Live-drop testing isn't automated — it
-requires auth, a live product, and would place a real order.)
+- **Submits on the dot.** A tab parked on checkout waiting for the drop
+  coarse-waits until ~40 ms out then **busy-spins** the final stretch, so the
+  SUBMIT click lands within a few ms of the drop instead of the ~120 ms that
+  `setTimeout` granularity used to cost.
+- **Submits immediately when late.** A tab opened *after* the drop skips the hold
+  and clicks as soon as it's ready.
+- **Cuts the fill→submit lag.** The fixed multi-second settle/commit sleeps (2 s
+  settle, the `1.6 s ×4` payment-commit loop, 1.2 s post-continue) collapse to
+  short ones, and the SUBMIT button is polled every 25 ms.
+
+PANIC cancels a held (or jittered) submit, and Test Mode still stops before
+clicking, in both modes. Covered by `test-harness/test.mjs` against the **real
+captured gs.nike.com checkout DOM**: LEO is faster than DAN on the same page,
+never submits early, lands within ~120 ms of the drop, and adds no hold when
+late; DAN's human delay lands the submit after the drop and inside the window.
+(Live-drop testing isn't automated — it needs auth, a live product, and would
+place a real order.)
 
 ## Region tagging (SG vs MY) + address readout (v4.10)
 

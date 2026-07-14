@@ -2852,6 +2852,20 @@ function setDropTimeField(iso) {
   return true;
 }
 
+// ── Drop mode (DAN raffle / LEO FCFS) ─────────────────────────
+function isLeoModeSelected() {
+  const leo = document.getElementById("dropModeLeo");
+  return !!(leo && leo.checked);
+}
+// Show the right hint + only show the DAN human-delay row in DAN mode.
+function syncDropModeUI() {
+  const leo = isLeoModeSelected();
+  const dh = $("dropModeHintDan"), lh = $("dropModeHintLeo"), jr = $("danJitterRow");
+  if (dh) dh.style.display = leo ? "none" : "";
+  if (lh) lh.style.display = leo ? "" : "none";
+  if (jr) jr.style.display = leo ? "none" : "flex";
+}
+
 // ── Proxy + notification config (Settings) ────────────────────
 function proxyLines() {
   const raw = ($("proxyList") && $("proxyList").value) || "";
@@ -3053,7 +3067,9 @@ function buildConfig() {
     options: {
       enabled: $("optEnabled").checked,
       testMode: $("optTestMode").checked,
-      leoMode: !!($("leoModeToggle") && $("leoModeToggle").checked),
+      leoMode: isLeoModeSelected(),
+      dropMode: isLeoModeSelected() ? "LEO" : "DAN",
+      danJitterSec: $("danJitterSec") ? Math.max(0, parseInt($("danJitterSec").value, 10) || 0) : 0,
       statusPollerEnabled: $("optPoller").checked,
       pollerIntervalMin: parseInt($("optPollerMin").value) || 3,
       logWebhook: $("logWebhook").value.trim(),
@@ -3668,7 +3684,11 @@ function applyConfigToUI(cfg) {
   if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
-  if ($("leoModeToggle")) $("leoModeToggle").checked = !!opts.leoMode;
+  const isLeo = opts.dropMode ? opts.dropMode === "LEO" : !!opts.leoMode;
+  if ($("dropModeLeo")) $("dropModeLeo").checked = isLeo;
+  if ($("dropModeDan")) $("dropModeDan").checked = !isLeo;
+  if ($("danJitterSec") && opts.danJitterSec != null) $("danJitterSec").value = opts.danJitterSec;
+  syncDropModeUI();
   $("optPoller").checked = opts.statusPollerEnabled ?? true;
   $("optPollerMin").value = opts.pollerIntervalMin ?? 3;
   $("logWebhook").value = opts.logWebhook || "";
@@ -3872,6 +3892,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ── Setup link → navigate to settings ──
   const sl = $("setupLink");
   if (sl) sl.addEventListener("click", e => { e.preventDefault(); navigateTo("settings"); });
+
+  // ── Drop mode (DAN / LEO) selector ──
+  ["dropModeDan", "dropModeLeo"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", () => { syncDropModeUI(); saveAll(true); });
+  });
+  syncDropModeUI();
 
   // ── Chrome Profile Creator ──
   $("createProfileBtn").addEventListener("click", createProfile);
