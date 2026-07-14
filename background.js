@@ -228,10 +228,39 @@ async function postNotify(text) {
     const url = `https://api.telegram.org/bot${encodeURIComponent(_notifyCfg.telegramToken)}/sendMessage`;
     jobs.push(fetch(url, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: _notifyCfg.telegramChatId, text, parse_mode: "Markdown", disable_web_page_preview: true }),
+      // No parse_mode — send plain text so an account label with a stray * or _
+      // can't make Telegram reject the whole message with a 400.
+      body: JSON.stringify({ chat_id: (_notifyCfg.telegramChatId || "").trim(), text, disable_web_page_preview: true }),
     }).catch(() => {}));
   }
   await Promise.all(jobs);
+}
+
+// Verifying test send: unlike postNotify (fire-and-forget for the live path),
+// this actually reads each channel's response and returns a human error so the
+// dashboard's "Send test" can say WHY it failed (chat not found, bad token…).
+async function sendTestNotify(text) {
+  const results = [];
+  const wh = _notifyCfg && _notifyCfg.webhook;
+  const tgToken = _notifyCfg && (_notifyCfg.telegramToken || "").trim();
+  const tgChat = _notifyCfg && (_notifyCfg.telegramChatId || "").trim();
+
+  if (wh) {
+    try {
+      const r = await fetch(wh, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text }) });
+      results.push(r.ok ? { ch: "Discord", ok: true } : { ch: "Discord", ok: false, error: `HTTP ${r.status}` });
+    } catch (e) { results.push({ ch: "Discord", ok: false, error: String(e && e.message || e) }); }
+  }
+  if (tgToken && tgChat) {
+    try {
+      const url = `https://api.telegram.org/bot${tgToken}/sendMessage`;
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: tgChat, text }) });
+      let body = null; try { body = await r.json(); } catch (e) {}
+      if (body && body.ok) results.push({ ch: "Telegram", ok: true });
+      else results.push({ ch: "Telegram", ok: false, error: (body && body.description) || `HTTP ${r.status}` });
+    } catch (e) { results.push({ ch: "Telegram", ok: false, error: String(e && e.message || e) }); }
+  }
+  return results;
 }
 
 function maybeNotifyOutcome(profileDir, tabId, code, message) {
@@ -242,7 +271,9 @@ function maybeNotifyOutcome(profileDir, tabId, code, message) {
   const meta = NOTIFY_META[code];
   const who = _profileLabels[profileDir] || profileDir || "account";
   const detail = (message || "").replace(/[*_`]/g, "").slice(0, 140);
-  const text = `${meta.emoji} **${meta.label}** — \`${who}\`\n${detail}`;
+  // Plain text (no markdown) so it reads cleanly in BOTH Discord and Telegram —
+  // Telegram sends without parse_mode, and literal ** would show through.
+  const text = `${meta.emoji} ${meta.label} — ${who}\n${detail}`;
   postNotify(text);
 }
 
@@ -1370,13 +1401,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === "test_outcome_notify") {
     (async () => {
       _notifyCfg = msg.cfg || _notifyCfg;
-      if (!_notifyCfg || (!_notifyCfg.webhook && !(_notifyCfg.telegramToken && _notifyCfg.telegramChatId))) {
-        sendResponse({ ok: false, error: "No Discord webhook or Telegram token configured." });
+      if (!_notifyCfg || (!_notifyCfg.webhook && !((_notifyCfg.telegramToken || "").trim() && (_notifyCfg.telegramChatId || "").trim()))) {
+        sendResponse({ ok: false, error: "No Discord webhook or Telegram token + chat ID configured." });
         return;
       }
       try {
-        await postNotify("🎉 **GOT 'EM — WON** — `Test account`\nThis is a test from your SNKRS Bot dashboard. Notifications are working.");
-        sendResponse({ ok: true });
+        const results = await sendTestNotify("🎉 GOT 'EM — WON — Test account. This is a test from your SNKRS Bot dashboard. Notifications are working.");
+        const failed = results.filter(r => !r.ok);
+        if (!failed.length) sendResponse({ ok: true, channels: results.map(r => r.ch) });
+        else sendResponse({ ok: false, error: failed.map(r => `${r.ch}: ${r.error}`).join(" · ") });
       } catch (e) { sendResponse({ ok: false, error: String(e && e.message || e) }); }
     })();
     return true;
