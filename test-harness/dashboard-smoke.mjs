@@ -241,6 +241,7 @@ async function main() {
   await page.waitForTimeout(150);
   const region = await page.evaluate(() => {
     const hasBar = !!document.getElementById("preflightRegionBar");
+    const hasOpenBtns = !!document.getElementById("openSGBtn") && !!document.getElementById("openMYBtn");
     const hasRegionDef = typeof PF_CHECK_DEFS !== "undefined" && PF_CHECK_DEFS.some(d => d.key === "region");
     const hasTpl = !!document.querySelector("#accountRowTpl");
     const tplHasRegion = hasTpl && !!document.getElementById("accountRowTpl").content.querySelector(".f-region");
@@ -249,9 +250,10 @@ async function main() {
     const eff = effectiveRegionFor(accounts[0]);
     // Region is informational — an unknown region must NOT flip the verdict red.
     const verdictInfoSafe = preflightVerdict({ version: { ok: true }, host: { ok: true }, login: { ok: true }, region: { ok: null }, address: { ok: null }, card: { ok: true }, cookies: { ok: true }, target: { ok: true } }) === "green";
-    return { hasBar, hasRegionDef, tplHasRegion, eff, verdictInfoSafe };
+    return { hasBar, hasOpenBtns, hasRegionDef, tplHasRegion, eff, verdictInfoSafe };
   });
-  check("preflight has arm-by-region bar", region.hasBar);
+  check("preflight has open-by-region bar", region.hasBar);
+  check("region bar has OPEN SG + OPEN MY buttons", region.hasOpenBtns);
   check("preflight defs include a Region row", region.hasRegionDef);
   check("account row template has a region selector", region.tplHasRegion);
   check("manual region override wins (SG)", region.eff === "SG", region.eff);

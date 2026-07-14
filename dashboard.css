@@ -1063,6 +1063,7 @@ select.inp { cursor: pointer; }
   background: rgba(139,92,246,.05);
 }
 .pf-bar-lbl { font-size: 12px; font-weight: 700; letter-spacing: .4px; color: var(--white); }
+.pf-bar-hint { font-size: 11px; color: #9a9ab0; }
 .f-region-label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .f-region { background: var(--panel2); color: var(--white); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
 

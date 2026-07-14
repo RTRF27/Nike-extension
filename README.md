@@ -212,10 +212,11 @@ which Akamai 403s for every account (that 403 was the old "Address" amber noise)
   address line 1 for reference and never turns the card red/amber.
 - **Manual override.** Each account row has a **🌏 Region** selector
   (Auto / SG / MY) for anything the phone can't classify; the override wins.
-- **Arm by region.** **⏰ ARM SG ONLY** / **⏰ ARM MY ONLY** arm just the matching
-  accounts and unarm the rest, so a Singapore drop opens your SG accounts and a
-  Malaysia drop your MY accounts. Covered by `test-harness/region-test.mjs`
-  (15 assertions) + the dashboard smoke test.
+- **Open by region.** **🇸🇬 OPEN SG** / **🇲🇾 OPEN MY** launch just the matching
+  profiles right now. They're **additive** — click one for a Singapore drop, the
+  other for a Malaysia drop, or both to open everything. Each account keeps its
+  own window tile so SG and MY don't overlap. Covered by
+  `test-harness/region-test.mjs` (15 assertions) + the dashboard smoke test.
 
 ## Proxies & outcome notifications (v4.9)
 

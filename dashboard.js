@@ -770,26 +770,6 @@ function effectiveRegionFor(acct) {
   return (rec && rec.region) || "";
 }
 
-// Arm ONLY the accounts of one region (SG or MY) and unarm the rest — so a
-// Singapore drop opens just the SG accounts, a Malaysia drop just the MY ones.
-async function armRegionOnly(region) {
-  const withDir = accounts.filter(a => a.profileDir);
-  const matched = withDir.filter(a => effectiveRegionFor(a) === region);
-  const msgEl = $("preflightRegionMsg") || $("statusMsg");
-  if (!matched.length) {
-    flashTemp(msgEl,
-      `No ${region} accounts detected yet — run Preflight, or set Region manually on the Profiles page.`, "var(--orange)", 6000);
-    return;
-  }
-  accounts.forEach(a => { a.autoLaunch = !!a.profileDir && effectiveRegionFor(a) === region; });
-  renderAccounts();
-  renderPreflight();
-  await saveAll(true);
-  flashTemp($("preflightRegionMsg") || $("statusMsg"),
-    `⏰ Armed ${matched.length} ${region} account(s); unarmed the rest. Ready for the ${region === "SG" ? "Singapore" : "Malaysia"} drop.`,
-    "var(--green)", 6000);
-}
-
 // ── Warm-up: open the SNKRS feed (no boot marker → bot idle) so each profile's
 // Kasada anti-bot cookies are fresh before the drop. Records when we warmed
 // each profile so the preflight cookies row can show its age.
@@ -969,19 +949,20 @@ function renderPreflight() {
       (rc.unknown ? chip(rc.unknown, "? REGION", "#8a8a9e") : "");
   }
 
-  // Arm-by-region toolbar (SG-only / MY-only) so a Singapore or Malaysia drop
-  // opens just the matching accounts.
+  // Open-by-region toolbar: open just the SG or just the MY profiles, now.
+  // Additive — click SG and MY to open both.
   const bar = $("preflightRegionBar");
   if (bar) {
     const rc = { SG: 0, MY: 0 };
     for (const acct of withProfile) { const r = effectiveRegionFor(acct); if (r === "SG") rc.SG++; else if (r === "MY") rc.MY++; }
     bar.innerHTML =
-      `<span class="pf-bar-lbl">Arm for a drop:</span>` +
-      `<button id="armSGBtn" class="btn btn-mini btn-dark">⏰ ARM SG ONLY (${rc.SG})</button>` +
-      `<button id="armMYBtn" class="btn btn-mini btn-dark">⏰ ARM MY ONLY (${rc.MY})</button>` +
-      `<span id="preflightMsg" class="status-msg" style="margin:0 0 0 10px; text-align:left; display:inline-block;"></span>`;
-    const sg = $("armSGBtn"); if (sg) sg.addEventListener("click", () => armRegionOnly("SG"));
-    const my = $("armMYBtn"); if (my) my.addEventListener("click", () => armRegionOnly("MY"));
+      `<span class="pf-bar-lbl">Open profiles:</span>` +
+      `<button id="openSGBtn" class="btn btn-mini btn-accent">🇸🇬 OPEN SG (${rc.SG})</button>` +
+      `<button id="openMYBtn" class="btn btn-mini btn-accent">🇲🇾 OPEN MY (${rc.MY})</button>` +
+      `<span class="pf-bar-hint">Additive — click both to open both.</span>` +
+      `<span id="preflightRegionMsg" class="status-msg" style="margin:0 0 0 10px; text-align:left; display:inline-block;"></span>`;
+    const sg = $("openSGBtn"); if (sg) sg.addEventListener("click", () => launchRegion("SG"));
+    const my = $("openMYBtn"); if (my) my.addEventListener("click", () => launchRegion("MY"));
   }
 }
 
@@ -3547,6 +3528,67 @@ async function launchAll() {
     flashTemp($("statusMsg"), `Launched ${profOk}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
   } else {
     flashTemp($("statusMsg"), `Couldn't launch. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
+  }
+}
+
+// Open ONLY the accounts of one region (SG or MY), now. Additive by design:
+// launching SG never closes MY, so a Singapore + Malaysia drop is just two
+// clicks. Each account keeps its stable window tile so SG and MY don't overlap.
+async function launchRegion(region) {
+  const msgEl = $("preflightRegionMsg") || $("statusMsg");
+  const list = accounts.filter(a => a.profileDir && effectiveRegionFor(a) === region);
+  if (!list.length) {
+    flashTemp(msgEl, `No ${region} accounts detected yet — run Preflight, or set Region manually on the Profiles page.`, "var(--orange)", 6000);
+    return;
+  }
+
+  // Preflight gate, scoped to THIS region's accounts (warn, never hard-block).
+  const blockers = list.filter(a => {
+    const rec = preflightResults[a.profileDir];
+    return rec && rec.ts && preflightVerdict(mergedChecksFor(a)) === "red";
+  });
+  if (blockers.length) {
+    const names = blockers.map(a => a.label || a.profileDir).join(", ");
+    if (!confirm(`⚠️ Preflight flagged ${blockers.length} ${region} profile(s) as BLOCKED:\n\n${names}\n\nOpen anyway?`)) {
+      flashTemp(msgEl, `Cancelled — fix ${blockers.length} blocked ${region} profile(s) first.`, "var(--orange)", 6000);
+      return;
+    }
+  }
+
+  await saveAll(true);
+  // Clear any stale PANIC / CLOSE flag so this region's tabs can submit, and
+  // disarm the auto-open scheduler so it can't open a duplicate set at drop time.
+  await setAbort(false);
+  await hostSend({ cmd: "setClose", on: false });
+  refreshPanicBanner();
+  await new Promise(res => chrome.runtime.sendMessage({ type: "cancel_dash_launch" }, res));
+
+  const flag = region === "SG" ? "🇸🇬" : "🇲🇾";
+  flash(msgEl, `Opening ${list.length} ${region} profile(s)…`, "#888");
+  let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
+  for (const acct of list) {
+    // Stable per-account tile (global index) so SG and MY windows don't stack.
+    const win = windowFor(Math.max(0, accounts.findIndex(a => a.id === acct.id)));
+    const targets = launchTargetsFor(acct);
+    if (!targets.length) {
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL, window: win });
+      if (resp.ok) { profOk++; warmCount++; } else lastErr = resp.error || "unknown";
+      await new Promise(r => setTimeout(r, 400));
+      continue;
+    }
+    const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win });
+    if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 450));
+  }
+
+  if (profOk === list.length) {
+    const tail = warmCount ? ` (${warmCount} warm-up)` : "";
+    flashTemp(msgEl, `${flag} Opened ${profOk} ${region} profile(s) · ${tabOk} tab(s)${tail}. Each holds SUBMIT until drop.`, "var(--green)", 8000);
+  } else if (profOk > 0) {
+    flashTemp(msgEl, `Opened ${profOk}/${list.length} ${region}. Last error: ${lastErr}`, "#f0c070", 6000);
+  } else {
+    flashTemp(msgEl, `Couldn't open ${region}. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
   }
 }
 
