@@ -5,6 +5,7 @@
 // Region (SG/MY) classifier — shared pure module, also used by Node tests.
 try { importScripts("region-util.js"); } catch (e) { /* loaded elsewhere / tests */ }
 const classifyRegion = (self.RegionUtil && self.RegionUtil.classifyRegionFromPhone) || (() => "");
+const displayPhone = (self.RegionUtil && self.RegionUtil.displayPhone) || ((p) => p || "");
 
 const SETTINGS_KEY = "snkrsBotSettings";
 const DROP_ALARM_NAME = "snkrsDropAlarm";
@@ -963,15 +964,16 @@ async function runPreflight(profileDir, page, accessToken) {
   const prof = (page && page.profile) || {};
   const phone = (prof.phone || "").trim();
   const region = classifyRegion(phone) || (/(singapore|^sg$)/i.test(prof.country || "") ? "SG" : /(malaysia|^my$)/i.test(prof.country || "") ? "MY" : "");
-  entry.phone = phone;
+  const shownPhone = displayPhone(phone) || phone;
+  entry.phone = shownPhone;
   entry.country = prof.country || "";
   entry.region = region;
   entry.addressLine1 = prof.addressLine1 || "";
   entry.checks.region = {
     ok: region ? true : null,
     detail: region
-      ? `${region === "SG" ? "🇸🇬 Singapore" : "🇲🇾 Malaysia"}${phone ? " · " + phone : ""}`
-      : (phone ? `unclassified · ${phone}` : "phone not read — set region manually"),
+      ? `${region === "SG" ? "🇸🇬 Singapore" : "🇲🇾 Malaysia"}${shownPhone ? " · " + shownPhone : ""}`
+      : (phone ? `unclassified · ${phone} — set region manually` : "phone not read — set region manually"),
   };
   entry.checks.address = {
     ok: prof.addressLine1 ? true : null,          // informational — never red

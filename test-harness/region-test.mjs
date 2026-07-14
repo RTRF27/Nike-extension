@@ -30,6 +30,10 @@ eq("SG: 8-digit starting 8",         classifyRegionFromPhone("81234567"), "SG");
 eq("SG: spaced 9123 4567",           classifyRegionFromPhone("9123 4567"), "SG");
 eq("SG: +65 prefixed",               classifyRegionFromPhone("+65 9123 4567"), "SG");
 eq("SG: 65 prefix no plus",          classifyRegionFromPhone("6591234567"), "SG");
+// Real captures where the reader bled trailing digits from the next field:
+eq("SG: trailing-junk 9656 1552 28", classifyRegionFromPhone("9656 1552 28"), "SG");
+eq("SG: trailing-junk 8800 7114 27", classifyRegionFromPhone("8800 7114 27"), "SG");
+eq("MY: trailing-junk 011-2109 9805 28", classifyRegionFromPhone("011-2109 9805 28"), "MY");
 
 // ── Unknown / empty ──
 eq("unknown: empty",                 classifyRegionFromPhone(""), "");
