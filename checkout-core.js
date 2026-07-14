@@ -335,7 +335,14 @@
       this.startTs = Date.now();
       this.stateTs = Date.now();
       this.dropAt = 0;
+      // LEO / speed mode (FCFS drops): strip the fixed settling waits and submit
+      // with millisecond precision at the drop time. Default OFF → the raffle
+      // path below is completely unchanged.
+      this.leo = !!(this.d.isLeoMode && this.d.isLeoMode());
     }
+    // A wait that collapses to a short one in LEO mode (fast) but keeps the
+    // original duration for the normal raffle flow.
+    _w(normalMs, leoMs) { return wait(this.leo ? leoMs : normalMs); }
     _log(msg) { if (this.d.log) try { this.d.log(msg); } catch (e) {} }
     _dbg(msg) { if (this.d.dbg) try { this.d.dbg(msg); } catch (e) {} }
     _tag() { return (this.d.tag && this.d.tag()) || ""; }
@@ -386,10 +393,11 @@
       const doc = this.doc;
       this._to(STATES.LOADING);
       this._emit("started");
-      this._log(`💳${tag} SNKRS checkout — starting…`);
+      this._log(`💳${tag} SNKRS checkout — starting…${this.leo ? " ⚡LEO speed mode" : ""}`);
 
       // Let Angular finish rendering (matches the original 2000ms settle).
-      await wait(2000);
+      // LEO trims this to the minimum a rendered checkout page needs.
+      await this._w(2000, 800);
       if (isWindowMinimized(doc)) {
         this._log(`⚠️${tag} Window is MINIMIZED — using DOM-order visibility checks (offsetParent bypass active)`);
       }
@@ -403,7 +411,7 @@
       if (deliveryContinue) {
         this._log(`✅${tag} [1/3] Clicking CONTINUE (delivery)…`);
         await nativeClick(deliveryContinue, "CONTINUE (delivery)", false, (m) => this._dbg(m));
-        await wait(1500);
+        await this._w(1500, 300);
       } else {
         this._log(`ℹ️${tag} [1/3] Delivery CONTINUE not found — already confirmed or payment form is open.`);
       }
@@ -463,10 +471,10 @@
         if (paymentContinue) {
           this._log(`✅${tag} [2/3] Clicking CONTINUE (payment)…`);
           await nativeClick(paymentContinue, "CONTINUE (payment)", false, (m) => this._dbg(m));
-          await wait(1200);
+          await this._w(1200, 150);
         } else {
           this._log(`ℹ️${tag} [2/3] No payment-section CONTINUE found — going straight to SUBMIT`);
-          await wait(400);
+          await this._w(400, 80);
         }
       }
       this._emit("filled");
@@ -474,23 +482,35 @@
       // ── READY: commit payment, then wait for SUBMIT ───────────
       this._to(STATES.READY);
       this._log(`⏳${tag} [3/3] Finalising — committing payment, then submitting…`);
-      for (let i = 0; i < 4; i++) {
+      if (this.leo) {
+        // LEO: one commit click if a CONTINUE is present, then poll hard for the
+        // SUBMIT button — no fixed multi-second sleeps between commits.
         const pc = this.finder("paymentContinue");
-        if (!pc) break;
-        this._log(`✅${tag} [3/3] Clicking CONTINUE (payment) to commit it (try ${i + 1})…`);
-        await nativeClick(pc, "CONTINUE (payment)", false, (m) => this._dbg(m));
-        await wait(1600);
+        if (pc) {
+          this._log(`✅${tag} [3/3] (LEO) Committing payment…`);
+          await nativeClick(pc, "CONTINUE (payment)", false, (m) => this._dbg(m));
+        }
+      } else {
+        for (let i = 0; i < 4; i++) {
+          const pc = this.finder("paymentContinue");
+          if (!pc) break;
+          this._log(`✅${tag} [3/3] Clicking CONTINUE (payment) to commit it (try ${i + 1})…`);
+          await nativeClick(pc, "CONTINUE (payment)", false, (m) => this._dbg(m));
+          await wait(1600);
+        }
       }
 
       let hb = 0;
-      const heartbeat = setInterval(() => {
+      const heartbeat = this.leo ? null : setInterval(() => {
         hb++;
         const all = Array.from(doc.querySelectorAll("button.button-submit"));
         this._log(`💓${tag} [3/3] waiting for SUBMIT (${hb * 3}s) — submitBtns=${all.length} ` +
           `enabled=${all.filter(b => !b.disabled).length} | paymentCont=${!!this.finder("paymentContinue")}`);
       }, 3000);
-      let submitBtn = await waitFor(() => this.finder("submit"), 12000, 100);
-      clearInterval(heartbeat);
+      // LEO polls the SUBMIT button every 25ms so it's clickable the instant it
+      // appears; the raffle path keeps its 100ms cadence.
+      let submitBtn = await waitFor(() => this.finder("submit"), 12000, this.leo ? 25 : 100);
+      if (heartbeat) clearInterval(heartbeat);
 
       if (!submitBtn) {
         this._log(`❌${tag} [3/3] SUBMIT ORDER not found — STUCK HERE. Full page state:`);
@@ -516,28 +536,48 @@
       if (dropAt && Date.now() < dropAt) {
         this._to(STATES.HOLDING);
         this._emit("holding");
-        this._log(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.`);
-        let sinceAbortCheck = 0;
-        while (Date.now() < dropAt) {
-          // PANIC: bail out of the hold without ever submitting.
+        this._log(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.${this.leo ? " ⚡LEO on-the-dot" : ""}`);
+        if (this.leo) {
+          // LEO precise hold: coarse-wait (abort-checked) until ~40ms before the
+          // drop, then BUSY-SPIN the final stretch so the click lands on the dot
+          // (setTimeout granularity would otherwise cost up to ~100ms).
+          while (dropAt - Date.now() > 40) {
+            if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised while holding. SUBMIT cancelled, order NOT placed.`);
+              return this._abort();
+            }
+            const left = dropAt - Date.now();
+            await wait(Math.min(250, left - 40));
+          }
           if (await this._aborted()) {
-            this._log(`🛑${tag} [3/3] PANIC — abort raised while holding. SUBMIT cancelled, order NOT placed.`);
+            this._log(`🛑${tag} [3/3] PANIC — abort raised at the line. SUBMIT cancelled.`);
             return this._abort();
           }
-          const left = dropAt - Date.now();
-          if (left > 5000) {
-            this._log(`⏳${tag} [3/3] ${Math.ceil(left / 1000)}s to drop — SUBMIT held…`);
-            await wait(Math.min(3000, left - 1500));
-          } else {
-            // Final approach: fine-grained, but still poll abort ~once/sec.
-            await wait(120);
-            if (++sinceAbortCheck >= 8) { sinceAbortCheck = 0; if (await this._aborted()) {
-              this._log(`🛑${tag} [3/3] PANIC — abort raised at the line. SUBMIT cancelled.`);
+          while (Date.now() < dropAt) { /* busy-spin the last <=40ms for precision */ }
+          this._log(`🟢${tag} [3/3] DROP TIME (LEO) — submitting on the dot!`);
+        } else {
+          let sinceAbortCheck = 0;
+          while (Date.now() < dropAt) {
+            // PANIC: bail out of the hold without ever submitting.
+            if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised while holding. SUBMIT cancelled, order NOT placed.`);
               return this._abort();
-            } }
+            }
+            const left = dropAt - Date.now();
+            if (left > 5000) {
+              this._log(`⏳${tag} [3/3] ${Math.ceil(left / 1000)}s to drop — SUBMIT held…`);
+              await wait(Math.min(3000, left - 1500));
+            } else {
+              // Final approach: fine-grained, but still poll abort ~once/sec.
+              await wait(120);
+              if (++sinceAbortCheck >= 8) { sinceAbortCheck = 0; if (await this._aborted()) {
+                this._log(`🛑${tag} [3/3] PANIC — abort raised at the line. SUBMIT cancelled.`);
+                return this._abort();
+              } }
+            }
           }
+          this._log(`🟢${tag} [3/3] DROP TIME — submitting now!`);
         }
-        this._log(`🟢${tag} [3/3] DROP TIME — submitting now!`);
       }
 
       // Final abort gate right before the click (covers the no-hold path too).

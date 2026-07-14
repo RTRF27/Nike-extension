@@ -197,6 +197,61 @@ async function main() {
     await page.close();
   }
 
+  // ── 4b. LEO speed mode: faster fill→submit + on-the-dot / immediate ─
+  // Tests run against the REAL captured gs.nike.com checkout DOM (saved-card
+  // fixture). We assert BEHAVIOUR + a RELATIVE speed-up (LEO vs the normal
+  // flow on the same page) rather than brittle absolute millisecond thresholds,
+  // and that LEO never submits before the drop.
+  console.log("[machine] LEO mode is faster and submits on/after the drop");
+  {
+    const runOnce = async (page, leo, getDropAt) => page.evaluate(async ({ leo, dropAt }) => {
+      const C = window.CheckoutCore;
+      let submittedAt = 0;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        // FIRST submit emit only — the post-submit verify loop re-emits on each
+        // retry when a static fixture never "advances".
+        emit: (e) => { if (e.code === "submitted" && !submittedAt) submittedAt = Date.now(); },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false,
+        isLeoMode: () => leo, getDropAt: () => dropAt,
+      });
+      const t0 = Date.now();
+      const r = await machine.run();
+      return { submitted: r.submitted, totalMs: Date.now() - t0, offset: submittedAt ? submittedAt - dropAt : null };
+    }, { leo, dropAt: getDropAt });
+
+    // Relative speed: LEO (no hold) must reach SUBMIT faster than the normal
+    // flow on the same real page — that's the "fill→submit is too slow" fix.
+    const pN = await openFixture(context, fixture("saved-card.html"));
+    const normal = await runOnce(pN, false, 0);
+    await pN.close();
+    const pL = await openFixture(context, fixture("saved-card.html"));
+    const leo = await runOnce(pL, true, 0);
+    await pL.close();
+    eq("LEO: normal flow submitted", normal.submitted, true);
+    eq("LEO: leo flow submitted", leo.submitted, true);
+    check("LEO: fill→submit is faster than the normal flow",
+      leo.totalMs < normal.totalMs, `leo ${leo.totalMs}ms vs normal ${normal.totalMs}ms`);
+
+    // On-the-dot: with a drop comfortably beyond the fill pipeline, LEO holds and
+    // submits AT/AFTER the drop, never early.
+    const pH = await openFixture(context, fixture("saved-card.html"));
+    const held = await runOnce(pH, true, Date.now() + 6000);
+    await pH.close();
+    eq("LEO: held tab submitted", held.submitted, true);
+    check("LEO: never submits before the drop", held.offset >= -15, `offset ${held.offset}ms`);
+    check("LEO: submits on the dot (<120ms late)", held.offset != null && held.offset <= 120, `offset ${held.offset}ms`);
+
+    // Late tab (opened after drop): submits, with no drop-hold added.
+    const pLate = await openFixture(context, fixture("saved-card.html"));
+    const late = await runOnce(pLate, true, Date.now() - 60000);
+    await pLate.close();
+    eq("LEO: late tab submitted", late.submitted, true);
+    check("LEO: late tab not slower than normal (no hold added)",
+      late.totalMs <= normal.totalMs + 500, `${late.totalMs}ms`);
+  }
+
   // ── 5. PANIC: abort raised while holding must cancel SUBMIT ──
   console.log("[machine] panic abort during HOLDING cancels SUBMIT");
   {

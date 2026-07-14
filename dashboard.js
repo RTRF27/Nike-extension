@@ -3053,6 +3053,7 @@ function buildConfig() {
     options: {
       enabled: $("optEnabled").checked,
       testMode: $("optTestMode").checked,
+      leoMode: !!($("leoModeToggle") && $("leoModeToggle").checked),
       statusPollerEnabled: $("optPoller").checked,
       pollerIntervalMin: parseInt($("optPollerMin").value) || 3,
       logWebhook: $("logWebhook").value.trim(),
@@ -3667,6 +3668,7 @@ function applyConfigToUI(cfg) {
   if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
+  if ($("leoModeToggle")) $("leoModeToggle").checked = !!opts.leoMode;
   $("optPoller").checked = opts.statusPollerEnabled ?? true;
   $("optPollerMin").value = opts.pollerIntervalMin ?? 3;
   $("logWebhook").value = opts.logWebhook || "";

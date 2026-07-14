@@ -1043,6 +1043,7 @@ function buildSettingsForProfile(config, profileDir) {
   return {
     enabled:             opts.enabled ?? true,
     testMode:            opts.testMode ?? false,
+    leoMode:             opts.leoMode ?? false,   // ⚡ FCFS speed checkout
     preferredSize:       account.size || "",
     preferredSizeType:   account.sizeType || "footwear",
     productKeyword:      keyword,

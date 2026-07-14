@@ -217,6 +217,7 @@ async function runCheckoutFlow() {
     getCardFill: () => _cardFillPromise,
     cancelCardFill: () => cancelCardFillWait(),
     isTestMode: () => !!settings?.testMode,
+    isLeoMode: () => !!settings?.leoMode,
     getDropAt: () => resolveDropAt(),
     checkAbort: () => checkAbort(),
   });

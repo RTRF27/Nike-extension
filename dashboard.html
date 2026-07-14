@@ -264,6 +264,13 @@
 
           <section class="card">
             <div class="card-head"><h2>ACTIONS</h2></div>
+            <div class="toggle" style="margin-bottom:10px; border:1px solid rgba(251,146,60,.35); border-radius:10px; padding:10px 12px; background:rgba(251,146,60,.06);">
+              <div>
+                <div class="t-label">⚡ LEO / Speed mode (FCFS drops)</div>
+                <div class="t-hint">For first-come-first-served drops where speed wins. Strips the settling delays and submits with millisecond precision: tabs waiting for the drop submit <strong>on the dot</strong>; a tab opened after drop time submits <strong>immediately</strong>. Leave OFF for normal raffle drops.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="leoModeToggle"><span class="track"></span></label>
+            </div>
             <div id="sizeHints" class="size-hints" style="display:none;"></div>
             <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;">🎲 RANDOMLY ASSIGN SIZES</button>
             <button id="directUrlsBtn" class="btn btn-dark" style="width:100%; margin-bottom:10px;">⚡ BUILD DIRECT CHECKOUT URLS</button>

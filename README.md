@@ -196,6 +196,34 @@ the same steps in short:
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
 
+## LEO / speed checkout mode (v4.13)
+
+Raffle drops are decided by a draw, so a second of submit latency doesn't matter.
+**LEO / FCFS drops are decided by speed** — so there's now a dedicated fast
+checkout path, toggled per drop on the **Drop setup → Actions** card
+(**⚡ LEO / Speed mode**). Default OFF → the raffle flow is byte-for-byte
+unchanged.
+
+When ON, the checkout state machine (`checkout-core.js`):
+
+- **Submits on the dot.** For tabs already parked on checkout waiting for the
+  drop, the hold coarse-waits until ~40 ms out then **busy-spins** the final
+  stretch, so the SUBMIT click lands within a few ms of the drop time instead of
+  the ~120 ms that `setTimeout` granularity used to cost.
+- **Submits immediately when late.** A tab opened *after* the drop time skips the
+  hold entirely and clicks as soon as it's ready.
+- **Cuts the fill→submit lag.** The fixed multi-second settle/commit sleeps
+  (2 s page settle, the `1.6 s ×4` payment-commit loop, 1.2 s post-continue
+  waits) collapse to short ones, and the SUBMIT button is polled every 25 ms so
+  it's clicked the instant it's enabled.
+
+PANIC still cancels a held submit, and Test Mode still stops before clicking.
+Covered by `test-harness/test.mjs` against the **real captured gs.nike.com
+checkout DOM**: it asserts LEO is faster than the normal flow on the same page,
+never submits before the drop, lands within ~120 ms of it, and submits with no
+added hold when the tab is opened late. (Live-drop testing isn't automated — it
+requires auth, a live product, and would place a real order.)
+
 ## Region tagging (SG vs MY) + address readout (v4.10)
 
 Nike runs **SNKRS SG** and **SNKRS MY** as separate storefronts, and which one an
