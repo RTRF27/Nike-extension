@@ -316,6 +316,11 @@
               <input type="number" id="tileH" class="inp" value="680" min="200" max="2000" step="10" style="width:80px;">
               <span class="muted">px</span>
             </div>
+            <div style="display:flex; align-items:center; gap:8px; margin:2px 0 8px;">
+              <button id="tilePreviewBtn" class="btn btn-mini btn-dark">👁 Preview layout</button>
+              <span class="muted">See how the windows will tile on your screen.</span>
+            </div>
+            <div id="tilePreview" class="tile-preview" style="display:none;"></div>
             <p class="hint" style="margin:0 0 12px;">Chrome won't render a window narrower than ~500px — smaller widths get clamped, but positions still tile.</p>
 
             <div class="toggle" style="margin-bottom:6px;">

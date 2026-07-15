@@ -3397,6 +3397,41 @@ function tileWindowsEnabled() {
 function loadExtOnLaunch() {
   return !!($("loadExtToggle") && $("loadExtToggle").checked);
 }
+// Draw a scaled mock of the screen with the windows tiled the way they'll open,
+// so the size/position can be judged before launching.
+function renderTilePreview() {
+  const box = $("tilePreview");
+  if (!box) return;
+  if (!tileWindowsEnabled()) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+  box.style.display = "block";
+  const availW = (window.screen && screen.availWidth)  || 1920;
+  const availH = (window.screen && screen.availHeight) || 1040;
+  // Chrome clamps window width to ~500px, so preview at the size it'll REALLY be.
+  const reqW = tileWH().w, reqH = tileWH().h;
+  const effW = Math.max(500, reqW);
+  const scale = 320 / availW;
+  const n = Math.max(1, accounts.filter(a => a.profileDir).length || 6);
+  box.style.width  = Math.round(availW * scale) + "px";
+  box.style.height = Math.round(availH * scale) + "px";
+  const cols = Math.max(1, Math.floor(availW / effW));
+  const rows = Math.max(1, Math.floor(availH / reqH));
+  const per = cols * rows;
+  let html = "";
+  for (let i = 0; i < n; i++) {
+    const idx = ((i % per) + per) % per;
+    const x = (idx % cols) * effW;
+    const y = Math.floor(idx / cols) * reqH;
+    const overlap = i >= per;   // grid full → this one stacks on an earlier tile
+    html += `<div class="tile-cell${overlap ? " overlap" : ""}" style="left:${x * scale}px; top:${y * scale}px; width:${effW * scale}px; height:${reqH * scale}px;">${i + 1}</div>`;
+  }
+  const clampNote = reqW < 500 ? ` · width clamped 500` : "";
+  box.innerHTML = html +
+    `<div class="tile-cap">${n} window(s) · ${effW}×${reqH}px · ${cols}×${rows} grid${clampNote}</div>`;
+}
 function tileWH() {
   const w = $("tileW") ? parseInt($("tileW").value, 10) : NaN;
   const h = $("tileH") ? parseInt($("tileH").value, 10) : NaN;
@@ -3990,6 +4025,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("selectAllBtn")) $("selectAllBtn").addEventListener("click", () => selectAllProfiles(true));
   if ($("selectNoneBtn")) $("selectNoneBtn").addEventListener("click", () => selectAllProfiles(false));
   if ($("openSelectedBtn")) $("openSelectedBtn").addEventListener("click", launchSelected);
+  // Tile-layout preview: toggle on the button, live-update as the size changes.
+  if ($("tilePreviewBtn")) $("tilePreviewBtn").addEventListener("click", () => {
+    const box = $("tilePreview");
+    if (box && box.style.display === "block" && tileWindowsEnabled()) { box.style.display = "none"; }
+    else { if ($("tileWindowsToggle") && !$("tileWindowsToggle").checked) $("tileWindowsToggle").checked = true; renderTilePreview(); }
+  });
+  ["tileW", "tileH"].forEach(id => { const el = $(id); if (el) el.addEventListener("input", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); }); });
+  if ($("tileWindowsToggle")) $("tileWindowsToggle").addEventListener("change", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); });
   $("scheduleEnabled").addEventListener("change", () => {
     // Toggle only controls AUTO-OPEN; the drop time + countdown stay either way.
     startCountdown();

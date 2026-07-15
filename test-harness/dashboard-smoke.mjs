@@ -278,6 +278,21 @@ async function main() {
   check("OPEN SELECTED shows the ticked count", /\(2\)/.test(select.btnLabel), select.btnLabel);
   check("selection filters to the ticked profiles", select.picked.join(",") === "A,C", select.picked.join(","));
 
+  // 10) Tile layout preview renders one cell per profile.
+  const preview = await page.evaluate(() => {
+    if (typeof renderTilePreview !== "function") return { ok: false };
+    if (document.getElementById("tileWindowsToggle")) document.getElementById("tileWindowsToggle").checked = true;
+    accounts = [
+      { id: "t1", profileDir: "Profile 1" }, { id: "t2", profileDir: "Profile 2" },
+      { id: "t3", profileDir: "Profile 3" }, { id: "t4", profileDir: "Profile 4" },
+    ];
+    renderTilePreview();
+    const cells = document.querySelectorAll("#tilePreview .tile-cell").length;
+    const shown = document.getElementById("tilePreview").style.display === "block";
+    return { ok: true, cells, shown };
+  });
+  check("tile preview renders a cell per profile", preview.ok && preview.cells === 4 && preview.shown, "cells=" + preview.cells);
+
   check("no errors after full navigation", errors.length === 0, errors.slice(0, 3).join(" | "));
 
   await browser.close();

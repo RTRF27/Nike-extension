@@ -1090,6 +1090,38 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 chrome.tabs.onRemoved.addListener((tabId) => { delete cardFillCache[tabId]; });
 
+// ── Small tiled windows: resize from the BACKGROUND, on ANY link ──
+// The launch URL carries #snkrsWin=w,h,x,y. Reading it here (instead of relying
+// on a content script that only runs on certain Nike URLs) means the window is
+// sized no matter what page the tab lands on — gs.nike.com, an error page, a
+// login redirect, anything. Still needs the extension loaded in that profile.
+const _tiledWindows = {}; // windowId -> "wxh@x,y" already applied (avoid loops)
+function parseWinMarker(url) {
+  const m = String(url || "").match(/snkrsWin=(\d+),(\d+),(-?\d+),(-?\d+)/);
+  return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null;
+}
+function tileWindowFromUrl(url, windowId) {
+  if (windowId == null) return;
+  const g = parseWinMarker(url);
+  if (!g) return;
+  const sig = `${g.w}x${g.h}@${g.x},${g.y}`;
+  if (_tiledWindows[windowId] === sig) return; // already sized this window
+  _tiledWindows[windowId] = sig;
+  chrome.windows.update(windowId, {
+    left: Math.max(0, g.x | 0), top: Math.max(0, g.y | 0),
+    width: Math.max(200, g.w | 0), height: Math.max(200, g.h | 0),
+    state: "normal", focused: false,
+  }, () => { if (chrome.runtime.lastError) { /* window gone / clamped */ } });
+}
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Fires on the initial load (tab.url set) and on navigations (changeInfo.url).
+  tileWindowFromUrl(changeInfo.url || (tab && tab.url) || "", tab && tab.windowId);
+});
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab && tab.url) tileWindowFromUrl(tab.url, tab.windowId);
+});
+chrome.windows.onRemoved.addListener((windowId) => { delete _tiledWindows[windowId]; });
+
 // ── Live status board support ─────────────────────────────────
 // Maps tabId → profileDir so log messages from a launched Nike tab can be
 // attributed to the correct dashboard account row.
