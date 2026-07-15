@@ -3367,15 +3367,17 @@ function tileWindowsEnabled() {
 function tileWH() {
   const w = $("tileW") ? parseInt($("tileW").value, 10) : NaN;
   const h = $("tileH") ? parseInt($("tileH").value, 10) : NaN;
+  // Chrome won't render a window narrower than ~500px, but we allow smaller
+  // requests (it clamps) so the position tiling still works for tight grids.
   return {
-    w: isNaN(w) ? 500 : Math.max(300, Math.min(2000, w)),
-    h: isNaN(h) ? 680 : Math.max(300, Math.min(2000, h)),
+    w: isNaN(w) ? 500 : Math.max(200, Math.min(2000, w)),
+    h: isNaN(h) ? 680 : Math.max(200, Math.min(2000, h)),
   };
 }
-// Return { size, position } for the index-th launched profile, tiled across the
-// screen — or undefined when tiling is off (Chrome then sizes the window itself).
-function windowFor(index) {
-  if (!tileWindowsEnabled()) return undefined;
+// The tile geometry {w,h,x,y} for the index-th launched profile, or null when
+// tiling is off. Shared by the launcher hint AND the in-page resize (below).
+function tileGeomFor(index) {
+  if (!tileWindowsEnabled()) return null;
   const { w, h } = tileWH();
   const availW = (window.screen && screen.availWidth)  || 1920;
   const availH = (window.screen && screen.availHeight) || 1040;
@@ -3385,7 +3387,13 @@ function windowFor(index) {
   const idx  = ((index % per) + per) % per;   // wrap; overlaps once the grid fills
   const x = (idx % cols) * w;
   const y = Math.floor(idx / cols) * h;
-  return { size: `${w},${h}`, position: `${x},${y}` };
+  return { w, h, x, y };
+}
+// Return { size, position } for the native-host launch hint (best-effort — only
+// honoured when Chrome cold-starts the profile's process).
+function windowFor(index) {
+  const g = tileGeomFor(index);
+  return g ? { size: `${g.w},${g.h}`, position: `${g.x},${g.y}` } : undefined;
 }
 function flipLeadMs() {
   const m = $("flipLeadMin") ? parseFloat($("flipLeadMin").value) : NaN;
@@ -3412,11 +3420,19 @@ function bootUrlForTarget(acct, target) {
   let t = target.dropAtMs || 0;
   if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
 
+  // Tile geometry for THIS account, carried in the URL so the content script can
+  // resize its own window reliably (the command-line --window-size only works on
+  // a cold profile process). "w,h,x,y".
+  const gi = Math.max(0, accounts.findIndex(a => a.id === acct.id));
+  const geom = tileGeomFor(gi);
+  const winMarker = geom ? `snkrsWin=${geom.w},${geom.h},${geom.x},${geom.y}` : "";
+
   // Append our #snkrsBoot / #snkrsDrop markers to a URL.
   const boot = (u) => {
     if (!/^https?:\/\//i.test(u)) u = "https://" + u;
     const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
     if (t) params.push(`snkrsDrop=${t}`);
+    if (winMarker) params.push(winMarker);
     const sep = u.includes("#") ? "&" : "#";
     return `${u}${sep}${params.join("&")}`;
   };
@@ -3431,6 +3447,7 @@ function bootUrlForTarget(acct, target) {
       `snkrsGs=${b64url(gsBoot)}`,
       `snkrsFlip=${flipLeadMs()}`,
     ];
+    if (winMarker) params.push(winMarker);
     const sep = pageUrl.includes("#") ? "&" : "#";
     return `${pageUrl}${sep}${params.join("&")}`;
   }

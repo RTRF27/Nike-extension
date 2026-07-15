@@ -1336,6 +1336,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
 
+  // Small tiled windows: a launched tab asks us to resize/position ITS window.
+  // chrome.windows.update works regardless of whether Chrome cold-started the
+  // profile — unlike the command-line --window-size flag, which a
+  // already-running profile ignores (the reason tiling appeared to do nothing).
+  if (msg.type === "tile_window") {
+    const g = msg.geom || {};
+    const winId = sender?.tab?.windowId;
+    if (winId != null && g.w && g.h) {
+      chrome.windows.update(winId, {
+        left: Math.max(0, g.x | 0), top: Math.max(0, g.y | 0),
+        width: Math.max(200, g.w | 0), height: Math.max(200, g.h | 0),
+        state: "normal", focused: false,
+      }, () => { if (chrome.runtime.lastError) { /* window gone / clamped — fine */ } });
+    }
+    return false;
+  }
+
   // Generic relay so extension pages (the dashboard) could also reach the
   // host through us if they prefer. {cmd} is forwarded verbatim.
   if (msg.type === "native") {

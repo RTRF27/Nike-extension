@@ -192,6 +192,23 @@
     try { chrome.runtime.sendMessage({ type: "log", message: msg, profileDir }); } catch (e) {}
   }
 
+  // ── Small tiled window (#snkrsWin=w,h,x,y) ──────────────────
+  // Resize/position THIS profile's window from the extension itself. Chrome's
+  // command-line --window-size only takes effect when it cold-starts a profile's
+  // process; a profile that's already running ignores it — which is why tiling
+  // "did nothing". chrome.windows.update (in the background) always works.
+  (function applyTileWindow() {
+    const win = getMarker("snkrsWin");
+    if (!win) return;
+    const m = win.match(/^(\d+),(\d+),(-?\d+),(-?\d+)$/);
+    if (!m) return;
+    const geom = { w: +m[1], h: +m[2], x: +m[3], y: +m[4] };
+    const send = () => { try { chrome.runtime.sendMessage({ type: "tile_window", geom }); } catch (e) {} };
+    send();
+    // Re-assert shortly after load in case Nike/Chrome nudged the window.
+    setTimeout(send, 1200);
+  })();
+
   // ── Warm page → flip to gs.nike.com checkout ────────────────
   // The dashboard can launch us onto the LAUNCH PAGE (to warm Kasada / keep the
   // profile present) and pass the gs.nike.com checkout URL to switch to shortly
