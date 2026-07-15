@@ -306,7 +306,7 @@ function extensionDirValid(dir) {
 // chrome invocation opens them all as tabs in that profile — reliably, even
 // when the profile's Chrome is cold-starting (separate rapid launches can race
 // and get dropped, which is why multi-product only opened one tab).
-function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt) {
+function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt, loadExt) {
   const chrome = findChrome();
   if (!chrome) {
     return { ok: false, error: "Chrome executable not found. Set SNKRS_CHROME_PATH." };
@@ -345,7 +345,12 @@ function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt) {
   // SNKRS_LOAD_EXTENSION=1.
   const extDir = extensionDir || EXTENSION_DIR;
   let loadedExtension = false;
-  if (process.env.SNKRS_LOAD_EXTENSION === "1" && extensionDirValid(extDir)) {
+  // Load at launch when the dashboard asks (per-launch flag) OR the env var is
+  // set. NOTE: Chrome only applies --load-extension when it COLD-STARTS the
+  // browser process for this user-data-dir; a profile launched while Chrome is
+  // already running ignores it. So this reliably covers the profile that starts
+  // Chrome, not every forwarded launch.
+  if ((loadExt || process.env.SNKRS_LOAD_EXTENSION === "1") && extensionDirValid(extDir)) {
     args.push("--disable-features=DisableLoadExtensionCommandLineSwitch");
     args.push(`--load-extension=${extDir}`);
     loadedExtension = true;
@@ -392,7 +397,7 @@ function handle(msg) {
         return { ok: false, error: String(e && e.message || e) };
       }
     case "launch":
-      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir, msg.window);
+      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir, msg.window, !!msg.loadExtension);
     case "getOrders":
       return { ok: true, orders: readOrders() };
     case "setOrders":

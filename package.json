@@ -1,6 +1,6 @@
 {
   "name": "nike-snkrs-bot-sg",
-  "version": "4.15.0",
+  "version": "4.16.0",
   "private": true,
   "description": "Nike SNKRS SG multi-account drop dashboard + checkout bot (Chrome MV3 extension). Dev/test tooling only — the extension itself has no build step.",
   "scripts": {

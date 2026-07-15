@@ -318,6 +318,14 @@
             </div>
             <p class="hint" style="margin:0 0 12px;">Chrome won't render a window narrower than ~500px — smaller widths get clamped, but positions still tile.</p>
 
+            <div class="toggle" style="margin-bottom:6px;">
+              <div>
+                <div class="t-label">🧩 Load extension at launch</div>
+                <div class="t-hint">For profiles that keep losing the extension: load it fresh each launch. NOTE: Chrome only applies this to the profile that <em>cold-starts</em> the browser — if Chrome is already open, other profiles ignore it. Test whether it reaches all your profiles.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="loadExtToggle"><span class="track"></span></label>
+            </div>
+
             <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
             <div class="actions">
               <button id="saveBtn" class="btn btn-light">SAVE CONFIG</button>

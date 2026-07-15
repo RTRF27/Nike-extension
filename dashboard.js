@@ -3085,6 +3085,8 @@ function buildConfig() {
       tileWindows: !!($("tileWindowsToggle") && $("tileWindowsToggle").checked),
       tileW: $("tileW") ? (parseInt($("tileW").value, 10) || 500) : 500,
       tileH: $("tileH") ? (parseInt($("tileH").value, 10) || 680) : 680,
+      // Load the unpacked extension at launch (for profiles that keep losing it).
+      loadExtOnLaunch: !!($("loadExtToggle") && $("loadExtToggle").checked),
     },
     proxies: buildProxyConfig(),
     notify:  buildNotifyConfig(),
@@ -3364,6 +3366,9 @@ function warmFlipEnabled() {
 function tileWindowsEnabled() {
   return !!($("tileWindowsToggle") && $("tileWindowsToggle").checked);
 }
+function loadExtOnLaunch() {
+  return !!($("loadExtToggle") && $("loadExtToggle").checked);
+}
 function tileWH() {
   const w = $("tileW") ? parseInt($("tileW").value, 10) : NaN;
   const h = $("tileH") ? parseInt($("tileH").value, 10) : NaN;
@@ -3479,7 +3484,7 @@ async function launchAccount(acct, msgEl) {
   flash(msgEl, `Opening ${urls.length} tab(s)…`, "#888");
   // All tabs in ONE chrome command so they reliably open together.
   const idx = Math.max(0, accounts.findIndex(a => a.id === acct.id));
-  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: windowFor(idx) });
+  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: windowFor(idx), loadExtension: loadExtOnLaunch() });
   if (resp.ok) {
     flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${urls.length} tab(s).`, "#1db954");
   } else if (resp.hostMissing) {
@@ -3546,7 +3551,7 @@ async function launchAll() {
     }
     const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
     // All of this account's product tabs open in ONE chrome command.
-    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win });
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win, loadExtension: loadExtOnLaunch() });
     if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 450)); // stagger BETWEEN profiles
   }
@@ -3611,7 +3616,7 @@ async function launchRegion(region) {
       continue;
     }
     const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
-    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win });
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win, loadExtension: loadExtOnLaunch() });
     if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 450));
   }
@@ -3697,6 +3702,7 @@ function applyConfigToUI(cfg) {
   if ($("warmFlipToggle")) $("warmFlipToggle").checked = opts.warmFlipEnabled ?? true;
   if ($("flipLeadMin")) $("flipLeadMin").value = opts.flipLeadMin ?? 7;
   if ($("tileWindowsToggle")) $("tileWindowsToggle").checked = opts.tileWindows ?? true;
+  if ($("loadExtToggle")) $("loadExtToggle").checked = !!opts.loadExtOnLaunch;
   if ($("tileW")) $("tileW").value = opts.tileW ?? 500;
   if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
