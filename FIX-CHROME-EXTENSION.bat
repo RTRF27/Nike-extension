@@ -4,12 +4,16 @@ REM  FIX: "the extension keeps disappearing from my Chrome profiles"
 REM
 REM  Cause: a leftover Chrome MANAGEMENT policy (from a force-install
 REM  attempt) makes Chrome treat the browser as enterprise-managed, which
-REM  DISABLES developer-mode (unpacked) extensions on restart. Removing the
-REM  policy un-manages the browser so your Load-unpacked copy sticks.
+REM  DISABLES developer-mode (unpacked) extensions on restart. Worse, the
+REM  "SNKRS Bot Update Server" logon TASK can RE-APPLY that policy every time
+REM  you start Windows/Chrome — which is why it comes back on every run.
+REM  Removing the policy AND the task un-manages the browser so your
+REM  Load-unpacked copy sticks.
 REM
-REM  This removes ONLY the SNKRS-bot / force-install policy leftovers. It
-REM  prints any other Chrome policies (it does NOT delete those) so you can
-REM  see if something else is still managing the browser.
+REM  NOTE: the "This extension includes the key file ...crx-signing-key.pem"
+REM  warning on chrome://extensions is HARMLESS and is NOT what removes the
+REM  extension. (You may move the .keys folder out of the extension folder to
+REM  silence it and keep your signing key private.)
 REM
 REM  RIGHT-CLICK -> RUN AS ADMINISTRATOR.
 REM ============================================================
@@ -26,15 +30,43 @@ if errorlevel 1 (
   pause & exit /b 1
 )
 
+echo ============================================================
+echo  DIAGNOSIS (what is removing your extension) — before removal:
+echo ============================================================
+set "FOUND=0"
+for %%H in (HKLM HKCU) do (
+  reg query "%%H\Software\Policies\Google\Chrome\ExtensionInstallForcelist" >nul 2>&1 && (
+    echo   [X] FORCE-INSTALL policy present in %%H  ^<-- this manages Chrome ^& kills unpacked extensions
+    set "FOUND=1"
+  )
+  reg query "%%H\Software\Policies\Google\Chrome" /v CloudManagementEnrollmentToken >nul 2>&1 && (
+    echo   [X] CloudManagementEnrollmentToken present in %%H  ^<-- keeps Chrome "managed"
+    set "FOUND=1"
+  )
+)
+schtasks /query /tn "%TASK_NAME%" >nul 2>&1 && (
+  echo   [X] Logon task "%TASK_NAME%" exists  ^<-- RE-APPLIES the policy every startup
+  set "FOUND=1"
+)
+netstat -ano | findstr ":%PORT%" | findstr LISTENING >nul 2>&1 && (
+  echo   [X] Update server is running on port %PORT%
+  set "FOUND=1"
+)
+if "%FOUND%"=="0" (
+  echo   [OK] No force-install policy / task found in the registry.
+  echo        If the extension still disappears, Developer mode is being turned
+  echo        off, or another policy is present — see the list at the end.
+)
+echo.
+
 echo [1/4] Removing the force-install / management policy leftovers...
 for %%H in (HKLM HKCU) do (
   reg delete "%%H\Software\Policies\Google\Chrome\ExtensionInstallForcelist" /f >nul 2>&1
   reg delete "%%H\Software\Policies\Google\Chrome\ExtensionInstallSources"   /f >nul 2>&1
-  REM CBCM enrollment token (would keep the browser "managed") — remove if present.
   reg delete "%%H\Software\Policies\Google\Chrome" /v CloudManagementEnrollmentToken /f >nul 2>&1
 )
 
-echo [2/4] Removing the update-server logon task...
+echo [2/4] Removing the update-server logon task (stops it re-applying)...
 schtasks /delete /tn "%TASK_NAME%" /f >nul 2>&1
 
 echo [3/4] Stopping the local update server (port %PORT%)...
