@@ -259,6 +259,25 @@ async function main() {
   check("manual region override wins (SG)", region.eff === "SG", region.eff);
   check("region/address are informational (don't fail verdict)", region.verdictInfoSafe);
 
+  // 9) Profile selection → OPEN SELECTED filters to ticked accounts.
+  const select = await page.evaluate(() => {
+    const tplHasSelect = !!document.getElementById("accountRowTpl").content.querySelector(".f-select");
+    const hasBtn = !!document.getElementById("openSelectedBtn");
+    accounts = [
+      { id: "s1", label: "A", profileDir: "Profile 1", selected: true },
+      { id: "s2", label: "B", profileDir: "Profile 2", selected: false },
+      { id: "s3", label: "C", profileDir: "Profile 3", selected: true },
+    ];
+    updateSelectedCount();
+    const btnLabel = document.getElementById("openSelectedBtn").textContent;
+    const picked = accounts.filter(a => a.profileDir && a.selected).map(a => a.label);
+    return { tplHasSelect, hasBtn, btnLabel, picked };
+  });
+  check("account template has a select checkbox", select.tplHasSelect);
+  check("Drop page has OPEN SELECTED button", select.hasBtn);
+  check("OPEN SELECTED shows the ticked count", /\(2\)/.test(select.btnLabel), select.btnLabel);
+  check("selection filters to the ticked profiles", select.picked.join(",") === "A,C", select.picked.join(","));
+
   check("no errors after full navigation", errors.length === 0, errors.slice(0, 3).join(" | "));
 
   await browser.close();

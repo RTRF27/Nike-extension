@@ -2700,6 +2700,26 @@ function renderAccounts() {
   updateProfileSourceNote();
   refreshOrderCheckerProfiles();
   if (typeof renderProxyAssignments === "function") renderProxyAssignments();
+  updateSelectedCount();
+}
+
+// Reflect how many profiles are ticked, on both the Profiles and Drop pages.
+function updateSelectedCount() {
+  const n = accounts.filter(a => a.profileDir && a.selected).length;
+  const el = $("selectedCount");
+  if (el) el.textContent = String(n);
+  const btn = $("openSelectedBtn");
+  if (btn) {
+    btn.textContent = `🎯 OPEN SELECTED (${n})`;
+    btn.disabled = n === 0;
+    btn.style.opacity = n === 0 ? "0.5" : "";
+  }
+}
+
+function selectAllProfiles(on) {
+  accounts.forEach(a => { if (a.profileDir) a.selected = on; });
+  renderAccounts();
+  saveAll(true);
 }
 
 function buildAccountRow(acct) {
@@ -2711,6 +2731,7 @@ function buildAccountRow(acct) {
   const manualEl    = row.querySelector(".f-profile-manual");
   const sizeEl      = row.querySelector(".f-size");
   const autoEl      = row.querySelector(".f-autolaunch");
+  const selectEl    = row.querySelector(".f-select");
   const regionEl    = row.querySelector(".f-region");
   const cardSel     = row.querySelector(".f-card-select");
   const msgEl       = row.querySelector(".acct-msg");
@@ -2722,6 +2743,7 @@ function buildAccountRow(acct) {
 
   labelEl.value = acct.label || "";
   autoEl.checked = !!acct.autoLaunch;
+  if (selectEl) selectEl.checked = !!acct.selected;
   if (regionEl) regionEl.value = (acct.regionOverride === "SG" || acct.regionOverride === "MY") ? acct.regionOverride : "auto";
   fillSizeSelect(sizeEl, acct.size, acct.sizeType);
   fillProfileSelect(profileEl, manualEl, acct.profileDir);
@@ -2755,6 +2777,11 @@ function buildAccountRow(acct) {
 
   // ── Wire field → state ──
   labelEl.addEventListener("input", () => { acct.label = labelEl.value.trim(); });
+  if (selectEl) selectEl.addEventListener("change", () => {
+    acct.selected = selectEl.checked;
+    updateSelectedCount();
+    saveAll(true);
+  });
   if (regionEl) regionEl.addEventListener("change", () => {
     acct.regionOverride = regionEl.value === "auto" ? "" : regionEl.value;
     saveAll(true);
@@ -3107,6 +3134,7 @@ function buildConfig() {
         checkoutUrl: t.checkoutUrl || "", dropAtMs: t.dropAtMs || 0,
       })) : [],
       autoLaunch: !!a.autoLaunch,
+      selected: !!a.selected,        // ticked for OPEN SELECTED
       regionOverride: a.regionOverride || "",   // "" = auto (detect from phone)
       cardId: a.cardId || "",
       card: resolveCard(a.cardId),   // resolved card object the bot fills
@@ -3580,37 +3608,51 @@ async function launchRegion(region) {
     flashTemp(msgEl, `No ${region} accounts detected yet — run Preflight, or set Region manually on the Profiles page.`, "var(--orange)", 6000);
     return;
   }
+  const flag = region === "SG" ? "🇸🇬" : "🇲🇾";
+  await openProfileSet(list, `${flag} ${region}`, msgEl);
+}
 
-  // Preflight gate, scoped to THIS region's accounts (warn, never hard-block).
+// Open just the accounts the user ticked on the Profiles page.
+async function launchSelected() {
+  const msgEl = $("statusMsg");
+  const list = accounts.filter(a => a.profileDir && a.selected);
+  if (!list.length) {
+    flashTemp(msgEl, "No profiles selected — tick the ☑ boxes on the Profiles page first.", "var(--orange)", 6000);
+    return;
+  }
+  await openProfileSet(list, "selected", msgEl);
+}
+
+// Shared launcher for a SUBSET of accounts (region / selected). Additive: it
+// doesn't wipe the other set's replay timelines or history. Warns on BLOCKED
+// profiles, clears stale PANIC/CLOSE, disarms the scheduler, then opens each.
+async function openProfileSet(list, labelText, msgEl) {
   const blockers = list.filter(a => {
     const rec = preflightResults[a.profileDir];
     return rec && rec.ts && preflightVerdict(mergedChecksFor(a)) === "red";
   });
   if (blockers.length) {
     const names = blockers.map(a => a.label || a.profileDir).join(", ");
-    if (!confirm(`⚠️ Preflight flagged ${blockers.length} ${region} profile(s) as BLOCKED:\n\n${names}\n\nOpen anyway?`)) {
-      flashTemp(msgEl, `Cancelled — fix ${blockers.length} blocked ${region} profile(s) first.`, "var(--orange)", 6000);
+    if (!confirm(`⚠️ Preflight flagged ${blockers.length} ${labelText} profile(s) as BLOCKED:\n\n${names}\n\nOpen anyway?`)) {
+      flashTemp(msgEl, `Cancelled — fix ${blockers.length} blocked profile(s) first.`, "var(--orange)", 6000);
       return;
     }
   }
 
   await saveAll(true);
-  // Clear any stale PANIC / CLOSE flag so this region's tabs can submit, and
-  // disarm the auto-open scheduler so it can't open a duplicate set at drop time.
   await setAbort(false);
   await hostSend({ cmd: "setClose", on: false });
   refreshPanicBanner();
   await new Promise(res => chrome.runtime.sendMessage({ type: "cancel_dash_launch" }, res));
 
-  const flag = region === "SG" ? "🇸🇬" : "🇲🇾";
-  flash(msgEl, `Opening ${list.length} ${region} profile(s)…`, "#888");
+  flash(msgEl, `Opening ${list.length} ${labelText} profile(s)…`, "#888");
   let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
   for (const acct of list) {
-    // Stable per-account tile (global index) so SG and MY windows don't stack.
+    // Stable per-account tile (global index) so windows don't stack.
     const win = windowFor(Math.max(0, accounts.findIndex(a => a.id === acct.id)));
     const targets = launchTargetsFor(acct);
     if (!targets.length) {
-      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL, window: win });
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL, window: win, loadExtension: loadExtOnLaunch() });
       if (resp.ok) { profOk++; warmCount++; } else lastErr = resp.error || "unknown";
       await new Promise(r => setTimeout(r, 400));
       continue;
@@ -3623,11 +3665,11 @@ async function launchRegion(region) {
 
   if (profOk === list.length) {
     const tail = warmCount ? ` (${warmCount} warm-up)` : "";
-    flashTemp(msgEl, `${flag} Opened ${profOk} ${region} profile(s) · ${tabOk} tab(s)${tail}. Each holds SUBMIT until drop.`, "var(--green)", 8000);
+    flashTemp(msgEl, `🚀 Opened ${profOk} ${labelText} profile(s) · ${tabOk} tab(s)${tail}. Each holds SUBMIT until drop.`, "var(--green)", 8000);
   } else if (profOk > 0) {
-    flashTemp(msgEl, `Opened ${profOk}/${list.length} ${region}. Last error: ${lastErr}`, "#f0c070", 6000);
+    flashTemp(msgEl, `Opened ${profOk}/${list.length} ${labelText}. Last error: ${lastErr}`, "#f0c070", 6000);
   } else {
-    flashTemp(msgEl, `Couldn't open ${region}. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
+    flashTemp(msgEl, `Couldn't open ${labelText}. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
   }
 }
 
@@ -3763,6 +3805,7 @@ function applyConfigToUI(cfg) {
     dropAtMs: a.dropAtMs || 0,
     targets: Array.isArray(a.targets) ? a.targets.map(t => ({ ...t })) : [],
     autoLaunch: !!a.autoLaunch,
+    selected: !!a.selected,
     regionOverride: a.regionOverride || "",
     cardId: a.cardId || "",
   }));
@@ -3944,6 +3987,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderAccounts();
     saveAll(true).then(() => flashTemp($("statusMsg"), "Unarm All — scheduler cleared.", "#888", 3000));
   });
+  if ($("selectAllBtn")) $("selectAllBtn").addEventListener("click", () => selectAllProfiles(true));
+  if ($("selectNoneBtn")) $("selectNoneBtn").addEventListener("click", () => selectAllProfiles(false));
+  if ($("openSelectedBtn")) $("openSelectedBtn").addEventListener("click", launchSelected);
   $("scheduleEnabled").addEventListener("change", () => {
     // Toggle only controls AUTO-OPEN; the drop time + countdown stay either way.
     startCountdown();

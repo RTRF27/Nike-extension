@@ -329,8 +329,10 @@
             <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
             <div class="actions">
               <button id="saveBtn" class="btn btn-light">SAVE CONFIG</button>
+              <button id="openSelectedBtn" class="btn btn-purple">🎯 OPEN SELECTED (0)</button>
               <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL</button>
             </div>
+            <p class="hint" style="margin:6px 0 0;">OPEN SELECTED launches only the profiles you ticked ☑ on the Profiles page. LAUNCH ALL opens every configured profile.</p>
             <div id="statusMsg" class="status-msg"></div>
           </section>
         </div>
@@ -429,6 +431,8 @@
         <div class="card-head">
           <h2>ACCOUNTS</h2>
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <button id="selectAllBtn"  class="btn btn-mini btn-dark">☑ SELECT ALL</button>
+            <button id="selectNoneBtn" class="btn btn-mini btn-dark">☐ NONE</button>
             <button id="armAllBtn"   class="btn btn-mini btn-dark">⏰ ARM ALL</button>
             <button id="unarmAllBtn" class="btn btn-mini btn-danger">✕ UNARM ALL</button>
             <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
@@ -437,6 +441,8 @@
         <p class="hint">
           Each account maps to one Chrome profile.
           Pick the profile, set size, assign a card, then launch.
+          Tick <strong>☑ select</strong> on the profiles you want, then use
+          <strong>🎯 OPEN SELECTED</strong> on the Drop page. (<span id="selectedCount">0</span> selected)
           <span id="profileSourceNote"></span>
         </p>
 
@@ -795,6 +801,9 @@
       </div>
       <div class="acct-foot">
         <div class="acct-toggles">
+          <label class="chk f-select-label" title="Include this profile when you click OPEN SELECTED on the Drop page">
+            <input type="checkbox" class="f-select"> ☑ select
+          </label>
           <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
             <input type="checkbox" class="f-autolaunch"> ⏰ auto
           </label>
