@@ -315,6 +315,15 @@ function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt, loadExt) 
 
   const args = [`--profile-directory=${profileDir}`];
 
+  // Keep background / occluded windows running at full speed. Chrome normally
+  // throttles timers + backgrounds the renderer for windows that aren't focused
+  // or are covered by another window — which is why the checkout tabs opened
+  // first (and left behind) were loading slowly. These are process-wide, so they
+  // take effect when Chrome cold-starts for this user-data-dir.
+  args.push("--disable-backgrounding-occluded-windows");
+  args.push("--disable-renderer-backgrounding");
+  args.push("--disable-background-timer-throttling");
+
   // Small / positioned window (opt-in). The dashboard sends window.size ("w,h")
   // and window.position ("x,y") to tile profiles across the screen instead of
   // opening full-size; env vars are a fallback. --new-window ensures the size

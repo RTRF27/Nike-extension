@@ -40,6 +40,23 @@
   const dropMs     = dropRaw ? parseInt(dropRaw, 10) : NaN;
   const now        = Date.now();
 
+  // ── Small tiled window (#snkrsWin=w,h,x,y) ──────────────────
+  // Direct-checkout tabs open straight on gs.nike.com, where the launch-page
+  // bootstrap never runs — so the window sizing lived in the wrong script and
+  // checkout tabs stayed full-size. Resize THIS window from here too. Keeping
+  // every window visible (not stacked/occluded) also stops Chrome throttling
+  // the ones behind, which is why the earlier tabs were loading slowly.
+  (function applyTileWindow() {
+    const win = readParam("snkrsWin");
+    if (!win) return;
+    const m = win.match(/^(\d+),(\d+),(-?\d+),(-?\d+)$/);
+    if (!m) return;
+    const geom = { w: +m[1], h: +m[2], x: +m[3], y: +m[4] };
+    const send = () => { try { chrome.runtime.sendMessage({ type: "tile_window", geom }); } catch (e) {} };
+    send();
+    setTimeout(send, 1200);
+  })();
+
   function log(...a) { console.log("[SNKRSBot gs-boot]", ...a); }
   function logBG(msg) { try { chrome.runtime.sendMessage({ type: "log", message: msg }); } catch (e) {} }
 
