@@ -305,6 +305,58 @@ async function main() {
     await page.close();
   }
 
+  // ── 6. Saved card + CVV: fill the inline security code, then submit ──
+  console.log("[machine] saved card that needs a CVV: types it and submits");
+  {
+    const page = await openFixture(context, fixture("saved-card-cvv.html"));
+    // Detection: the empty security-code field is found; once filled it isn't.
+    const det = await page.evaluate(() => {
+      const C = window.CheckoutCore;
+      const before = !!C.findSecurityCodeInput(document);
+      const inp = document.querySelector(".cvv-input");
+      C.fillNativeInput(inp, "123");
+      const after = !!C.findSecurityCodeInput(document);
+      return { before, after, value: inp.value };
+    });
+    eq("cvv: empty security-code field detected", det.before, true);
+    eq("cvv: fillNativeInput wrote the value", det.value, "123");
+    eq("cvv: filled field no longer flagged empty", det.after, false);
+    await page.close();
+
+    // Machine: a saved card with an empty CVV → types the account CVV → submits.
+    const page2 = await openFixture(context, fixture("saved-card-cvv.html"));
+    const out = await page2.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
+        getCvv: () => "456",
+      });
+      const r = await machine.run();
+      return { submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || "") };
+    });
+    eq("cvv: machine typed the account CVV", out.cvv, "456");
+    eq("cvv: machine reached SUBMIT", out.submitted, true);
+    await page2.close();
+
+    // No CVV set → the machine must NOT get stuck; it flags and moves on.
+    const page3 = await openFixture(context, fixture("saved-card-cvv.html"));
+    const noCvv = await page3.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
+        getCvv: () => "",
+      });
+      const r = await machine.run();
+      return { state: machine.state, cvv: (document.querySelector(".cvv-input").value || "") };
+    });
+    check("cvv: no-CVV account leaves the field empty (manual)", noCvv.cvv === "", `cvv=${noCvv.cvv}`);
+    await page3.close();
+  }
+
   await browser.close();
 
   console.log("\n" + results.join("\n"));

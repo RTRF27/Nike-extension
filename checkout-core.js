@@ -225,6 +225,45 @@
     return digits.length >= 12;
   }
 
+  // A visible, still-empty security-code / CVV input on the MAIN page — the
+  // saved-card case where Nike shows the card already on file but still wants
+  // the CVV typed before CONTINUE (see the "Security code *" field).
+  function findSecurityCodeInput(doc) {
+    doc = doc || document;
+    const inputs = Array.from(doc.querySelectorAll("input"));
+    return inputs.find((inp) => {
+      const hay = [inp.name, inp.id, inp.placeholder, inp.getAttribute("aria-label"), inp.autocomplete]
+        .join(" ").toLowerCase();
+      const isCvv = inp.autocomplete === "cc-csc" ||
+        /security\s*code|\bcvv\b|\bcvc\b|\bcid\b|card\s*verification|verification\s*(code|value)/.test(hay);
+      if (!isCvv) return false;
+      if (!isLogicallyVisible(inp)) return false;
+      const v = (inp.value || "").replace(/\D/g, "");
+      return v.length < 3; // empty or incomplete
+    }) || null;
+  }
+
+  // Type a value into a native (possibly React-controlled) input: use the
+  // prototype value setter so React's onChange sees it, then fire the events.
+  function fillNativeInput(input, value, dbg) {
+    dbg = dbg || function () {};
+    if (!input) return false;
+    const view = (input.ownerDocument && input.ownerDocument.defaultView) || window;
+    try { input.focus(); } catch (e) {}
+    try {
+      const proto = view.HTMLInputElement && view.HTMLInputElement.prototype;
+      const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
+      if (desc && desc.set) desc.set.call(input, value); else input.value = value;
+    } catch (e) { try { input.value = value; } catch (_) {} }
+    for (const type of ["input", "change"]) {
+      try { input.dispatchEvent(new view.Event(type, { bubbles: true })); } catch (e) {}
+    }
+    try { input.dispatchEvent(new view.KeyboardEvent("keyup", { bubbles: true })); } catch (e) {}
+    try { input.blur(); } catch (e) {}
+    dbg(`fillNativeInput: set CVV (${String(value).length} digits)`);
+    return true;
+  }
+
   // Has the page reached a confirmation / processing state?
   function isConfirmed(doc) {
     doc = doc || document;
@@ -386,6 +425,29 @@
     }
     snapshot() { return snapshotPageState(this.doc); }
 
+    // Saved-card checkout variant: the card is already on file but Nike wants
+    // the CVV / security code typed before CONTINUE. Fill it from the account's
+    // stored CVV. No-op when there's no such field (returns false).
+    async _fillSavedCardCvv(tag) {
+      let input = findSecurityCodeInput(this.doc);
+      if (!input) input = await waitFor(() => findSecurityCodeInput(this.doc), this.leo ? 1500 : 3000, 150);
+      if (!input) return false; // this checkout doesn't ask for a CVV
+      const cvv = (this.d.getCvv && String(this.d.getCvv() || "").replace(/\D/g, "")) || "";
+      if (cvv.length < 3) {
+        this._log(`⚠️${tag} [2/3] Saved card needs a security code but no CVV is set for this account — enter it manually.`);
+        return false;
+      }
+      this._log(`💳${tag} [2/3] Saved card on file — entering security code (CVV)…`);
+      fillNativeInput(input, cvv, (m) => this._dbg(m));
+      await this._w(600, 200);
+      // One retry if it didn't stick (React can drop a too-fast programmatic set).
+      if (findSecurityCodeInput(this.doc)) {
+        fillNativeInput(input, cvv, (m) => this._dbg(m));
+        await this._w(400, 150);
+      }
+      return true;
+    }
+
     // Run the whole flow once from the CURRENT DOM state. Safe to re-enter
     // (each state re-checks the DOM), which is what the outer watchdog relies
     // on. Returns { state, submitted }.
@@ -425,9 +487,12 @@
       if (isPaymentAlreadyComplete(doc)) {
         this._log(`💳${tag} [2/3] Payment already on file — no card entry needed.`);
         if (d.cancelCardFill) d.cancelCardFill();
+        // Saved card, but Nike may still require the CVV/security code typed.
+        await this._fillSavedCardCvv(tag);
       } else if (isInlineCardFilled(doc)) {
         this._log(`💳${tag} [2/3] Card details already filled inline — proceeding to SUBMIT.`);
         if (d.cancelCardFill) d.cancelCardFill();
+        await this._fillSavedCardCvv(tag);
       } else {
         const iframe = doc.querySelector("iframe.newCard[src*='gs-payments']");
         if (!iframe && !isInlineCardFilled(doc)) {
@@ -670,6 +735,7 @@
     findDeliveryContinueButton, findDeliveryContinueOnly, findPaymentAccordionRow,
     findPaymentIframe, findPaymentContinueOnly, findSubmitOrderButton,
     isPaymentAlreadyComplete, isInlineCardFilled, isConfirmed,
+    findSecurityCodeInput, fillNativeInput,
     snapshotPageState, formatSnapshot, nativeClick,
     // machine
     CheckoutMachine,

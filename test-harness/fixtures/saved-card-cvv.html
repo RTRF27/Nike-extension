@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- Fixture: a SAVED card is on file (VISA ····1561) but Nike still requires the
+     CVV / "Security code" typed before CONTINUE. isPaymentAlreadyComplete() is
+     true (card on file), yet findSecurityCodeInput() must find the empty field
+     and the machine must type the account's CVV into it. -->
+<html lang="en">
+<head><meta charset="utf-8"><title>GS Checkout — saved card + CVV</title></head>
+<body>
+  <main class="checkout">
+    <section class="category delivery-section">
+      <h2>DELIVERY</h2>
+      <div class="summary">1 Pearl Bank 26-18, 169016</div>
+    </section>
+
+    <section class="category payment-section">
+      <h2>PAYMENT</h2>
+      <div class="saved-card-row">
+        <span class="brand">VISA</span>
+        <span class="last4">1561</span>
+        <input class="cvv-input" type="text" inputmode="numeric" maxlength="4"
+               autocomplete="cc-csc" aria-label="Security code" placeholder="Security code *">
+      </div>
+      <label><input type="checkbox" checked> Billing address is the same as delivery address</label>
+      <button class="button-continue" type="button">Continue</button>
+    </section>
+
+    <!-- SUBMIT appears after the payment section is committed. -->
+    <button class="button-submit" type="button" style="display:none;">Submit Order</button>
+  </main>
+
+  <script>
+    // Mimic Nike: clicking CONTINUE (once the CVV has 3+ digits) reveals SUBMIT.
+    document.querySelector(".button-continue").addEventListener("click", function () {
+      var cvv = (document.querySelector(".cvv-input").value || "").replace(/\D/g, "");
+      if (cvv.length >= 3) {
+        this.style.display = "none";
+        document.querySelector(".button-submit").style.display = "";
+      }
+    });
+  </script>
+</body>
+</html>
