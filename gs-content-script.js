@@ -218,8 +218,11 @@ async function runCheckoutFlow() {
     cancelCardFill: () => cancelCardFillWait(),
     isTestMode: () => !!settings?.testMode,
     isLeoMode: () => !!settings?.leoMode,
-    // Saved-card checkouts sometimes still ask for the CVV inline — supply it.
+    // Saved-card checkouts sometimes still ask for the CVV inline — supply it,
+    // plus the configured card's last 4 so the bot can confirm the card on file
+    // matches this account before submitting.
     getCvv: () => settings?.cardCvv || "",
+    getCardLast4: () => (settings?.cardNumber || "").replace(/\D/g, "").slice(-4),
     // DAN raffle only: max random human delay before submit (seconds → ms).
     getSubmitJitterMs: () => Math.max(0, Number(settings?.danJitterSec) || 0) * 1000,
     getDropAt: () => resolveDropAt(),

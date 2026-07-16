@@ -323,7 +323,7 @@ async function main() {
     eq("cvv: filled field no longer flagged empty", det.after, false);
     await page.close();
 
-    // Machine: a saved card with an empty CVV → types the account CVV → submits.
+    // Machine: card matches (····1561) + CVV set → types CVV → CONTINUE → submits.
     const page2 = await openFixture(context, fixture("saved-card-cvv.html"));
     const out = await page2.evaluate(async () => {
       const C = window.CheckoutCore;
@@ -331,7 +331,7 @@ async function main() {
         doc: document, log: () => {}, dbg: () => {},
         emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
         cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
-        getCvv: () => "456",
+        getCvv: () => "456", getCardLast4: () => "1561",
       });
       const r = await machine.run();
       return { submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || "") };
@@ -340,7 +340,7 @@ async function main() {
     eq("cvv: machine reached SUBMIT", out.submitted, true);
     await page2.close();
 
-    // No CVV set → the machine must NOT get stuck; it flags and moves on.
+    // No CVV set → must NOT click CONTINUE into a dead submit; abort in ERROR.
     const page3 = await openFixture(context, fixture("saved-card-cvv.html"));
     const noCvv = await page3.evaluate(async () => {
       const C = window.CheckoutCore;
@@ -348,13 +348,34 @@ async function main() {
         doc: document, log: () => {}, dbg: () => {},
         emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
         cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
-        getCvv: () => "",
+        getCvv: () => "", getCardLast4: () => "1561",
       });
       const r = await machine.run();
-      return { state: machine.state, cvv: (document.querySelector(".cvv-input").value || "") };
+      const submitVisible = document.querySelector(".button-submit").style.display !== "none";
+      return { state: machine.state, submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || ""), submitVisible };
     });
-    check("cvv: no-CVV account leaves the field empty (manual)", noCvv.cvv === "", `cvv=${noCvv.cvv}`);
+    eq("cvv: no-CVV account does NOT submit", noCvv.submitted, false);
+    eq("cvv: no-CVV account ends in ERROR (didn't click CONTINUE)", noCvv.state, "ERROR");
+    check("cvv: no-CVV never reached SUBMIT page", noCvv.submitVisible === false, `submitVisible=${noCvv.submitVisible}`);
     await page3.close();
+
+    // Wrong card on file (····9999 ≠ 1561) → abort BEFORE typing / continuing.
+    const page4 = await openFixture(context, fixture("saved-card-cvv.html"));
+    const wrong = await page4.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
+        getCvv: () => "456", getCardLast4: () => "9999",
+      });
+      const r = await machine.run();
+      return { state: machine.state, submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || "") };
+    });
+    eq("cvv: mismatched card does NOT submit", wrong.submitted, false);
+    eq("cvv: mismatched card ends in ERROR", wrong.state, "ERROR");
+    check("cvv: mismatched card never typed the CVV", wrong.cvv === "", `cvv=${wrong.cvv}`);
+    await page4.close();
   }
 
   await browser.close();

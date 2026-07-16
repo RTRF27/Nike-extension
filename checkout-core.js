@@ -450,29 +450,65 @@
     }
     snapshot() { return snapshotPageState(this.doc); }
 
-    // Saved-card checkout variant: the card is already on file but Nike wants
-    // the CVV / security code typed before CONTINUE. Fill it from the account's
-    // stored CVV. No-op when there's no such field (returns false).
-    async _fillSavedCardCvv(tag) {
+    // The last 4 digits of the card shown on file (near the VISA/…/AMEX brand).
+    _savedCardLast4() {
+      const text = (this.doc.body && this.doc.body.innerText) || "";
+      const m = text.match(/\b(VISA|MASTERCARD|MASTER\s?CARD|AMEX|AMERICAN\s?EXPRESS)\b[\s\S]{0,40}?(\d{4})\b/i);
+      return m ? m[2] : "";
+    }
+    // Does the card on file match the account's configured card? true / false /
+    // null (can't tell — no configured last-4, or none readable on the page).
+    _verifyCardMatch(tag) {
+      const want = (this.d.getCardLast4 && String(this.d.getCardLast4() || "").replace(/\D/g, "").slice(-4)) || "";
+      if (want.length < 4) return null;
+      const have = this._savedCardLast4();
+      if (!have) return null;
+      if (have === want) { this._log(`✅${tag} [2/3] Card on file ····${have} matches this account.`); return true; }
+      this._log(`⛔${tag} [2/3] Card on file ····${have} does NOT match this account's card ····${want}.`);
+      return false;
+    }
+
+    // Type the account CVV into the security-code field. Returns:
+    //   "none"   → the page isn't asking for a CVV,
+    //   "nocvv"  → a CVV is required but none is configured,
+    //   "failed" → typed but the field is still empty/invalid,
+    //   "filled" → CVV is now in the field.
+    async _typeCvv(tag) {
       let input = findSecurityCodeInput(this.doc);
-      if (!input) input = await waitFor(() => findSecurityCodeInput(this.doc), this.leo ? 1500 : 3000, 150);
-      if (!input) return false; // this checkout doesn't ask for a CVV
+      if (!input) input = await waitFor(() => findSecurityCodeInput(this.doc), this.leo ? 1500 : 2500, 150);
+      if (!input) return "none";
       const cvv = (this.d.getCvv && String(this.d.getCvv() || "").replace(/\D/g, "")) || "";
-      if (cvv.length < 3) {
-        this._log(`⚠️${tag} [2/3] Saved card needs a security code but no CVV is set for this account — enter it manually.`);
-        return false;
-      }
-      this._log(`💳${tag} [2/3] Saved card on file — entering security code (CVV)…`);
+      if (cvv.length < 3) return "nocvv";
+      this._log(`💳${tag} [2/3] Entering security code (CVV)…`);
       fillNativeInput(input, cvv, (m) => this._dbg(m));
       await this._w(600, 200);
-      // One retry if it didn't stick (Angular/React can drop a too-fast set).
-      if (findSecurityCodeInput(this.doc)) {
+      if (findSecurityCodeInput(this.doc)) { // still empty → retry once
         fillNativeInput(input, cvv, (m) => this._dbg(m));
         await this._w(400, 150);
       }
-      // Commit the PAYMENT section so it collapses with the green tick (like
-      // DELIVERY) and SUBMIT ORDER unlocks. Poll briefly for the CONTINUE to
-      // become clickable now that the CVV made the form valid.
+      return findSecurityCodeInput(this.doc) ? "failed" : "filled";
+    }
+
+    // Saved card already on file. Verify it's the right card, type the CVV if
+    // the page asks for one, then commit PAYMENT (green tick) so SUBMIT unlocks.
+    // Returns "ok" to continue, or "abort" to STOP (never click CONTINUE / submit
+    // into a state that can't actually go through).
+    async _handleSavedCard(tag) {
+      if (this._verifyCardMatch(tag) === false) {
+        this._log(`❌${tag} [2/3] Wrong card on file — NOT continuing (won't submit someone else's card).`);
+        return "abort";
+      }
+      const res = await this._typeCvv(tag);
+      if (res === "none") return "ok";                // no CVV needed — ready as-is
+      if (res === "nocvv") {
+        this._log(`❌${tag} [2/3] Saved card needs a security code but no CVV is set for this account — NOT continuing (SUBMIT would fail). Add the card's CVV in the dashboard.`);
+        return "abort";
+      }
+      if (res === "failed") {
+        this._log(`❌${tag} [2/3] Couldn't enter the CVV — NOT continuing.`);
+        return "abort";
+      }
+      // CVV is in → commit PAYMENT so it collapses with the green tick.
       let pc = this.finder("paymentContinue");
       if (!pc) pc = await waitFor(() => this.finder("paymentContinue"), this.leo ? 1500 : 3000, 150);
       if (pc) {
@@ -480,7 +516,7 @@
         await nativeClick(pc, "CONTINUE (payment) after CVV", this.leo, (m) => this._dbg(m));
         await this._w(1400, 350);
       }
-      return true;
+      return "ok";
     }
 
     // Run the whole flow once from the CURRENT DOM state. Safe to re-enter
@@ -520,14 +556,23 @@
       this._to(STATES.PAYMENT);
       this._log(`🔍${tag} [2/3] Checking payment state…`);
       if (isPaymentAlreadyComplete(doc)) {
-        this._log(`💳${tag} [2/3] Payment already on file — no card entry needed.`);
+        this._log(`💳${tag} [2/3] Payment already on file — verifying card + CVV…`);
         if (d.cancelCardFill) d.cancelCardFill();
-        // Saved card, but Nike may still require the CVV/security code typed.
-        await this._fillSavedCardCvv(tag);
+        // Saved card: confirm it's the right card and that the CVV is entered
+        // BEFORE any CONTINUE — otherwise CONTINUE collapses PAYMENT into a
+        // state that can't submit.
+        const sc = await this._handleSavedCard(tag);
+        if (sc === "abort") {
+          this._log(formatSnapshot(tag, this.snapshot()));
+          this._to(STATES.ERROR);
+          this._emit("error", { reason: "saved_card_blocked" });
+          return { state: this.state, submitted: false };
+        }
       } else if (isInlineCardFilled(doc)) {
         this._log(`💳${tag} [2/3] Card details already filled inline — proceeding to SUBMIT.`);
         if (d.cancelCardFill) d.cancelCardFill();
-        await this._fillSavedCardCvv(tag);
+        // Inline card the bot typed — still fill the CVV if the page asks.
+        await this._typeCvv(tag);
       } else {
         const iframe = doc.querySelector("iframe.newCard[src*='gs-payments']");
         if (!iframe && !isInlineCardFilled(doc)) {
