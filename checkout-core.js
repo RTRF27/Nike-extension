@@ -231,12 +231,27 @@
   function findSecurityCodeInput(doc) {
     doc = doc || document;
     const inputs = Array.from(doc.querySelectorAll("input"));
+    const looksLikeCvv = (inp) => {
+      if (inp.autocomplete === "cc-csc") return true;
+      // Scan EVERY attribute name+value (catches name="cardCvc", id="cardCvc-input",
+      // the cccvc="" marker attribute, class names, etc.) as plain substrings —
+      // NOT word-boundaried, so "cardCvc" matches "cvc".
+      let hay = "";
+      try {
+        for (const n of (inp.getAttributeNames ? inp.getAttributeNames() : [])) {
+          hay += " " + n + " " + (inp.getAttribute(n) || "");
+        }
+      } catch (e) {}
+      hay = (hay + " " + [inp.name, inp.id, inp.placeholder, inp.className, inp.getAttribute("aria-label")].join(" ")).toLowerCase();
+      if (/cvv|cvc|csc|cccvc|security\s*code|securitycode|card\s*verification|verification\s*(code|value)/.test(hay)) return true;
+      // Heuristic fallback: a short numeric field constrained to 3–4 digits.
+      const ml = parseInt(inp.getAttribute("maxlength") || "0", 10);
+      const pat = inp.getAttribute("pattern") || "";
+      if ((ml === 3 || ml === 4) && /\[0-9\]\{3/.test(pat.replace(/\s/g, ""))) return true;
+      return false;
+    };
     return inputs.find((inp) => {
-      const hay = [inp.name, inp.id, inp.placeholder, inp.getAttribute("aria-label"), inp.autocomplete]
-        .join(" ").toLowerCase();
-      const isCvv = inp.autocomplete === "cc-csc" ||
-        /security\s*code|\bcvv\b|\bcvc\b|\bcid\b|card\s*verification|verification\s*(code|value)/.test(hay);
-      if (!isCvv) return false;
+      if (!looksLikeCvv(inp)) return false;
       if (!isLogicallyVisible(inp)) return false;
       const v = (inp.value || "").replace(/\D/g, "");
       return v.length < 3; // empty or incomplete
@@ -249,18 +264,28 @@
     dbg = dbg || function () {};
     if (!input) return false;
     const view = (input.ownerDocument && input.ownerDocument.defaultView) || window;
+    const setNative = (v) => {
+      try {
+        const proto = view.HTMLInputElement && view.HTMLInputElement.prototype;
+        const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
+        if (desc && desc.set) desc.set.call(input, v); else input.value = v;
+      } catch (e) { try { input.value = v; } catch (_) {} }
+    };
     try { input.focus(); } catch (e) {}
-    try {
-      const proto = view.HTMLInputElement && view.HTMLInputElement.prototype;
-      const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
-      if (desc && desc.set) desc.set.call(input, value); else input.value = value;
-    } catch (e) { try { input.value = value; } catch (_) {} }
-    for (const type of ["input", "change"]) {
+    try { input.dispatchEvent(new view.FocusEvent("focus", { bubbles: false })); } catch (e) {}
+    // Set the whole value, then fire the events Angular/React listen for. An
+    // InputEvent (not a plain Event) makes some frameworks accept it.
+    setNative(String(value));
+    try { input.dispatchEvent(new view.InputEvent("input", { bubbles: true, data: String(value), inputType: "insertText" })); }
+    catch (e) { try { input.dispatchEvent(new view.Event("input", { bubbles: true })); } catch (_) {} }
+    for (const type of ["keydown", "keyup", "change"]) {
       try { input.dispatchEvent(new view.Event(type, { bubbles: true })); } catch (e) {}
     }
-    try { input.dispatchEvent(new view.KeyboardEvent("keyup", { bubbles: true })); } catch (e) {}
+    // blur → marks Angular controls "touched" so validity (ng-valid) settles and
+    // the CONTINUE button enables.
     try { input.blur(); } catch (e) {}
-    dbg(`fillNativeInput: set CVV (${String(value).length} digits)`);
+    try { input.dispatchEvent(new view.FocusEvent("blur", { bubbles: false })); } catch (e) {}
+    dbg(`fillNativeInput: set value (${String(value).length} chars) into ${input.name || input.id || "input"}`);
     return true;
   }
 
@@ -440,10 +465,20 @@
       this._log(`💳${tag} [2/3] Saved card on file — entering security code (CVV)…`);
       fillNativeInput(input, cvv, (m) => this._dbg(m));
       await this._w(600, 200);
-      // One retry if it didn't stick (React can drop a too-fast programmatic set).
+      // One retry if it didn't stick (Angular/React can drop a too-fast set).
       if (findSecurityCodeInput(this.doc)) {
         fillNativeInput(input, cvv, (m) => this._dbg(m));
         await this._w(400, 150);
+      }
+      // Commit the PAYMENT section so it collapses with the green tick (like
+      // DELIVERY) and SUBMIT ORDER unlocks. Poll briefly for the CONTINUE to
+      // become clickable now that the CVV made the form valid.
+      let pc = this.finder("paymentContinue");
+      if (!pc) pc = await waitFor(() => this.finder("paymentContinue"), this.leo ? 1500 : 3000, 150);
+      if (pc) {
+        this._log(`✅${tag} [2/3] CVV entered — committing PAYMENT (CONTINUE)…`);
+        await nativeClick(pc, "CONTINUE (payment) after CVV", this.leo, (m) => this._dbg(m));
+        await this._w(1400, 350);
       }
       return true;
     }

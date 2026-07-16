@@ -17,21 +17,26 @@
       <div class="saved-card-row">
         <span class="brand">VISA</span>
         <span class="last4">1561</span>
-        <input class="cvv-input" type="text" inputmode="numeric" maxlength="4"
-               autocomplete="cc-csc" aria-label="Security code" placeholder="Security code *">
+        <!-- EXACT attributes from a real Nike/eShopWorld saved-card checkout:
+             name="cardCvc", id="cardCvc-input", cccvc marker, numeric pattern,
+             NO placeholder/aria-label matching "cvv"/"security code". -->
+        <input class="cvv-input form-control" type="tel" name="cardCvc" id="cardCvc-input"
+               autocomplete="off" required minlength="3" maxlength="4"
+               pattern="[0-9]{4}|[0-9]{3}" cccvc="">
       </div>
       <label><input type="checkbox" checked> Billing address is the same as delivery address</label>
       <button class="button-continue" type="button">Continue</button>
     </section>
 
-    <!-- SUBMIT appears after the payment section is committed. -->
+    <!-- SUBMIT appears after the payment section is committed (green tick). -->
     <button class="button-submit" type="button" style="display:none;">Submit Order</button>
   </main>
 
   <script>
-    // Mimic Nike: clicking CONTINUE (once the CVV has 3+ digits) reveals SUBMIT.
+    // Mimic Nike: CONTINUE only commits once the CVV has 3+ digits; committing
+    // collapses PAYMENT and reveals SUBMIT ORDER.
     document.querySelector(".button-continue").addEventListener("click", function () {
-      var cvv = (document.querySelector(".cvv-input").value || "").replace(/\D/g, "");
+      var cvv = (document.getElementById("cardCvc-input").value || "").replace(/\D/g, "");
       if (cvv.length >= 3) {
         this.style.display = "none";
         document.querySelector(".button-submit").style.display = "";
