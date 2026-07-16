@@ -666,7 +666,33 @@ chrome.runtime.onStartup.addListener(() => {
   // Re-apply this profile's proxy + reload notify config after a browser
   // restart, even before any Nike tab boots.
   ensureCentralConfig();
+  reinjectOpenTabs("startup");
 });
+
+// After an extension reload/update, any checkout tab that was already open is
+// left with ORPHANED (dead) content scripts — Chrome only injects fresh ones on
+// a navigation, which is why the card wouldn't fill until you refreshed. Push
+// the checkout scripts back into open gs.nike.com tabs so they work without a
+// manual refresh. Guards in each script make re-injection safe.
+async function reinjectOpenTabs(reason) {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: ["*://gs.nike.com/*"] }); } catch (e) { return; }
+  for (const tab of tabs) {
+    if (!tab.id || !/^https?:/i.test(tab.url || "")) continue;
+    try {
+      // Clear the run-guards the dead scripts left behind so the fresh ones run.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        func: () => { try { delete document.documentElement.dataset.snkrsBotRan; delete document.documentElement.dataset.snkrsPayRan; } catch (e) {} },
+      });
+      // Payments filler into all frames (no-op outside the gs-payments iframe).
+      await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["gs-payments-content-script.js"] });
+      // Checkout driver into the top frame.
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["checkout-core.js", "gs-content-script.js"] });
+      console.log(`[SNKRSBot BG] re-injected checkout scripts into tab ${tab.id} (${reason})`);
+    } catch (e) { /* tab not scriptable (chrome://, etc.) */ }
+  }
+}
 chrome.runtime.onInstalled.addListener(() => {
   scheduleDropAlarm();
   armUpcomingPoll();
@@ -675,6 +701,9 @@ chrome.runtime.onInstalled.addListener(() => {
   // so the dashboard banner flips this profile to green without waiting for
   // the next browser restart.
   reportVersionToHost();
+  // Re-inject into open checkout tabs so a reload/update doesn't require a
+  // manual page refresh for the card to fill.
+  reinjectOpenTabs("installed/updated");
 });
 
 // ── Drop-time tab reload (survives Memory Saver / SW sleep) ────

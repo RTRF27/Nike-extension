@@ -201,6 +201,18 @@ function findCvvField() {
 // No signal needed — this iframe only loads after the payment
 // section is expanded, so it's safe to start filling immediately.
 (async function init() {
+  // Only run inside the actual gs-payments card iframe. (When the background
+  // re-injects checkout scripts into an already-open tab after an extension
+  // reload, it injects into ALL frames — this guard makes it a no-op in the
+  // main gs.nike.com frame, which has no card form.)
+  if (!/gs-payments\.nike\.com/i.test(location.hostname)) return;
+  // Run-guard: don't double-type if this frame already got filled this load.
+  try {
+    const ran = document.documentElement.dataset.snkrsPayRan;
+    if (ran && Date.now() - Number(ran) < 180000) { log("Payments script already ran on this frame — skipping."); return; }
+    document.documentElement.dataset.snkrsPayRan = String(Date.now());
+  } catch (e) {}
+
   const minimizedAtLoad = document.body && document.body.getBoundingClientRect().width === 0;
   log("Payment iframe script loaded —", location.href, minimizedAtLoad ? "[WINDOW MINIMIZED]" : "[window visible]");
 
