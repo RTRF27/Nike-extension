@@ -197,6 +197,187 @@ async function main() {
     await page.close();
   }
 
+  // ── 4b. LEO speed mode: faster fill→submit + on-the-dot / immediate ─
+  // Tests run against the REAL captured gs.nike.com checkout DOM (saved-card
+  // fixture). We assert BEHAVIOUR + a RELATIVE speed-up (LEO vs the normal
+  // flow on the same page) rather than brittle absolute millisecond thresholds,
+  // and that LEO never submits before the drop.
+  console.log("[machine] LEO mode is faster and submits on/after the drop");
+  {
+    const runOnce = async (page, leo, getDropAt) => page.evaluate(async ({ leo, dropAt }) => {
+      const C = window.CheckoutCore;
+      let submittedAt = 0;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        // FIRST submit emit only — the post-submit verify loop re-emits on each
+        // retry when a static fixture never "advances".
+        emit: (e) => { if (e.code === "submitted" && !submittedAt) submittedAt = Date.now(); },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false,
+        isLeoMode: () => leo, getDropAt: () => dropAt,
+      });
+      const t0 = Date.now();
+      const r = await machine.run();
+      return { submitted: r.submitted, totalMs: Date.now() - t0, offset: submittedAt ? submittedAt - dropAt : null };
+    }, { leo, dropAt: getDropAt });
+
+    // Relative speed: LEO (no hold) must reach SUBMIT faster than the normal
+    // flow on the same real page — that's the "fill→submit is too slow" fix.
+    const pN = await openFixture(context, fixture("saved-card.html"));
+    const normal = await runOnce(pN, false, 0);
+    await pN.close();
+    const pL = await openFixture(context, fixture("saved-card.html"));
+    const leo = await runOnce(pL, true, 0);
+    await pL.close();
+    eq("LEO: normal flow submitted", normal.submitted, true);
+    eq("LEO: leo flow submitted", leo.submitted, true);
+    check("LEO: fill→submit is faster than the normal flow",
+      leo.totalMs < normal.totalMs, `leo ${leo.totalMs}ms vs normal ${normal.totalMs}ms`);
+
+    // On-the-dot: with a drop comfortably beyond the fill pipeline, LEO holds and
+    // submits AT/AFTER the drop, never early.
+    const pH = await openFixture(context, fixture("saved-card.html"));
+    const held = await runOnce(pH, true, Date.now() + 6000);
+    await pH.close();
+    eq("LEO: held tab submitted", held.submitted, true);
+    check("LEO: never submits before the drop", held.offset >= -15, `offset ${held.offset}ms`);
+    check("LEO: submits on the dot (<120ms late)", held.offset != null && held.offset <= 120, `offset ${held.offset}ms`);
+
+    // Late tab (opened after drop): submits, with no drop-hold added.
+    const pLate = await openFixture(context, fixture("saved-card.html"));
+    const late = await runOnce(pLate, true, Date.now() - 60000);
+    await pLate.close();
+    eq("LEO: late tab submitted", late.submitted, true);
+    check("LEO: late tab not slower than normal (no hold added)",
+      late.totalMs <= normal.totalMs + 500, `${late.totalMs}ms`);
+  }
+
+  // ── 4c. DAN raffle human delay: submit lands AFTER the drop, within window ─
+  console.log("[machine] DAN raffle adds a bounded human delay before submit");
+  {
+    const page = await openFixture(context, fixture("saved-card.html"));
+    const out = await page.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const dropAt = Date.now(); // drop is now → only the jitter delays submit
+      let firstSubmit = 0;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: (e) => { if (e.code === "submitted" && !firstSubmit) firstSubmit = Date.now(); },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false,
+        isLeoMode: () => false, getSubmitJitterMs: () => 3000, getDropAt: () => dropAt,
+      });
+      const r = await machine.run();
+      return { submitted: r.submitted, delay: firstSubmit - dropAt };
+    });
+    eq("DAN: submitted", out.submitted, true);
+    // Pipeline itself takes ~1s; with up to 3s jitter the submit must land after
+    // the drop and comfortably inside the raffle window.
+    check("DAN: submit delayed past the drop (human spread)", out.delay >= 0, `delay ${out.delay}ms`);
+    check("DAN: delay within the bounded window", out.delay < 20000, `delay ${out.delay}ms`);
+    await page.close();
+  }
+
+  // ── 5. PANIC: abort raised while holding must cancel SUBMIT ──
+  console.log("[machine] panic abort during HOLDING cancels SUBMIT");
+  {
+    const page = await openFixture(context, fixture("saved-card.html"));
+    const out = await page.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const dropAt = Date.now() + 4000; // hold 4s
+      let submitted = false, aborted = false;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: (e) => { if (e.code === "submitted") submitted = true; },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => dropAt,
+        // Abort flips true ~1s into the hold.
+        checkAbort: () => Date.now() > (window.__t0 + 1000),
+      });
+      window.__t0 = Date.now();
+      const r = await machine.run();
+      aborted = !!r.aborted;
+      return { submitted, aborted, state: machine.state };
+    });
+    check("panic: never submitted", out.submitted === false, `submitted=${out.submitted}`);
+    eq("panic: reported aborted", out.aborted, true);
+    eq("panic: ended in ERROR", out.state, "ERROR");
+    await page.close();
+  }
+
+  // ── 6. Saved card + CVV: fill the inline security code, then submit ──
+  console.log("[machine] saved card that needs a CVV: types it and submits");
+  {
+    const page = await openFixture(context, fixture("saved-card-cvv.html"));
+    // Detection: the empty security-code field is found; once filled it isn't.
+    const det = await page.evaluate(() => {
+      const C = window.CheckoutCore;
+      const before = !!C.findSecurityCodeInput(document);
+      const inp = document.querySelector(".cvv-input");
+      C.fillNativeInput(inp, "123");
+      const after = !!C.findSecurityCodeInput(document);
+      return { before, after, value: inp.value };
+    });
+    eq("cvv: empty security-code field detected", det.before, true);
+    eq("cvv: fillNativeInput wrote the value", det.value, "123");
+    eq("cvv: filled field no longer flagged empty", det.after, false);
+    await page.close();
+
+    // Machine: card matches (····1561) + CVV set → types CVV → CONTINUE → submits.
+    const page2 = await openFixture(context, fixture("saved-card-cvv.html"));
+    const out = await page2.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
+        getCvv: () => "456", getCardLast4: () => "1561",
+      });
+      const r = await machine.run();
+      return { submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || "") };
+    });
+    eq("cvv: machine typed the account CVV", out.cvv, "456");
+    eq("cvv: machine reached SUBMIT", out.submitted, true);
+    await page2.close();
+
+    // No CVV set → must NOT click CONTINUE into a dead submit; abort in ERROR.
+    const page3 = await openFixture(context, fixture("saved-card-cvv.html"));
+    const noCvv = await page3.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
+        getCvv: () => "", getCardLast4: () => "1561",
+      });
+      const r = await machine.run();
+      const submitVisible = document.querySelector(".button-submit").style.display !== "none";
+      return { state: machine.state, submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || ""), submitVisible };
+    });
+    eq("cvv: no-CVV account does NOT submit", noCvv.submitted, false);
+    eq("cvv: no-CVV account ends in ERROR (didn't click CONTINUE)", noCvv.state, "ERROR");
+    check("cvv: no-CVV never reached SUBMIT page", noCvv.submitVisible === false, `submitVisible=${noCvv.submitVisible}`);
+    await page3.close();
+
+    // Wrong card on file (····9999 ≠ 1561) → abort BEFORE typing / continuing.
+    const page4 = await openFixture(context, fixture("saved-card-cvv.html"));
+    const wrong = await page4.evaluate(async () => {
+      const C = window.CheckoutCore;
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: () => {}, tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false, getDropAt: () => 0,
+        getCvv: () => "456", getCardLast4: () => "9999",
+      });
+      const r = await machine.run();
+      return { state: machine.state, submitted: r.submitted, cvv: (document.querySelector(".cvv-input").value || "") };
+    });
+    eq("cvv: mismatched card does NOT submit", wrong.submitted, false);
+    eq("cvv: mismatched card ends in ERROR", wrong.state, "ERROR");
+    check("cvv: mismatched card never typed the CVV", wrong.cvv === "", `cvv=${wrong.cvv}`);
+    await page4.close();
+  }
+
   await browser.close();
 
   console.log("\n" + results.join("\n"));

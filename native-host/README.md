@@ -10,6 +10,39 @@ sandboxed Chrome extension can’t do on its own:
 It speaks Chrome **Native Messaging** (length-prefixed JSON over stdio). It is
 ~200 lines of Node with no dependencies.
 
+## Loading the extension into launched profiles (v1.3.0+)
+
+When you Launch All, the launcher now loads the extension into every profile
+**straight from the folder this host lives in** (`EXTENSION_DIR` = the parent of
+`native-host/`, e.g. `C:\Snkrs-extension\Nike-extension`), so profiles that
+don't already have it installed still run the bot. It does this with:
+
+```
+chrome --profile-directory=<dir> \
+  --disable-features=DisableLoadExtensionCommandLineSwitch \
+  --load-extension=<EXTENSION_DIR> <urls…>
+```
+
+The `--disable-features=…` flag re-enables `--load-extension` on Chrome 137+
+(which otherwise neuters it). The extension keeps its pinned ID (manifest
+`key`), so it still matches this host's `allowed_origins`.
+
+**Important caveat — Chrome's single-process model:** `--load-extension` only
+takes effect when that profile's Chrome starts a **fresh process**. If a Chrome
+window for the same *User Data* directory is already open, the launch is
+forwarded to the existing process and the flag is ignored. For a clean result:
+**close Chrome completely before Launch All**, or use the force-install
+(`update-server/`) which is process-independent and the most reliable option.
+
+Env overrides:
+- `SNKRS_EXTENSION_DIR` — point at the extension folder if the host lives
+  elsewhere.
+- `SNKRS_NO_LOAD_EXTENSION=1` — don't pass `--load-extension` (use this if you
+  rely on force-install / a manually loaded copy).
+
+The dashboard's **LIVE → 🔍 DIAGNOSE** shows the folder in use and whether
+auto-load is active.
+
 ## Install
 
 You need Node.js on `PATH` (`node --version`).

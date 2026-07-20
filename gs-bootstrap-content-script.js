@@ -40,8 +40,32 @@
   const dropMs     = dropRaw ? parseInt(dropRaw, 10) : NaN;
   const now        = Date.now();
 
+  // ── Small tiled window (#snkrsWin=w,h,x,y) ──────────────────
+  // Direct-checkout tabs open straight on gs.nike.com, where the launch-page
+  // bootstrap never runs — so the window sizing lived in the wrong script and
+  // checkout tabs stayed full-size. Resize THIS window from here too. Keeping
+  // every window visible (not stacked/occluded) also stops Chrome throttling
+  // the ones behind, which is why the earlier tabs were loading slowly.
+  (function applyTileWindow() {
+    const win = readParam("snkrsWin");
+    if (!win) return;
+    const m = win.match(/^(\d+),(\d+),(-?\d+),(-?\d+)$/);
+    if (!m) return;
+    const geom = { w: +m[1], h: +m[2], x: +m[3], y: +m[4] };
+    const send = () => { try { chrome.runtime.sendMessage({ type: "tile_window", geom }); } catch (e) {} };
+    send();
+    setTimeout(send, 1200);
+  })();
+
   function log(...a) { console.log("[SNKRSBot gs-boot]", ...a); }
   function logBG(msg) { try { chrome.runtime.sendMessage({ type: "log", message: msg }); } catch (e) {} }
+
+  // Runs at document_start on EVERY gs.nike.com load (incl. a manual refresh
+  // after an "Oops"/error page). Reset this tab's cached card-fill result so the
+  // checkout flow waits for THIS page's real card fill instead of reusing the
+  // previous load's "card filled" flag and racing to a SUBMIT that never
+  // completes. Deterministic: this fires before gs-content-script's idle init.
+  try { chrome.runtime.sendMessage({ type: "reset_card_fill" }); } catch (e) {}
 
   // Swap the checkoutId for a fresh UUID — reusing a spent/invalid checkout
   // session is a common cause of the gs.nike.com/error page.
@@ -71,12 +95,14 @@
     // checkout right at drop rather than hammering /error before the launch is
     // active (which just errors again).
     const dropFromUrl = (u) => { const m = (u || "").match(/snkrsDrop=(\d+)/); return m ? parseInt(m[1], 10) : NaN; };
+    const MAX_TRIES = 8;
     const retryWith = (url) => {
       if (!url) { logBG(`⚠️ No saved checkout URL to retry — fix this profile manually.`); return; }
-      if (tries >= 5) { logBG(`⚠️ Retried ${tries}× and still erroring — needs manual attention (click it in the dashboard).`); return; }
+      if (tries >= MAX_TRIES) { logBG(`⚠️ Retried ${tries}× and still erroring — needs manual attention (click it in the dashboard).`); return; }
       tries++; sessionStorage.setItem("snkrsErrTries", String(tries));
       const dMs = dropFromUrl(url);
-      const backoff = 1500 + tries * 2000;
+      // Near-immediate first retry (let the /error page settle), then ramp up.
+      const backoff = 600 + (tries - 1) * 1200;
       // If drop is in the future, retry at ~PREP before drop (fresh Kasada);
       // otherwise back off and retry now.
       let delay = backoff;

@@ -225,6 +225,70 @@
     return digits.length >= 12;
   }
 
+  // A visible, still-empty security-code / CVV input on the MAIN page — the
+  // saved-card case where Nike shows the card already on file but still wants
+  // the CVV typed before CONTINUE (see the "Security code *" field).
+  function findSecurityCodeInput(doc) {
+    doc = doc || document;
+    const inputs = Array.from(doc.querySelectorAll("input"));
+    const looksLikeCvv = (inp) => {
+      if (inp.autocomplete === "cc-csc") return true;
+      // Scan EVERY attribute name+value (catches name="cardCvc", id="cardCvc-input",
+      // the cccvc="" marker attribute, class names, etc.) as plain substrings —
+      // NOT word-boundaried, so "cardCvc" matches "cvc".
+      let hay = "";
+      try {
+        for (const n of (inp.getAttributeNames ? inp.getAttributeNames() : [])) {
+          hay += " " + n + " " + (inp.getAttribute(n) || "");
+        }
+      } catch (e) {}
+      hay = (hay + " " + [inp.name, inp.id, inp.placeholder, inp.className, inp.getAttribute("aria-label")].join(" ")).toLowerCase();
+      if (/cvv|cvc|csc|cccvc|security\s*code|securitycode|card\s*verification|verification\s*(code|value)/.test(hay)) return true;
+      // Heuristic fallback: a short numeric field constrained to 3–4 digits.
+      const ml = parseInt(inp.getAttribute("maxlength") || "0", 10);
+      const pat = inp.getAttribute("pattern") || "";
+      if ((ml === 3 || ml === 4) && /\[0-9\]\{3/.test(pat.replace(/\s/g, ""))) return true;
+      return false;
+    };
+    return inputs.find((inp) => {
+      if (!looksLikeCvv(inp)) return false;
+      if (!isLogicallyVisible(inp)) return false;
+      const v = (inp.value || "").replace(/\D/g, "");
+      return v.length < 3; // empty or incomplete
+    }) || null;
+  }
+
+  // Type a value into a native (possibly React-controlled) input: use the
+  // prototype value setter so React's onChange sees it, then fire the events.
+  function fillNativeInput(input, value, dbg) {
+    dbg = dbg || function () {};
+    if (!input) return false;
+    const view = (input.ownerDocument && input.ownerDocument.defaultView) || window;
+    const setNative = (v) => {
+      try {
+        const proto = view.HTMLInputElement && view.HTMLInputElement.prototype;
+        const desc = proto && Object.getOwnPropertyDescriptor(proto, "value");
+        if (desc && desc.set) desc.set.call(input, v); else input.value = v;
+      } catch (e) { try { input.value = v; } catch (_) {} }
+    };
+    try { input.focus(); } catch (e) {}
+    try { input.dispatchEvent(new view.FocusEvent("focus", { bubbles: false })); } catch (e) {}
+    // Set the whole value, then fire the events Angular/React listen for. An
+    // InputEvent (not a plain Event) makes some frameworks accept it.
+    setNative(String(value));
+    try { input.dispatchEvent(new view.InputEvent("input", { bubbles: true, data: String(value), inputType: "insertText" })); }
+    catch (e) { try { input.dispatchEvent(new view.Event("input", { bubbles: true })); } catch (_) {} }
+    for (const type of ["keydown", "keyup", "change"]) {
+      try { input.dispatchEvent(new view.Event(type, { bubbles: true })); } catch (e) {}
+    }
+    // blur → marks Angular controls "touched" so validity (ng-valid) settles and
+    // the CONTINUE button enables.
+    try { input.blur(); } catch (e) {}
+    try { input.dispatchEvent(new view.FocusEvent("blur", { bubbles: false })); } catch (e) {}
+    dbg(`fillNativeInput: set value (${String(value).length} chars) into ${input.name || input.id || "input"}`);
+    return true;
+  }
+
   // Has the page reached a confirmation / processing state?
   function isConfirmed(doc) {
     doc = doc || document;
@@ -335,13 +399,34 @@
       this.startTs = Date.now();
       this.stateTs = Date.now();
       this.dropAt = 0;
+      // LEO / speed mode (FCFS drops): strip the fixed settling waits and submit
+      // with millisecond precision at the drop time. Default OFF → the raffle
+      // path below is completely unchanged.
+      this.leo = !!(this.d.isLeoMode && this.d.isLeoMode());
+      // DAN raffle: max random human delay (ms) added before SUBMIT. 0 = off.
+      this.jitterMs = this.leo ? 0 : Math.max(0, (this.d.getSubmitJitterMs && this.d.getSubmitJitterMs()) || 0);
     }
+    // A wait that collapses to a short one in LEO mode (fast) but keeps the
+    // original duration for the normal raffle flow.
+    _w(normalMs, leoMs) { return wait(this.leo ? leoMs : normalMs); }
     _log(msg) { if (this.d.log) try { this.d.log(msg); } catch (e) {} }
     _dbg(msg) { if (this.d.dbg) try { this.d.dbg(msg); } catch (e) {} }
     _tag() { return (this.d.tag && this.d.tag()) || ""; }
     _emit(code, extra) {
       if (!this.d.emit) return;
       try { this.d.emit({ code, t: Date.now(), dropAt: this.dropAt || 0, extra: extra || null }); } catch (e) {}
+    }
+    // PANIC / abort: the dashboard can raise a shared abort flag to stop every
+    // held SUBMIT at once (e.g. wrong product detected). checkAbort() is
+    // supplied by the adapter (throttled) and may be sync or async.
+    async _aborted() {
+      if (!this.d.checkAbort) return false;
+      try { return !!(await this.d.checkAbort()); } catch (e) { return false; }
+    }
+    _abort() {
+      this._to(STATES.ERROR);
+      this._emit("error", { reason: "panic_abort" });
+      return { state: this.state, submitted: false, aborted: true };
     }
     _to(state) {
       const prev = this.state;
@@ -365,6 +450,75 @@
     }
     snapshot() { return snapshotPageState(this.doc); }
 
+    // The last 4 digits of the card shown on file (near the VISA/…/AMEX brand).
+    _savedCardLast4() {
+      const text = (this.doc.body && this.doc.body.innerText) || "";
+      const m = text.match(/\b(VISA|MASTERCARD|MASTER\s?CARD|AMEX|AMERICAN\s?EXPRESS)\b[\s\S]{0,40}?(\d{4})\b/i);
+      return m ? m[2] : "";
+    }
+    // Does the card on file match the account's configured card? true / false /
+    // null (can't tell — no configured last-4, or none readable on the page).
+    _verifyCardMatch(tag) {
+      const want = (this.d.getCardLast4 && String(this.d.getCardLast4() || "").replace(/\D/g, "").slice(-4)) || "";
+      if (want.length < 4) return null;
+      const have = this._savedCardLast4();
+      if (!have) return null;
+      if (have === want) { this._log(`✅${tag} [2/3] Card on file ····${have} matches this account.`); return true; }
+      this._log(`⛔${tag} [2/3] Card on file ····${have} does NOT match this account's card ····${want}.`);
+      return false;
+    }
+
+    // Type the account CVV into the security-code field. Returns:
+    //   "none"   → the page isn't asking for a CVV,
+    //   "nocvv"  → a CVV is required but none is configured,
+    //   "failed" → typed but the field is still empty/invalid,
+    //   "filled" → CVV is now in the field.
+    async _typeCvv(tag) {
+      let input = findSecurityCodeInput(this.doc);
+      if (!input) input = await waitFor(() => findSecurityCodeInput(this.doc), this.leo ? 1500 : 2500, 150);
+      if (!input) return "none";
+      const cvv = (this.d.getCvv && String(this.d.getCvv() || "").replace(/\D/g, "")) || "";
+      if (cvv.length < 3) return "nocvv";
+      this._log(`💳${tag} [2/3] Entering security code (CVV)…`);
+      fillNativeInput(input, cvv, (m) => this._dbg(m));
+      await this._w(600, 200);
+      if (findSecurityCodeInput(this.doc)) { // still empty → retry once
+        fillNativeInput(input, cvv, (m) => this._dbg(m));
+        await this._w(400, 150);
+      }
+      return findSecurityCodeInput(this.doc) ? "failed" : "filled";
+    }
+
+    // Saved card already on file. Verify it's the right card, type the CVV if
+    // the page asks for one, then commit PAYMENT (green tick) so SUBMIT unlocks.
+    // Returns "ok" to continue, or "abort" to STOP (never click CONTINUE / submit
+    // into a state that can't actually go through).
+    async _handleSavedCard(tag) {
+      if (this._verifyCardMatch(tag) === false) {
+        this._log(`❌${tag} [2/3] Wrong card on file — NOT continuing (won't submit someone else's card).`);
+        return "abort";
+      }
+      const res = await this._typeCvv(tag);
+      if (res === "none") return "ok";                // no CVV needed — ready as-is
+      if (res === "nocvv") {
+        this._log(`❌${tag} [2/3] Saved card needs a security code but no CVV is set for this account — NOT continuing (SUBMIT would fail). Add the card's CVV in the dashboard.`);
+        return "abort";
+      }
+      if (res === "failed") {
+        this._log(`❌${tag} [2/3] Couldn't enter the CVV — NOT continuing.`);
+        return "abort";
+      }
+      // CVV is in → commit PAYMENT so it collapses with the green tick.
+      let pc = this.finder("paymentContinue");
+      if (!pc) pc = await waitFor(() => this.finder("paymentContinue"), this.leo ? 1500 : 3000, 150);
+      if (pc) {
+        this._log(`✅${tag} [2/3] CVV entered — committing PAYMENT (CONTINUE)…`);
+        await nativeClick(pc, "CONTINUE (payment) after CVV", this.leo, (m) => this._dbg(m));
+        await this._w(1400, 350);
+      }
+      return "ok";
+    }
+
     // Run the whole flow once from the CURRENT DOM state. Safe to re-enter
     // (each state re-checks the DOM), which is what the outer watchdog relies
     // on. Returns { state, submitted }.
@@ -374,10 +528,11 @@
       const doc = this.doc;
       this._to(STATES.LOADING);
       this._emit("started");
-      this._log(`💳${tag} SNKRS checkout — starting…`);
+      this._log(`💳${tag} SNKRS checkout — starting…${this.leo ? " ⚡LEO speed mode" : ""}`);
 
       // Let Angular finish rendering (matches the original 2000ms settle).
-      await wait(2000);
+      // LEO trims this to the minimum a rendered checkout page needs.
+      await this._w(2000, 800);
       if (isWindowMinimized(doc)) {
         this._log(`⚠️${tag} Window is MINIMIZED — using DOM-order visibility checks (offsetParent bypass active)`);
       }
@@ -391,7 +546,7 @@
       if (deliveryContinue) {
         this._log(`✅${tag} [1/3] Clicking CONTINUE (delivery)…`);
         await nativeClick(deliveryContinue, "CONTINUE (delivery)", false, (m) => this._dbg(m));
-        await wait(1500);
+        await this._w(1500, 300);
       } else {
         this._log(`ℹ️${tag} [1/3] Delivery CONTINUE not found — already confirmed or payment form is open.`);
       }
@@ -401,11 +556,23 @@
       this._to(STATES.PAYMENT);
       this._log(`🔍${tag} [2/3] Checking payment state…`);
       if (isPaymentAlreadyComplete(doc)) {
-        this._log(`💳${tag} [2/3] Payment already on file — no card entry needed.`);
+        this._log(`💳${tag} [2/3] Payment already on file — verifying card + CVV…`);
         if (d.cancelCardFill) d.cancelCardFill();
+        // Saved card: confirm it's the right card and that the CVV is entered
+        // BEFORE any CONTINUE — otherwise CONTINUE collapses PAYMENT into a
+        // state that can't submit.
+        const sc = await this._handleSavedCard(tag);
+        if (sc === "abort") {
+          this._log(formatSnapshot(tag, this.snapshot()));
+          this._to(STATES.ERROR);
+          this._emit("error", { reason: "saved_card_blocked" });
+          return { state: this.state, submitted: false };
+        }
       } else if (isInlineCardFilled(doc)) {
         this._log(`💳${tag} [2/3] Card details already filled inline — proceeding to SUBMIT.`);
         if (d.cancelCardFill) d.cancelCardFill();
+        // Inline card the bot typed — still fill the CVV if the page asks.
+        await this._typeCvv(tag);
       } else {
         const iframe = doc.querySelector("iframe.newCard[src*='gs-payments']");
         if (!iframe && !isInlineCardFilled(doc)) {
@@ -451,10 +618,10 @@
         if (paymentContinue) {
           this._log(`✅${tag} [2/3] Clicking CONTINUE (payment)…`);
           await nativeClick(paymentContinue, "CONTINUE (payment)", false, (m) => this._dbg(m));
-          await wait(1200);
+          await this._w(1200, 150);
         } else {
           this._log(`ℹ️${tag} [2/3] No payment-section CONTINUE found — going straight to SUBMIT`);
-          await wait(400);
+          await this._w(400, 80);
         }
       }
       this._emit("filled");
@@ -462,23 +629,35 @@
       // ── READY: commit payment, then wait for SUBMIT ───────────
       this._to(STATES.READY);
       this._log(`⏳${tag} [3/3] Finalising — committing payment, then submitting…`);
-      for (let i = 0; i < 4; i++) {
+      if (this.leo) {
+        // LEO: one commit click if a CONTINUE is present, then poll hard for the
+        // SUBMIT button — no fixed multi-second sleeps between commits.
         const pc = this.finder("paymentContinue");
-        if (!pc) break;
-        this._log(`✅${tag} [3/3] Clicking CONTINUE (payment) to commit it (try ${i + 1})…`);
-        await nativeClick(pc, "CONTINUE (payment)", false, (m) => this._dbg(m));
-        await wait(1600);
+        if (pc) {
+          this._log(`✅${tag} [3/3] (LEO) Committing payment…`);
+          await nativeClick(pc, "CONTINUE (payment)", false, (m) => this._dbg(m));
+        }
+      } else {
+        for (let i = 0; i < 4; i++) {
+          const pc = this.finder("paymentContinue");
+          if (!pc) break;
+          this._log(`✅${tag} [3/3] Clicking CONTINUE (payment) to commit it (try ${i + 1})…`);
+          await nativeClick(pc, "CONTINUE (payment)", false, (m) => this._dbg(m));
+          await wait(1600);
+        }
       }
 
       let hb = 0;
-      const heartbeat = setInterval(() => {
+      const heartbeat = this.leo ? null : setInterval(() => {
         hb++;
         const all = Array.from(doc.querySelectorAll("button.button-submit"));
         this._log(`💓${tag} [3/3] waiting for SUBMIT (${hb * 3}s) — submitBtns=${all.length} ` +
           `enabled=${all.filter(b => !b.disabled).length} | paymentCont=${!!this.finder("paymentContinue")}`);
       }, 3000);
-      let submitBtn = await waitFor(() => this.finder("submit"), 12000, 100);
-      clearInterval(heartbeat);
+      // LEO polls the SUBMIT button every 25ms so it's clickable the instant it
+      // appears; the raffle path keeps its 100ms cadence.
+      let submitBtn = await waitFor(() => this.finder("submit"), 12000, this.leo ? 25 : 100);
+      if (heartbeat) clearInterval(heartbeat);
 
       if (!submitBtn) {
         this._log(`❌${tag} [3/3] SUBMIT ORDER not found — STUCK HERE. Full page state:`);
@@ -504,17 +683,75 @@
       if (dropAt && Date.now() < dropAt) {
         this._to(STATES.HOLDING);
         this._emit("holding");
-        this._log(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.`);
-        while (Date.now() < dropAt) {
-          const left = dropAt - Date.now();
-          if (left > 5000) {
-            this._log(`⏳${tag} [3/3] ${Math.ceil(left / 1000)}s to drop — SUBMIT held…`);
-            await wait(Math.min(3000, left - 1500));
-          } else {
-            await wait(120);
+        this._log(`⏸️${tag} [3/3] Primed — holding SUBMIT until drop time ${new Date(dropAt).toLocaleTimeString()}.${this.leo ? " ⚡LEO on-the-dot" : ""}`);
+        if (this.leo) {
+          // LEO precise hold: coarse-wait (abort-checked) until ~40ms before the
+          // drop, then BUSY-SPIN the final stretch so the click lands on the dot
+          // (setTimeout granularity would otherwise cost up to ~100ms).
+          while (dropAt - Date.now() > 40) {
+            if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised while holding. SUBMIT cancelled, order NOT placed.`);
+              return this._abort();
+            }
+            const left = dropAt - Date.now();
+            await wait(Math.min(250, left - 40));
+          }
+          if (await this._aborted()) {
+            this._log(`🛑${tag} [3/3] PANIC — abort raised at the line. SUBMIT cancelled.`);
+            return this._abort();
+          }
+          while (Date.now() < dropAt) { /* busy-spin the last <=40ms for precision */ }
+          this._log(`🟢${tag} [3/3] DROP TIME (LEO) — submitting on the dot!`);
+        } else {
+          let sinceAbortCheck = 0;
+          while (Date.now() < dropAt) {
+            // PANIC: bail out of the hold without ever submitting.
+            if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised while holding. SUBMIT cancelled, order NOT placed.`);
+              return this._abort();
+            }
+            const left = dropAt - Date.now();
+            if (left > 5000) {
+              this._log(`⏳${tag} [3/3] ${Math.ceil(left / 1000)}s to drop — SUBMIT held…`);
+              await wait(Math.min(3000, left - 1500));
+            } else {
+              // Final approach: fine-grained, but still poll abort ~once/sec.
+              await wait(120);
+              if (++sinceAbortCheck >= 8) { sinceAbortCheck = 0; if (await this._aborted()) {
+                this._log(`🛑${tag} [3/3] PANIC — abort raised at the line. SUBMIT cancelled.`);
+                return this._abort();
+              } }
+            }
+          }
+          this._log(`🟢${tag} [3/3] DROP TIME — submitting now!`);
+        }
+      }
+
+      // ── DAN raffle human delay ────────────────────────────────
+      // A raffle isn't won on speed and stays open for ~20 min, so submitting
+      // the instant the clock ticks over (and from every account at the exact
+      // same millisecond) is an unnecessary bot tell. In DAN mode we wait a
+      // small RANDOM amount before clicking to look human and spread the load.
+      // LEO ignores this entirely (it submits on the dot). PANIC still bails.
+      if (!this.leo && this.jitterMs > 0) {
+        const j = randInt(0, this.jitterMs);
+        if (j > 0) {
+          this._log(`🎲${tag} [3/3] DAN raffle — human delay ~${(j / 1000).toFixed(1)}s before submit…`);
+          const end = Date.now() + j;
+          while (Date.now() < end) {
+            if (await this._aborted()) {
+              this._log(`🛑${tag} [3/3] PANIC — abort raised during human delay. SUBMIT cancelled.`);
+              return this._abort();
+            }
+            await wait(Math.min(500, end - Date.now()));
           }
         }
-        this._log(`🟢${tag} [3/3] DROP TIME — submitting now!`);
+      }
+
+      // Final abort gate right before the click (covers the no-hold path too).
+      if (await this._aborted()) {
+        this._log(`🛑${tag} [3/3] PANIC — abort raised. SUBMIT cancelled, order NOT placed.`);
+        return this._abort();
       }
 
       // ── SUBMITTING: click + verify, bounded retries ───────────
@@ -578,6 +815,7 @@
     findDeliveryContinueButton, findDeliveryContinueOnly, findPaymentAccordionRow,
     findPaymentIframe, findPaymentContinueOnly, findSubmitOrderButton,
     isPaymentAlreadyComplete, isInlineCardFilled, isConfirmed,
+    findSecurityCodeInput, fillNativeInput,
     snapshotPageState, formatSnapshot, nativeClick,
     // machine
     CheckoutMachine,

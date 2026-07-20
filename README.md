@@ -179,4 +179,147 @@ the same steps in short:
 - **Drop Replay** (dashboard HISTORY tab) — every drop is recorded as a
   per-account timeline (loaded → card filled → submitted) with fill/submit
   timing and, crucially, **how many ms before/after go-live each submit
-  landed**, alongside win/loss and failure reasons.
+  landed**, alongside win/loss and failure reasons. The summary is persisted
+  into each history run so past drops keep their timing.
+
+## Drop-day controls (v3.6)
+
+- **🛑 PANIC (LIVE tab)** — one click raises a shared abort flag that every
+  profile's checkout polls while holding SUBMIT, so all held submits cancel at
+  once (e.g. wrong product spotted). Cleared automatically on the next launch,
+  or manually. The draw flow respects it too.
+- **Preflight remediation** — red profiles get one-click fixes: **LOG IN**
+  (opens Nike sign-in), **UPDATE** (opens `chrome://extensions` to update),
+  **WARM** (warms cookies), each auto re-checking afterwards. A profile that
+  never reports back within 40s is flagged **NO RESPONSE** (likely logged out).
+- **🔥 WARM ALL (Preflight tab)** — opens the SNKRS feed in every profile (bot
+  stays idle) to refresh Kasada/cookies before a drop; the cookies check then
+  shows how long ago each profile was warmed.
+
+## Drop type: DAN (raffle) vs LEO (FCFS) — v4.13 / v4.14
+
+Pick the drop type per drop on the **Drop setup → Actions** card. Default **DAN**.
+
+**🎟️ DAN — Raffle (relaxed).** Draw-based drops stay open ~20 min and aren't won
+on speed, so the bot fills carefully and adds a small **random human delay**
+before submitting — configurable ("submit within N sec after drop", default 6 s,
+0 = instant). This spreads the accounts out instead of firing every submit at
+the exact same millisecond, which is an easy bot tell. This is the original,
+careful checkout flow plus the jitter.
+
+**⚡ LEO — FCFS (speed).** First-come-first-served drops are won on speed, so the
+state machine flips to a fast path:
+
+- **Submits on the dot.** A tab parked on checkout waiting for the drop
+  coarse-waits until ~40 ms out then **busy-spins** the final stretch, so the
+  SUBMIT click lands within a few ms of the drop instead of the ~120 ms that
+  `setTimeout` granularity used to cost.
+- **Submits immediately when late.** A tab opened *after* the drop skips the hold
+  and clicks as soon as it's ready.
+- **Cuts the fill→submit lag.** The fixed multi-second settle/commit sleeps (2 s
+  settle, the `1.6 s ×4` payment-commit loop, 1.2 s post-continue) collapse to
+  short ones, and the SUBMIT button is polled every 25 ms.
+
+PANIC cancels a held (or jittered) submit, and Test Mode still stops before
+clicking, in both modes. Covered by `test-harness/test.mjs` against the **real
+captured gs.nike.com checkout DOM**: LEO is faster than DAN on the same page,
+never submits early, lands within ~120 ms of the drop, and adds no hold when
+late; DAN's human delay lands the submit after the drop and inside the window.
+(Live-drop testing isn't automated — it needs auth, a live product, and would
+place a real order.)
+
+## Region tagging (SG vs MY) + address readout (v4.10)
+
+Nike runs **SNKRS SG** and **SNKRS MY** as separate storefronts, and which one an
+account should enter is best told by its **phone number**. Preflight now reads
+each account's phone (and address) from Nike **in the page context** — where the
+session cookies are valid — instead of the background's cookieless API call,
+which Akamai 403s for every account (that 403 was the old "Address" amber noise).
+
+- **Region auto-detect.** `region-util.js` classifies the phone: Singapore =
+  8 digits starting 8/9 (or `+65`), Malaysia = leading `0`, 9–11 digits
+  (e.g. `011-2109 9805`) or `+60`. Each Preflight card shows a **🇸🇬 SG / 🇲🇾 MY /
+  ? REGION** tag, and the summary tallies how many of each.
+- **Address is now printed, not graded.** The Address row shows delivery
+  address line 1 for reference and never turns the card red/amber.
+- **Manual override.** Each account row has a **🌏 Region** selector
+  (Auto / SG / MY) for anything the phone can't classify; the override wins.
+- **Open by region.** **🇸🇬 OPEN SG** / **🇲🇾 OPEN MY** launch just the matching
+  profiles right now. They're **additive** — click one for a Singapore drop, the
+  other for a Malaysia drop, or both to open everything. Each account keeps its
+  own window tile so SG and MY don't overlap. Covered by
+  `test-harness/region-test.mjs` (15 assertions) + the dashboard smoke test.
+
+## Proxies & outcome notifications (v4.9)
+
+**Per-account proxies.** Nike de-dupes raffle entries by egress IP, so running
+many accounts from one IP wastes them. Each Chrome profile runs its own copy of
+the extension, so the background worker points **this profile** at its assigned
+proxy via `chrome.proxy` — it only affects that profile. Configure in
+**Settings → 🌐 Proxies**:
+
+- **Two sources.** Paste a **list** (`host:port:user:pass`, one per line) for a
+  sticky one-IP-per-account mapping, or a **single gateway** endpoint that
+  rotates the IP for every profile. Auth (`user:pass`) is answered via
+  `webRequest.onAuthRequired` (proxy challenges only — a site's own login is
+  never touched).
+- **Deterministic sticky assignment.** Accounts are sorted by `profileDir` and
+  round-robined over the list, so each account keeps the **same IP** across
+  restarts; the dashboard shows a live **IP-assignment preview** (credentials
+  masked) and warns when accounts outnumber proxies.
+- **Pre-drop test.** *Test first proxy* routes the dashboard profile through the
+  proxy, fetches its egress IP, confirms it **differs from your real IP**, then
+  restores the profile's real assignment. Turning proxies **off** clears them on
+  each profile's next boot.
+- **Live swap when a resi dies.** Residential IPs drop mid-session. Each row in
+  the assignment preview has a **⟳ Swap** button that moves that account onto the
+  next **unused** proxy in the list and **relaunches** the profile on the new IP
+  (add spare lines so there are fresh IPs to swap in). A **⟳ Rotate all** button
+  moves every account to a different IP at once — for when a whole batch/subnet
+  gets banned. Swaps are saved as per-account overrides so they persist.
+- This applies proxies you **rent** from a provider (IPRoyal, Smartproxy,
+  Oxylabs…) — it doesn't create residential IPs. Use SG IPs for SNKRS SG. Proxies
+  fix IP de-dupe; they don't by themselves defeat Akamai fingerprinting.
+
+**Outcome notifications.** **Settings → 🔔 Outcome Notifications** pushes a
+message the moment any account **wins / enters / carts / errors**, over a
+**Discord webhook and/or a Telegram bot**. Each profile sends its own event
+(deduped once per draw), so it works even with the dashboard closed. Pick which
+events ping; *Send test* confirms delivery.
+
+Both are default-**off** and add no work to the checkout path — the 29-assertion
+checkout suite is unchanged. Proxy/notification config plumbing is covered by
+`test-harness/dashboard-smoke.mjs`.
+
+## Dashboard revamp (v4.0)
+
+CyberAIO-style **left sidebar** with four sections (all overlapping panels
+merged, nothing removed):
+
+- **Dashboard** — overview stats + upcoming drops + quick launch + the full LIVE
+  monitor in one command-center view. Persistent **LAUNCH ALL / PANIC / CLOSE**
+  live in the sidebar footer, one click away from anywhere.
+- **Setup** — Drop / Profiles / Cards / Preflight as sub-tabs.
+- **History** — Insights & Replay / Orders.
+- **Settings** — options, webhooks, backup.
+
+**Self-learning** (grounded in the drop data the bot already records — no fake
+ML): an **Insights** panel mines every past drop for hit rate, average fill
+time, average submit-vs-go-live offset, and per-size hit rates; **Auto-tune**
+recommends (and one-click applies) the open-lead from your slowest observed
+fill; and **size hints** surface your best-performing sizes when assigning.
+Covered by `test-harness/dashboard-smoke.mjs` (loads the real dashboard with
+`chrome.*` stubbed and drives the sidebar + insights).
+
+## Live-feed attribution (v3.7)
+
+The LIVE board used to go stale while profiles sat holding for a drop. Cause:
+the background attributed each tab's status via an **in-memory** tab→profile
+map, and MV3 service workers are ephemeral (killed after ~30s idle / memory
+pressure / a 5-minute cap). After a restart the map was empty and never rebuilt,
+so status/replay/orders messages couldn't be attributed and were silently
+dropped. Fixed two ways: content scripts now **self-identify** (`profileDir` in
+every `log`/`checkout_event` message), and the map is **persisted to
+`chrome.storage.session`** and rehydrated on worker startup. Covered by
+`test-harness/attribution-test.mjs` (exercises the real functions across a
+simulated worker restart).

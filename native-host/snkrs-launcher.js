@@ -28,7 +28,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-const HOST_VERSION = "1.2.0";
+const HOST_VERSION = "1.3.0";
 
 // ── Shared config file ("the generic file") ───────────────────
 const CONFIG_DIR = path.join(os.homedir(), ".snkrs-bot");
@@ -190,6 +190,22 @@ function clearTimeline() {
   } catch (e) {}
 }
 
+// ── PANIC / abort flag ────────────────────────────────────────
+// One shared file the dashboard raises to stop every held SUBMIT at once.
+// Each profile's checkout script polls it (via its background) while holding.
+// abort.json holds two momentary cross-profile commands: `on` (PANIC — stop
+// held submits) and `close` (CLOSE ALL — close the bot windows). Both are
+// polled by each profile's content scripts.
+const ABORT_PATH = path.join(CONFIG_DIR, "abort.json");
+function readAbort() {
+  const c = readJsonFile(ABORT_PATH) || {};
+  return { on: !!c.on, close: !!c.close, ts: c.ts || 0 };
+}
+function writeControl(patch) {
+  const cur = readAbort();
+  writeJsonFile(ABORT_PATH, { on: cur.on, close: cur.close, ...patch, ts: Date.now() });
+}
+
 function clearStatus(profileDir) {
   try {
     for (const f of fs.readdirSync(STATUS_DIR)) {
@@ -275,33 +291,87 @@ function listProfiles() {
 // Extension folder is the parent of this native-host directory. We expose it
 // in the ping response for diagnostics, but we deliberately DO NOT pass it via
 // --load-extension when launching profiles (see below).
-const EXTENSION_DIR = path.resolve(__dirname, "..");
+// The extension folder = the parent of this native-host directory. On the
+// user's machine that resolves to e.g. C:\Snkrs-extension\Nike-extension.
+// Overridable with SNKRS_EXTENSION_DIR if the host lives elsewhere.
+const EXTENSION_DIR = process.env.SNKRS_EXTENSION_DIR || path.resolve(__dirname, "..");
+
+// Does the configured extension dir actually contain the extension?
+function extensionDirValid(dir) {
+  try { return !!dir && fs.existsSync(path.join(dir, "manifest.json")); }
+  catch (e) { return false; }
+}
 
 // Accepts a single url (string) OR many (array). Passing multiple URLs to one
 // chrome invocation opens them all as tabs in that profile — reliably, even
 // when the profile's Chrome is cold-starting (separate rapid launches can race
 // and get dropped, which is why multi-product only opened one tab).
-function launchProfile(profileDir, urlOrUrls, extensionDir) {
+function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt, loadExt) {
   const chrome = findChrome();
   if (!chrome) {
     return { ok: false, error: "Chrome executable not found. Set SNKRS_CHROME_PATH." };
   }
   if (!profileDir) return { ok: false, error: "Missing profileDir." };
 
-  // IMPORTANT: we intentionally do NOT pass --load-extension.
-  // Chrome 137+ treats any session started with --load-extension as untrusted
-  // and DISABLES all developer-mode (unpacked) extensions in it — including the
-  // copy the user installed manually. That made bot-launched profiles open with
-  // NO extension, even though manual launches worked. Launching without the flag
-  // lets each profile load its own already-installed extension normally.
   const args = [`--profile-directory=${profileDir}`];
+
+  // Keep background / occluded windows running at full speed. Chrome normally
+  // throttles timers + backgrounds the renderer for windows that aren't focused
+  // or are covered by another window — which is why the checkout tabs opened
+  // first (and left behind) were loading slowly. These are process-wide, so they
+  // take effect when Chrome cold-starts for this user-data-dir.
+  args.push("--disable-backgrounding-occluded-windows");
+  args.push("--disable-renderer-backgrounding");
+  args.push("--disable-background-timer-throttling");
+
+  // Small / positioned window (opt-in). The dashboard sends window.size ("w,h")
+  // and window.position ("x,y") to tile profiles across the screen instead of
+  // opening full-size; env vars are a fallback. --new-window ensures the size
+  // applies to a fresh window (a profile with a window already open reuses it,
+  // so Chrome would otherwise ignore the sizing).
+  const winSize = (windowOpt && windowOpt.size) || process.env.SNKRS_WINDOW_SIZE || "";
+  const winPos  = (windowOpt && windowOpt.position) || process.env.SNKRS_WINDOW_POSITION || "";
+  if (winSize || winPos) {
+    args.push("--new-window");
+    if (/^\d+,\d+$/.test(winSize))      args.push(`--window-size=${winSize}`);
+    if (/^-?\d+,-?\d+$/.test(winPos))   args.push(`--window-position=${winPos}`);
+  }
+
+  // OPTIONAL (opt-in): load the extension into the launched profile straight
+  // from the shared folder. This is OFF by default because it is NOT reliable
+  // for a multi-profile drop and can interfere with an already-installed
+  // (manually loaded) copy:
+  //   • Chrome uses ONE process per User Data dir, so --load-extension is only
+  //     honoured by the FIRST profile that starts a fresh process; every
+  //     forwarded launch after that ignores the flag. It cannot put the
+  //     extension into 14 profiles.
+  //   • On Chrome 137+ a bare --load-extension is neutered; we pair it with
+  //     --disable-features=DisableLoadExtensionCommandLineSwitch when enabled.
+  // The RELIABLE way to have every profile carry the extension is either a
+  // manual "Load unpacked" in each profile (then fully restart Chrome to pick up
+  // updates) or the force-install policy (update-server/), which is
+  // process-independent. Enable this only for a single fresh profile with
+  // SNKRS_LOAD_EXTENSION=1.
+  const extDir = extensionDir || EXTENSION_DIR;
+  let loadedExtension = false;
+  // Load at launch when the dashboard asks (per-launch flag) OR the env var is
+  // set. NOTE: Chrome only applies --load-extension when it COLD-STARTS the
+  // browser process for this user-data-dir; a profile launched while Chrome is
+  // already running ignores it. So this reliably covers the profile that starts
+  // Chrome, not every forwarded launch.
+  if ((loadExt || process.env.SNKRS_LOAD_EXTENSION === "1") && extensionDirValid(extDir)) {
+    args.push("--disable-features=DisableLoadExtensionCommandLineSwitch");
+    args.push(`--load-extension=${extDir}`);
+    loadedExtension = true;
+  }
+
   const urls = Array.isArray(urlOrUrls) ? urlOrUrls : (urlOrUrls ? [urlOrUrls] : []);
   for (const u of urls) if (u) args.push(u);
 
   try {
     const child = spawn(chrome, args, { detached: true, stdio: "ignore" });
     child.unref();
-    return { ok: true, pid: child.pid, chrome, tabs: urls.length };
+    return { ok: true, pid: child.pid, chrome, tabs: urls.length, loadedExtension, extensionDir: loadedExtension ? extDir : null };
   } catch (e) {
     return { ok: false, error: String(e && e.message || e) };
   }
@@ -320,6 +390,8 @@ function handle(msg) {
         userDataDir: userDataDir(),
         configPath: CONFIG_PATH,
         extensionDir: EXTENSION_DIR,
+        extensionDirValid: extensionDirValid(EXTENSION_DIR),
+        loadExtensionOnLaunch: process.env.SNKRS_LOAD_EXTENSION === "1" && extensionDirValid(EXTENSION_DIR),
         latestVersion: latestExtensionVersion(),
       };
     case "listProfiles":
@@ -334,7 +406,7 @@ function handle(msg) {
         return { ok: false, error: String(e && e.message || e) };
       }
     case "launch":
-      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir);
+      return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir, msg.window, !!msg.loadExtension);
     case "getOrders":
       return { ok: true, orders: readOrders() };
     case "setOrders":
@@ -395,6 +467,14 @@ function handle(msg) {
       }
     case "getTimeline":
       return { ok: true, timeline: readTimeline() };
+    case "setAbort":
+      try { writeControl({ on: !!msg.on }); return { ok: true, abort: readAbort() }; }
+      catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    case "setClose":
+      try { writeControl({ close: !!msg.on }); return { ok: true, abort: readAbort() }; }
+      catch (e) { return { ok: false, error: String(e && e.message || e) }; }
+    case "getAbort":
+      return { ok: true, abort: readAbort() };
     case "clearTimeline":
       try {
         clearTimeline();

@@ -14,7 +14,7 @@
   <div id="licenseGate" class="license-gate" style="display:none;">
     <div class="license-card">
       <div class="license-swoosh">
-        <svg viewBox="0 0 24 9" fill="none"><path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/></svg>
+        <svg viewBox="0 0 24 24" fill="none"><path d="M13.5 2 4 13.2h5.4L8.8 22 20 10.2h-5.6L15.4 2z" fill="white"/></svg>
       </div>
       <h1 class="license-title">SNKRS BOT</h1>
       <p class="license-sub">Enter your license key to access the dashboard.</p>
@@ -24,47 +24,57 @@
     </div>
   </div>
 
-  <!-- ░░ TOPBAR ░░ -->
-  <header class="topbar">
-    <div class="brand">
-      <div class="nike-swoosh">
-        <svg viewBox="0 0 24 9" fill="none"><path d="M23.9999 0.757812L5.84616 8.56236C4.61538 9.10467 3.38462 9.10467 2.46154 8.71851C1.53846 8.33234 0.923077 7.46001 0.923077 6.38382C0.923077 5.52002 1.23077 4.44383 2.15385 3.36764L0 5.52002C0 5.52002 -0.307692 7.67239 1.53846 8.93243C2.76923 9.7178 4.61538 9.82626 6.46154 8.93243L24 0.757812H23.9999Z" fill="white"/></svg>
+  <!-- ░░ APP SHELL: sidebar + content ░░ -->
+  <div class="app-shell">
+
+    <!-- ░░ SIDEBAR ░░ -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="nike-swoosh">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M13.5 2 4 13.2h5.4L8.8 22 20 10.2h-5.6L15.4 2z" fill="white"/></svg>
+          <span class="logo-spark"></span>
+        </div>
+        <div class="brand-text">
+          <span class="brand-label">SNKRS</span>
+          <span class="brand-sub">COMMAND</span>
+        </div>
       </div>
-      <div class="brand-text">
-        <span class="brand-label">SNKRS</span>
-        <span class="brand-sub">DROP DASHBOARD</span>
+
+      <nav class="side-nav" id="sideNav">
+        <button class="side-item active" data-nav="dashboard"><span class="si-ico">▦</span><span class="si-label">Dashboard</span></button>
+        <button class="side-item" data-nav="setup"><span class="si-ico">⚙</span><span class="si-label">Setup</span></button>
+        <button class="side-item" data-nav="history"><span class="si-ico">📊</span><span class="si-label">History</span></button>
+        <button class="side-item" data-nav="settings"><span class="si-ico">☰</span><span class="si-label">Settings</span></button>
+      </nav>
+
+      <div class="side-foot">
+        <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;">⚙ ADMIN</a>
+        <div class="host-pill" id="hostPill">
+          <span class="host-dot" id="hostDot"></span>
+          <span id="hostText">CHECKING…</span>
+        </div>
+        <button id="sideLaunchBtn" class="btn btn-accent side-launch">🚀 LAUNCH ALL</button>
+        <div class="side-foot-row">
+          <button id="sidePanicBtn" class="btn btn-danger side-panic" title="Stop all held submits">🛑 PANIC</button>
+          <button id="sideCloseBtn" class="btn btn-dark side-close" title="Close every profile's bot windows">✖ CLOSE</button>
+        </div>
       </div>
-    </div>
+    </aside>
 
-    <nav class="nav-tabs" id="navTabs">
-      <button class="nav-tab active" data-nav="home">HOME</button>
-      <button class="nav-tab" data-nav="drop">DROP</button>
-      <button class="nav-tab" data-nav="live">LIVE</button>
-      <button class="nav-tab" data-nav="preflight">PREFLIGHT</button>
-      <button class="nav-tab" data-nav="profiles">PROFILES</button>
-      <button class="nav-tab" data-nav="cards">CARDS</button>
-      <button class="nav-tab" data-nav="orders">ORDERS</button>
-      <button class="nav-tab" data-nav="history">HISTORY</button>
-      <button class="nav-tab" data-nav="settings">SETTINGS</button>
-    </nav>
+    <!-- ░░ CONTENT ░░ -->
+    <div class="content">
 
-    <div class="topbar-right">
-      <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;">⚙ ADMIN</a>
-      <div class="host-pill" id="hostPill">
-        <span class="host-dot" id="hostDot"></span>
-        <span id="hostText">CHECKING…</span>
+      <!-- Launcher-missing banner -->
+      <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
+        <strong>Launcher not connected.</strong> Launch buttons need the one-time native host install.
+        <a href="#" id="setupLink">How to install →</a>
       </div>
-    </div>
-  </header>
 
-  <!-- Launcher-missing banner -->
-  <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
-    <strong>Launcher not connected.</strong> Launch buttons need the one-time native host install.
-    <a href="#" id="setupLink">How to install →</a>
-  </div>
+      <!-- Secondary tabs (populated by JS for multi-view sections) -->
+      <div class="subnav" id="subNav"></div>
 
-  <!-- ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ PAGES ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ -->
-  <main class="main">
+      <!-- ░░░░░░░░░░░░░░░░░░░░░░░░░ PAGES ░░░░░░░░░░░░░░░░░░░░░░░░░ -->
+      <main class="main">
 
     <!-- ─────────────────── HOME ─────────────────── -->
     <div class="page-section active" id="page-home">
@@ -106,15 +116,9 @@
 
         <!-- Left: Live status board -->
         <div class="col">
-          <section class="card">
-            <div class="card-head">
-              <h2>⚡ LIVE STATUS</h2>
-              <span class="card-tag">ALL ACCOUNTS</span>
-            </div>
-            <div id="homeStatusList">
-              <p class="hint">No accounts running. Launch from the DROP page.</p>
-            </div>
-          </section>
+          <!-- LIVE STATUS mini-board removed — the full LIVE monitor renders
+               directly below in the Dashboard view (kept hidden for JS compat). -->
+          <div id="homeStatusList" style="display:none;"></div>
 
           <!-- Last drop summary -->
           <section class="card">
@@ -150,7 +154,7 @@
             </div>
           </section>
 
-          <section class="card">
+          <section class="card" style="display:none;">
             <div class="card-head">
               <h2>🚀 GETTING STARTED</h2>
               <span class="card-tag" id="guideToggle" style="cursor:pointer;">SHOW</span>
@@ -181,6 +185,27 @@
         <span class="section-sub">Configure the product every account will cop</span>
       </div>
 
+      <section class="card" style="margin-bottom:22px;">
+        <div class="card-head">
+          <h2>🛒 CHECKOUT METHOD</h2>
+          <span class="card-tag">HOW EACH ACCOUNT COPS</span>
+        </div>
+        <div class="dropmode">
+          <div class="dropmode-opts">
+            <label class="dropmode-opt">
+              <input type="radio" name="checkoutMode" id="checkoutModeOrganic" value="organic" checked>
+              <span class="dropmode-pill"><strong>🌱 Organic</strong> — launch page → size → Buy</span>
+            </label>
+            <label class="dropmode-opt">
+              <input type="radio" name="checkoutMode" id="checkoutModeDirect" value="direct">
+              <span class="dropmode-pill"><strong>⚡ Direct link</strong> — jump to gs checkout</span>
+            </label>
+          </div>
+          <p class="hint" id="checkoutHintOrganic" style="margin:8px 0 0;">Opens the SNKRS <strong>launch page</strong>, selects the size, and clicks <strong>Buy / Join Draw</strong> — letting Nike navigate to checkout the natural way. Slower by a moment, but avoids the <strong>“entry invalid”</strong> error you get from a pre-built checkout link. Recommended.</p>
+          <p class="hint" id="checkoutHintDirect" style="margin:8px 0 0; display:none;">Jumps each account straight to its <strong>gs.nike.com</strong> checkout link (built below), skipping the launch page. Fastest, but Nike can reject the entry (<em>“entry invalid”</em>) if the link wasn’t established through the launch flow.</p>
+        </div>
+      </section>
+
       <div class="two-col">
         <div class="col">
           <section class="card">
@@ -192,7 +217,7 @@
             <div class="toggle">
               <div>
                 <div class="t-label">Multi-product drop</div>
-                <div class="t-hint">Split accounts across multiple products</div>
+                <div class="t-hint">Every account cops all the products you add (one tab each)</div>
               </div>
               <label class="switch"><input type="checkbox" id="multiProductToggle"><span class="track"></span></label>
             </div>
@@ -200,17 +225,33 @@
             <div id="singleProductPanel" style="margin-top:14px;">
               <label class="lbl" for="dropUrl">Product URL</label>
               <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
-              <label class="lbl" for="dropKeyword" style="margin-top:10px;">Keyword / SKU <span class="muted">(optional — for collection pages)</span></label>
-              <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IM3219-100">
+              <label class="lbl" for="dropKeyword" style="margin-top:10px;">Keyword / SKU <span class="muted">(targets ONE exact item on a collection page)</span></label>
+              <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IH1610-052">
+              <button id="fetchSingleMetaBtn" type="button" class="btn btn-mini btn-dark" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
+              <div id="singleProductPreview" class="product-preview" style="display:none;"></div>
               <label class="lbl" style="margin-top:14px;">Size pool <span class="muted">(randomly assigned to accounts)</span></label>
               <div class="size-pool" id="singleSizePool"></div>
+              <button id="toMultiBtn" type="button" class="btn btn-ghost" style="margin-top:14px; width:100%;">➕ ADD A SECOND PRODUCT (JACKET + SHIRT…)</button>
             </div>
 
             <div id="multiProductPanel" style="margin-top:14px; display:none;">
-              <p class="hint">Add each product with its URL, SKU and size range. Hit <strong>Randomly assign</strong> to spread accounts across them.</p>
+              <p class="hint">Every account cops <strong>all</strong> the products below — one checkout tab each. Give each its URL or SKU + size range, then hit <strong>Randomly assign</strong>.</p>
               <div id="productsList"></div>
               <button id="addProductBtn" class="btn btn-ghost" style="margin-top:10px;">+ ADD PRODUCT</button>
             </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>🔗 GS CHECKOUT LINKS</h2>
+              <span class="card-tag">MANUAL PASTE</span>
+            </div>
+            <p class="hint">Generate ready-to-paste <code>gs.nike.com</code> checkout links for a SKU — one per size. Each COPY mints a fresh <code>checkoutId</code>, so paste straight into a logged-in tab at go-live.</p>
+            <label class="lbl" for="gsLinkSku">SKU</label>
+            <input type="text" id="gsLinkSku" class="inp" placeholder="e.g. IH1610-052">
+            <button id="gsLinkGenBtn" class="btn btn-purple" style="width:100%; margin-top:10px;">🔗 GENERATE LINKS</button>
+            <div id="gsLinkMsg" class="hint" style="margin-top:6px;"></div>
+            <div id="gsLinkList" class="gs-link-list"></div>
           </section>
         </div>
 
@@ -235,18 +276,90 @@
               <label class="switch"><input type="checkbox" id="scheduleEnabled"><span class="track"></span></label>
             </div>
             <div id="scheduleStatus" class="schedule-status" style="display:none; margin-top:8px;"></div>
+
+            <!-- Self-learning: recommended open-lead from observed fill times -->
+            <div id="autoTuneBox" class="autotune" style="display:none; margin-top:12px;">
+              <div class="autotune-text" id="autoTuneText"></div>
+              <button id="autoTuneApplyBtn" class="btn btn-mini btn-purple" style="white-space:nowrap;">Apply</button>
+            </div>
           </section>
 
           <section class="card">
             <div class="card-head"><h2>ACTIONS</h2></div>
+            <div class="dropmode">
+              <div class="dropmode-label">Drop type</div>
+              <div class="dropmode-opts">
+                <label class="dropmode-opt">
+                  <input type="radio" name="dropMode" id="dropModeDan" value="DAN" checked>
+                  <span class="dropmode-pill"><strong>🎟️ DAN</strong> — Raffle (relaxed)</span>
+                </label>
+                <label class="dropmode-opt">
+                  <input type="radio" name="dropMode" id="dropModeLeo" value="LEO">
+                  <span class="dropmode-pill"><strong>⚡ LEO</strong> — FCFS (speed)</span>
+                </label>
+              </div>
+              <p class="hint" id="dropModeHintDan" style="margin:8px 0 0;">Raffle drops stay open ~20 min and aren't won on speed — the bot fills carefully and adds a small random human delay before submitting (spreads accounts, looks less bot-like).</p>
+              <p class="hint" id="dropModeHintLeo" style="margin:8px 0 0; display:none;">First-come-first-served — the bot strips its settling delays and submits with millisecond precision: tabs waiting for the drop submit <strong>on the dot</strong>; a tab opened after drop time submits <strong>immediately</strong>.</p>
+              <div id="danJitterRow" style="display:flex; align-items:center; gap:8px; margin-top:8px;">
+                <label class="lbl" for="danJitterSec" style="margin:0;">Human delay: submit within</label>
+                <input type="number" id="danJitterSec" class="inp" value="6" min="0" max="1200" step="1" style="width:70px;">
+                <span class="muted">sec after drop (0 = instant)</span>
+              </div>
+            </div>
+            <div id="sizeHints" class="size-hints" style="display:none;"></div>
             <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;">🎲 RANDOMLY ASSIGN SIZES</button>
             <button id="directUrlsBtn" class="btn btn-dark" style="width:100%; margin-bottom:10px;">⚡ BUILD DIRECT CHECKOUT URLS</button>
             <p class="hint" style="margin:-2px 0 10px;">Generates a unique gs.nike.com checkout link per account from the SKU + assigned size — skips the launch page and size picker. Falls back to the normal flow if it can't resolve.</p>
+
+            <div class="toggle" style="margin-bottom:10px;">
+              <div>
+                <div class="t-label">🔥 Warm page, then flip to checkout</div>
+                <div class="t-hint">LAUNCH ALL opens the launch page first (warms Kasada), then auto-switches every tab to its gs.nike.com checkout link shortly before the drop — so checkout loads fresh and never hits the Oops page.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="warmFlipToggle" checked><span class="track"></span></label>
+            </div>
+            <div id="flipLeadRow" style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+              <label class="lbl" for="flipLeadMin" style="margin:0;">Flip to checkout</label>
+              <input type="number" id="flipLeadMin" class="inp" value="7" min="0.5" max="60" step="0.5" style="width:80px;">
+              <span class="muted">min before drop</span>
+            </div>
+
+            <div class="toggle" style="margin-bottom:10px;">
+              <div>
+                <div class="t-label">🪟 Small tiled windows</div>
+                <div class="t-hint">Open each profile as a small window, tiled across your screen, instead of full-size. The extension resizes each window itself, so it works even for profiles that are already running.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="tileWindowsToggle" checked><span class="track"></span></label>
+            </div>
+            <div id="tileSizeRow" style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <label class="lbl" style="margin:0;">Window size</label>
+              <input type="number" id="tileW" class="inp" value="500" min="200" max="2000" step="10" style="width:80px;">
+              <span class="muted">×</span>
+              <input type="number" id="tileH" class="inp" value="680" min="200" max="2000" step="10" style="width:80px;">
+              <span class="muted">px</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px; margin:2px 0 8px;">
+              <button id="tilePreviewBtn" class="btn btn-mini btn-dark">👁 Preview layout</button>
+              <span class="muted">See how the windows will tile on your screen.</span>
+            </div>
+            <div id="tilePreview" class="tile-preview" style="display:none;"></div>
+            <p class="hint" style="margin:0 0 12px;">Chrome won't render a window narrower than ~500px — smaller widths get clamped, but positions still tile.</p>
+
+            <div class="toggle" style="margin-bottom:6px;">
+              <div>
+                <div class="t-label">🧩 Load extension at launch</div>
+                <div class="t-hint">For profiles that keep losing the extension: load it fresh each launch. NOTE: Chrome only applies this to the profile that <em>cold-starts</em> the browser — if Chrome is already open, other profiles ignore it. Test whether it reaches all your profiles.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="loadExtToggle"><span class="track"></span></label>
+            </div>
+
             <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
             <div class="actions">
               <button id="saveBtn" class="btn btn-light">SAVE CONFIG</button>
+              <button id="openSelectedBtn" class="btn btn-purple">🎯 OPEN SELECTED (0)</button>
               <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL</button>
             </div>
+            <p class="hint" style="margin:6px 0 0;">OPEN SELECTED launches only the profiles you ticked ☑ on the Profiles page. LAUNCH ALL opens every configured profile.</p>
             <div id="statusMsg" class="status-msg"></div>
           </section>
         </div>
@@ -258,8 +371,13 @@
       <div class="section-header">
         <h1 class="section-title">LIVE MONITOR</h1>
         <span class="section-sub">Real-time status of every tab in every browser</span>
-        <button id="liveClearBtn" class="btn btn-mini btn-dark" style="margin-left:auto;">🗑 CLEAR</button>
+        <button id="panicBtn" class="btn btn-danger" style="margin-left:auto;">🛑 PANIC — STOP ALL SUBMITS</button>
+        <button id="closeAllBtn" class="btn btn-danger" title="Close every profile's bot windows (e.g. wrong sizes)">✖ CLOSE ALL PROFILES</button>
+        <button id="liveDiagBtn" class="btn btn-dark btn-mini" title="Diagnose why other profiles aren't showing">🔍 DIAGNOSE</button>
+        <button id="liveClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
       </div>
+      <div id="panicBanner" class="panic-banner" style="display:none;"></div>
+      <pre id="liveDiag" class="live-diag" style="display:none;"></pre>
       <div id="liveSummary" class="live-summary"></div>
       <div id="liveGrid" class="live-grid"></div>
       <div id="liveEmpty" class="live-empty" style="display:none;">
@@ -273,6 +391,8 @@
         <h1 class="section-title">PREFLIGHT</h1>
         <span class="section-sub">Pre-drop health check across every profile — go green before you launch</span>
         <button id="preflightRunBtn" class="btn btn-accent" style="margin-left:auto;">🩺 RUN PREFLIGHT</button>
+        <button id="updateAllBtn" class="btn btn-purple" title="Hot-reload the extension in every profile from the folder (after a git pull) — no Chrome restart">⟳ UPDATE ALL</button>
+        <button id="warmAllBtn" class="btn btn-dark" title="Open the SNKRS feed in every profile to warm Kasada/cookies (bot stays idle)">🔥 WARM ALL</button>
         <button id="preflightClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
       </div>
 
@@ -285,6 +405,7 @@
       </p>
 
       <div id="preflightSummary" class="pf-summary"></div>
+      <div id="preflightRegionBar" class="pf-region-bar"></div>
       <div id="preflightGrid" class="pf-grid"></div>
       <div id="preflightEmpty" class="live-empty">
         No preflight run yet. Click <strong>RUN PREFLIGHT</strong> to check every profile.
@@ -337,6 +458,8 @@
         <div class="card-head">
           <h2>ACCOUNTS</h2>
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <button id="selectAllBtn"  class="btn btn-mini btn-dark">☑ SELECT ALL</button>
+            <button id="selectNoneBtn" class="btn btn-mini btn-dark">☐ NONE</button>
             <button id="armAllBtn"   class="btn btn-mini btn-dark">⏰ ARM ALL</button>
             <button id="unarmAllBtn" class="btn btn-mini btn-danger">✕ UNARM ALL</button>
             <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
@@ -345,6 +468,8 @@
         <p class="hint">
           Each account maps to one Chrome profile.
           Pick the profile, set size, assign a card, then launch.
+          Tick <strong>☑ select</strong> on the profiles you want, then use
+          <strong>🎯 OPEN SELECTED</strong> on the Drop page. (<span id="selectedCount">0</span> selected)
           <span id="profileSourceNote"></span>
         </p>
 
@@ -448,8 +573,18 @@
     <div class="page-section" id="page-history">
       <div class="section-header">
         <h1 class="section-title">DROP HISTORY</h1>
-        <span class="section-sub">Timeline replay + record of every run</span>
+        <span class="section-sub">What the bot has learned from your past drops</span>
       </div>
+
+      <!-- ░ SELF-LEARNING INSIGHTS ░ -->
+      <section class="card insights-card" style="margin-bottom:20px;">
+        <div class="card-head">
+          <h2>🧠 INSIGHTS</h2>
+          <span class="card-tag">SELF-LEARNING</span>
+        </div>
+        <p class="hint" id="insightsMsg">The bot studies every drop it runs. Run a few and it learns your fill speed, timing margin, and which sizes hit.</p>
+        <div id="insightsBody"></div>
+      </section>
 
       <section class="card" style="margin-bottom:20px;">
         <div class="card-head">
@@ -521,6 +656,87 @@
 
           <section class="card">
             <div class="card-head">
+              <h2>🌐 PROXIES</h2>
+              <span class="card-tag">ONE IP PER ACCOUNT</span>
+            </div>
+            <p class="hint">Nike de-dupes raffle entries by IP. Give each account its own residential IP so every profile enters from a different address. Proxies are <strong>rented from a provider</strong> (IPRoyal, Smartproxy, Oxylabs…) — this applies them; it can't create them. Use SG IPs for SNKRS SG.</p>
+            <div class="toggle" style="border:none; padding:0 0 10px;">
+              <div>
+                <div class="t-label">Use proxies</div>
+                <div class="t-hint">Route each launched profile through its assigned IP</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="proxyEnabled"><span class="track"></span></label>
+            </div>
+            <label class="lbl" for="proxyMode">Proxy source</label>
+            <select id="proxyMode" class="inp">
+              <option value="list">List — one sticky IP per account (recommended)</option>
+              <option value="gateway">Single gateway — one rotating endpoint for all</option>
+            </select>
+            <div id="proxyListWrap" style="margin-top:10px;">
+              <label class="lbl" for="proxyList">Proxy list <span class="muted">(one per line: host:port:user:pass)</span></label>
+              <textarea id="proxyList" class="inp" rows="5" spellcheck="false" style="resize:vertical; font-family:monospace; font-size:12px;" placeholder="isp1.provider.com:8000:user:pass&#10;isp2.provider.com:8000:user:pass&#10;isp3.provider.com:8000:user:pass"></textarea>
+            </div>
+            <div id="proxyGatewayWrap" style="margin-top:10px; display:none;">
+              <label class="lbl" for="proxyGateway">Gateway endpoint <span class="muted">(host:port:user:pass)</span></label>
+              <input type="text" id="proxyGateway" class="inp" style="font-family:monospace;" placeholder="gate.provider.com:7000:user:pass">
+            </div>
+            <div style="margin-top:12px;">
+              <div class="row" style="justify-content:space-between; align-items:center; margin:0 0 4px;">
+                <div class="lbl" style="margin:0;">IP assignment preview</div>
+                <button id="rotateProxiesBtn" class="btn btn-dark" style="padding:3px 10px; font-size:11px;" title="Move every account to a different IP and relaunch — for when a batch of proxies dies">⟳ Rotate all</button>
+              </div>
+              <div id="proxyAssignPreview" class="assign-preview"><span class="muted">Add accounts to see IP assignments.</span></div>
+              <p class="hint" style="margin-top:6px;">A resi died? Hit <strong>⟳</strong> next to that account to swap it onto a fresh IP and relaunch it. Add spare lines to the list so there are unused IPs to swap in.</p>
+            </div>
+            <div class="actions" style="margin-top:12px;">
+              <button id="saveProxyBtn" class="btn btn-purple">SAVE PROXIES</button>
+              <button id="testProxyBtn" class="btn btn-dark">Test first proxy</button>
+            </div>
+            <div id="proxyTestMsg" class="status-msg" style="text-align:left;"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>🔔 OUTCOME NOTIFICATIONS</h2>
+              <span class="card-tag">WIN / CART / ERROR</span>
+            </div>
+            <p class="hint">Get pushed the moment any account wins, enters, or hits a problem — so you're not babysitting every window. Works with a Discord webhook and/or a Telegram bot.</p>
+            <div class="toggle" style="border:none; padding:0 0 10px;">
+              <div>
+                <div class="t-label">Notify on outcomes</div>
+                <div class="t-hint">Each account pings once per event</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="notifyEnabled"><span class="track"></span></label>
+            </div>
+            <label class="lbl" for="notifyWebhook">Discord webhook <span class="muted">(optional)</span></label>
+            <input type="text" id="notifyWebhook" class="inp" placeholder="https://discord.com/api/webhooks/...">
+            <div class="row" style="margin-top:10px; gap:8px;">
+              <div style="flex:1;">
+                <label class="lbl" for="notifyTgToken">Telegram bot token <span class="muted">(optional)</span></label>
+                <input type="text" id="notifyTgToken" class="inp" placeholder="123456:ABC-DEF...">
+              </div>
+              <div style="width:130px;">
+                <label class="lbl" for="notifyTgChat">Chat ID</label>
+                <input type="text" id="notifyTgChat" class="inp" placeholder="12345678">
+              </div>
+            </div>
+            <div class="lbl" style="margin-top:12px;">Notify me on…</div>
+            <div class="chk-grid">
+              <label class="chk"><input type="checkbox" id="notifyEvtWin" checked> 🎉 Won / order confirmed</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtEntered" checked> 📋 Draw entered</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtError" checked> ❌ Error / needs attention</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtSubmitting"> 🛒 Submitting order</label>
+              <label class="chk"><input type="checkbox" id="notifyEvtLoss"> 💔 Not selected</label>
+            </div>
+            <div class="actions" style="margin-top:12px;">
+              <button id="saveNotifyBtn" class="btn btn-purple">SAVE</button>
+              <button id="testNotifyBtn" class="btn btn-dark">Send test</button>
+            </div>
+            <div id="notifyTestMsg" class="status-msg" style="text-align:left;"></div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
               <h2>🔔 NEW-DROP ALERTS</h2>
               <span class="card-tag">SNKRS MONITOR</span>
             </div>
@@ -584,7 +800,9 @@
       </div>
     </div>
 
-  </main>
+      </main>
+    </div><!-- /.content -->
+  </div><!-- /.app-shell -->
 
   <!-- ─────────── TEMPLATES ─────────── -->
   <template id="accountRowTpl">
@@ -610,8 +828,19 @@
       </div>
       <div class="acct-foot">
         <div class="acct-toggles">
+          <label class="chk f-select-label" title="Include this profile when you click OPEN SELECTED on the Drop page">
+            <input type="checkbox" class="f-select"> ☑ select
+          </label>
           <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
             <input type="checkbox" class="f-autolaunch"> ⏰ auto
+          </label>
+          <label class="chk f-region-label" title="Region for SG/MY drops. Auto = detected from the account's phone number during Preflight.">
+            🌏
+            <select class="f-region">
+              <option value="auto">Auto</option>
+              <option value="SG">🇸🇬 SG</option>
+              <option value="MY">🇲🇾 MY</option>
+            </select>
           </label>
         </div>
         <div class="acct-actions">
@@ -638,8 +867,10 @@
       </div>
       <label class="lbl">Product URL</label>
       <input type="text" class="inp p-url" placeholder="https://www.nike.com/sg/launch/t/...">
-      <label class="lbl" style="margin-top:8px;">SKU / keyword <span class="muted">(optional)</span></label>
-      <input type="text" class="inp p-keyword" placeholder="e.g. IM3219-100">
+      <label class="lbl" style="margin-top:8px;">SKU / keyword <span class="muted">(targets ONE exact item)</span></label>
+      <input type="text" class="inp p-keyword" placeholder="e.g. IH1610-052">
+      <button type="button" class="btn btn-mini btn-dark p-fetch" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
+      <div class="product-preview p-preview" style="display:none;"></div>
       <label class="lbl" style="margin-top:8px;">Size range</label>
       <div class="size-pool p-sizepool"></div>
     </div>

@@ -2,9 +2,15 @@
 // Nike SNKRS Bot – Background Service Worker
 // ============================================================
 
+// Region (SG/MY) classifier — shared pure module, also used by Node tests.
+try { importScripts("region-util.js"); } catch (e) { /* loaded elsewhere / tests */ }
+const classifyRegion = (self.RegionUtil && self.RegionUtil.classifyRegionFromPhone) || (() => "");
+const displayPhone = (self.RegionUtil && self.RegionUtil.displayPhone) || ((p) => p || "");
+
 const SETTINGS_KEY = "snkrsBotSettings";
 const DROP_ALARM_NAME = "snkrsDropAlarm";
 const SELF_PROFILE_KEY = "snkrsSelfProfileDir";
+const RELOAD_HANDLED_KEY = "snkrsReloadHandledTs"; // last UPDATE-ALL ts this profile reloaded for
 const EXT_VERSION = chrome.runtime.getManifest().version;
 
 const defaultSettings = {
@@ -49,6 +55,231 @@ async function sendLog(message) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content: message }),
   }).catch(console.warn);
+}
+
+// ============================================================
+// Per-profile PROXY support
+// ============================================================
+// Nike de-dupes raffle entries by egress IP, so running many accounts from one
+// IP wastes them. Each Chrome PROFILE runs its own copy of this extension (its
+// own service worker), so we can point THIS profile at its assigned proxy with
+// the chrome.proxy API — it only affects this profile. Authenticated proxies
+// (user:pass) are handled via webRequest.onAuthRequired below.
+//
+// Accepted proxy string forms (whitespace-trimmed):
+//   host:port
+//   host:port:user:pass
+//   scheme://host:port
+//   scheme://user:pass@host:port
+//   user:pass@host:port
+// scheme is one of http|https|socks5|socks4 (default http).
+const PROXY_CREDS_KEY = "snkrsProxyCreds";   // {username, password} for onAuthRequired
+
+function parseProxy(raw) {
+  if (!raw || typeof raw !== "string") return null;
+  let s = raw.trim();
+  if (!s) return null;
+  let scheme = "http";
+  const schemeMatch = s.match(/^(https?|socks5|socks4):\/\//i);
+  if (schemeMatch) { scheme = schemeMatch[1].toLowerCase(); s = s.slice(schemeMatch[0].length); }
+  let username = "", password = "";
+  // Credentials before an @ (URL style).
+  const atIdx = s.lastIndexOf("@");
+  if (atIdx >= 0) {
+    const cred = s.slice(0, atIdx);
+    s = s.slice(atIdx + 1);
+    const ci = cred.indexOf(":");
+    if (ci >= 0) { username = cred.slice(0, ci); password = cred.slice(ci + 1); }
+    else username = cred;
+  }
+  // Remaining is host:port[:user:pass] (colon style).
+  const parts = s.split(":");
+  if (parts.length < 2) return null;
+  const host = parts[0];
+  const port = parseInt(parts[1], 10);
+  if (!host || !Number.isFinite(port)) return null;
+  if (!username && parts.length >= 4) { username = parts[2]; password = parts.slice(3).join(":"); }
+  return { scheme, host, port, username, password };
+}
+
+// Provide proxy credentials when Chrome challenges with a 407. We ONLY answer
+// proxy challenges (details.isProxy) so we never interfere with a site's own
+// login (Nike account 401s, etc.).
+let _proxyCreds = null;
+chrome.storage.local.get(PROXY_CREDS_KEY).then((d) => { _proxyCreds = d[PROXY_CREDS_KEY] || null; }).catch(() => {});
+try {
+  chrome.webRequest.onAuthRequired.addListener(
+    (details) => {
+      if (details.isProxy && _proxyCreds && _proxyCreds.username) {
+        return { authCredentials: { username: _proxyCreds.username, password: _proxyCreds.password || "" } };
+      }
+      return {};
+    },
+    { urls: ["<all_urls>"] },
+    ["blocking"]
+  );
+} catch (e) { /* webRequestAuthProvider missing on very old Chrome */ }
+
+async function applyProxy(proxyStr) {
+  const p = parseProxy(proxyStr);
+  if (!p) return clearProxy();
+  _proxyCreds = { username: p.username, password: p.password };
+  await chrome.storage.local.set({ [PROXY_CREDS_KEY]: _proxyCreds });
+  const single = { scheme: p.scheme, host: p.host, port: p.port };
+  return new Promise((resolve) => {
+    chrome.proxy.settings.set({
+      value: {
+        mode: "fixed_servers",
+        rules: { singleProxy: single, bypassList: ["<local>", "127.0.0.1", "localhost"] },
+      },
+      scope: "regular",
+    }, () => resolve({ ok: !chrome.runtime.lastError, applied: `${p.scheme}://${p.host}:${p.port}`, error: chrome.runtime.lastError && chrome.runtime.lastError.message }));
+  });
+}
+
+// Fetch our current public egress IP (used to prove a proxy is live and that
+// the IP actually changed). Races a couple of echo services for resilience.
+async function fetchEgressIp(timeoutMs) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), timeoutMs || 8000);
+  try {
+    const res = await fetch("https://api.ipify.org?format=json", { signal: ctl.signal, cache: "no-store" });
+    if (res.ok) { const j = await res.json(); if (j && j.ip) return j.ip; }
+    const res2 = await fetch("https://ipv4.icanhazip.com", { signal: ctl.signal, cache: "no-store" });
+    if (res2.ok) return (await res2.text()).trim();
+  } finally { clearTimeout(t); }
+  return null;
+}
+
+function clearProxy() {
+  _proxyCreds = null;
+  chrome.storage.local.remove(PROXY_CREDS_KEY).catch(() => {});
+  return new Promise((resolve) => {
+    chrome.proxy.settings.clear({ scope: "regular" }, () => resolve({ ok: !chrome.runtime.lastError, applied: null }));
+  });
+}
+
+// Work out which proxy string THIS profile should use from the shared config.
+//   proxies = {
+//     enabled: bool, mode: "list"|"gateway",
+//     list: ["host:port:user:pass", ...],   // one sticky IP per account
+//     gateway: "host:port:user:pass",       // one rotating endpoint for all
+//     assignments: { profileDir: "host:port:user:pass" }  // optional overrides
+//   }
+function resolveProxyForProfile(config, profileDir) {
+  const px = config && config.proxies;
+  if (!px || !px.enabled || !profileDir) return null;
+  if (px.assignments && px.assignments[profileDir]) return px.assignments[profileDir];
+  if (px.mode === "gateway") return (px.gateway || "").trim() || null;
+  const list = (Array.isArray(px.list) ? px.list : []).map(s => String(s || "").trim()).filter(Boolean);
+  if (!list.length) return null;
+  // Deterministic sticky round-robin: stable order by profileDir so each
+  // account keeps the SAME IP across restarts even without a saved assignment.
+  const accounts = Array.isArray(config.accounts) ? config.accounts : [];
+  const dirs = accounts.map(a => a && a.profileDir).filter(Boolean).sort();
+  let idx = dirs.indexOf(profileDir);
+  if (idx < 0) idx = 0;
+  return list[idx % list.length];
+}
+
+// Apply this profile's proxy from the freshly-fetched shared config.
+async function applyProxyFromConfig(config, profileDir) {
+  const target = resolveProxyForProfile(config, profileDir);
+  if (target) { await applyProxy(target); }
+  else if (config && config.proxies && config.proxies.hadProxy) { await clearProxy(); }
+}
+
+// ============================================================
+// OUTCOME NOTIFICATIONS (per-profile → Discord / Telegram)
+// ============================================================
+// Fire a push the moment an account reaches a notable state (won / entered /
+// carted / error), so the user isn't babysitting many windows. Each profile
+// sends its OWN event (it knows its account), deduped so one draw result pings
+// once. Config lives in the shared config so every profile reads the same
+// destination; we cache it in memory to avoid a host round-trip per log line.
+let _notifyCfg = null;                // { enabled, webhook, telegramToken, telegramChatId, events:{code:bool} }
+const _profileLabels = {};            // profileDir → friendly account label
+const _notifiedEvents = new Set();    // `${key}:${code}` already sent this worker session
+
+const NOTIFY_META = {
+  win:        { emoji: "🎉", label: "GOT 'EM — WON", important: true },
+  success:    { emoji: "✅", label: "Order submitted", important: true },
+  entered:    { emoji: "📋", label: "Draw entered", important: true },
+  submitting: { emoji: "🛒", label: "Submitting order", important: false },
+  loss:       { emoji: "💔", label: "Not selected", important: false },
+  limit:      { emoji: "⚠️", label: "Entry limit hit", important: false },
+  error:      { emoji: "❌", label: "Needs attention", important: false },
+};
+// States that default ON when the user hasn't customised the event list.
+const NOTIFY_DEFAULT_ON = { win: true, success: true, entered: true, error: true, submitting: false, loss: false, limit: true };
+
+function notifyEnabledFor(code) {
+  if (!_notifyCfg || !_notifyCfg.enabled) return false;
+  if (!(code in NOTIFY_META)) return false;
+  if (!_notifyCfg.webhook && !(_notifyCfg.telegramToken && _notifyCfg.telegramChatId)) return false;
+  const events = _notifyCfg.events || {};
+  return (code in events) ? !!events[code] : !!NOTIFY_DEFAULT_ON[code];
+}
+
+async function postNotify(text) {
+  const jobs = [];
+  if (_notifyCfg && _notifyCfg.webhook) {
+    jobs.push(fetch(_notifyCfg.webhook, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: text }),
+    }).catch(() => {}));
+  }
+  if (_notifyCfg && _notifyCfg.telegramToken && _notifyCfg.telegramChatId) {
+    const url = `https://api.telegram.org/bot${encodeURIComponent(_notifyCfg.telegramToken)}/sendMessage`;
+    jobs.push(fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      // No parse_mode — send plain text so an account label with a stray * or _
+      // can't make Telegram reject the whole message with a 400.
+      body: JSON.stringify({ chat_id: (_notifyCfg.telegramChatId || "").trim(), text, disable_web_page_preview: true }),
+    }).catch(() => {}));
+  }
+  await Promise.all(jobs);
+}
+
+// Verifying test send: unlike postNotify (fire-and-forget for the live path),
+// this actually reads each channel's response and returns a human error so the
+// dashboard's "Send test" can say WHY it failed (chat not found, bad token…).
+async function sendTestNotify(text) {
+  const results = [];
+  const wh = _notifyCfg && _notifyCfg.webhook;
+  const tgToken = _notifyCfg && (_notifyCfg.telegramToken || "").trim();
+  const tgChat = _notifyCfg && (_notifyCfg.telegramChatId || "").trim();
+
+  if (wh) {
+    try {
+      const r = await fetch(wh, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ content: text }) });
+      results.push(r.ok ? { ch: "Discord", ok: true } : { ch: "Discord", ok: false, error: `HTTP ${r.status}` });
+    } catch (e) { results.push({ ch: "Discord", ok: false, error: String(e && e.message || e) }); }
+  }
+  if (tgToken && tgChat) {
+    try {
+      const url = `https://api.telegram.org/bot${tgToken}/sendMessage`;
+      const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ chat_id: tgChat, text }) });
+      let body = null; try { body = await r.json(); } catch (e) {}
+      if (body && body.ok) results.push({ ch: "Telegram", ok: true });
+      else results.push({ ch: "Telegram", ok: false, error: (body && body.description) || `HTTP ${r.status}` });
+    } catch (e) { results.push({ ch: "Telegram", ok: false, error: String(e && e.message || e) }); }
+  }
+  return results;
+}
+
+function maybeNotifyOutcome(profileDir, tabId, code, message) {
+  if (!notifyEnabledFor(code)) return;
+  const dedupKey = `${profileDir}#${tabId}:${code}`;
+  if (_notifiedEvents.has(dedupKey)) return;
+  _notifiedEvents.add(dedupKey);
+  const meta = NOTIFY_META[code];
+  const who = _profileLabels[profileDir] || profileDir || "account";
+  const detail = (message || "").replace(/[*_`]/g, "").slice(0, 140);
+  // Plain text (no markdown) so it reads cleanly in BOTH Discord and Telegram —
+  // Telegram sends without parse_mode, and literal ** would show through.
+  const text = `${meta.emoji} ${meta.label} — ${who}\n${detail}`;
+  postNotify(text);
 }
 
 // ── Upcoming SNKRS drops (preview + new-release alerts) ───────
@@ -291,7 +522,13 @@ async function resolveLaunchData(sku, country) {
     const dropTimeISO = lv.startEntryDate ||
                         (pi.merchProduct && pi.merchProduct.commerceStartDate) ||
                         lv.stopEntryDate || "";
-    return { launchId, slug, skus, name, dropTimeISO };
+    // Squarish product image + a real /launch/t/ page URL, so the dashboard can
+    // show a thumbnail preview that confirms the exact product being targeted.
+    const imageUrl = _threadImage(obj);
+    // Launch method (DRAW = raffle, LEO/inline = first-come buy). Direct
+    // checkout links only apply to buy-type launches; DRAWs must be entered.
+    const method = (pi.launchView && pi.launchView.method) || "";
+    return { launchId, slug, skus, name, dropTimeISO, imageUrl, method };
   }
 
   let lastStatus = 0, netErr = "", partial = null;
@@ -309,7 +546,12 @@ async function resolveLaunchData(sku, country) {
     // Accept only a COMPLETE record. If an endpoint returns the product but
     // without launch fields (e.g. v2), remember it and keep trying others (v3).
     if (ex.launchId && ex.slug && ex.skus.length) {
-      return { ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug, skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO };
+      return {
+        ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug,
+        skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO,
+        imageUrl: ex.imageUrl || "", method: ex.method || "",
+        url: ex.slug ? `https://www.nike.com/${country.toLowerCase()}/launch/t/${ex.slug}` : "",
+      };
     }
     partial = partial || ex;
   }
@@ -421,7 +663,36 @@ chrome.runtime.onStartup.addListener(() => {
   armUpcomingPoll();
   rearmTabReloads();
   reportVersionToHost();
+  // Re-apply this profile's proxy + reload notify config after a browser
+  // restart, even before any Nike tab boots.
+  ensureCentralConfig();
+  reinjectOpenTabs("startup");
 });
+
+// After an extension reload/update, any checkout tab that was already open is
+// left with ORPHANED (dead) content scripts — Chrome only injects fresh ones on
+// a navigation, which is why the card wouldn't fill until you refreshed. Push
+// the checkout scripts back into open gs.nike.com tabs so they work without a
+// manual refresh. Guards in each script make re-injection safe.
+async function reinjectOpenTabs(reason) {
+  let tabs = [];
+  try { tabs = await chrome.tabs.query({ url: ["*://gs.nike.com/*"] }); } catch (e) { return; }
+  for (const tab of tabs) {
+    if (!tab.id || !/^https?:/i.test(tab.url || "")) continue;
+    try {
+      // Clear the run-guards the dead scripts left behind so the fresh ones run.
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id, allFrames: true },
+        func: () => { try { delete document.documentElement.dataset.snkrsBotRan; delete document.documentElement.dataset.snkrsPayRan; } catch (e) {} },
+      });
+      // Payments filler into all frames (no-op outside the gs-payments iframe).
+      await chrome.scripting.executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["gs-payments-content-script.js"] });
+      // Checkout driver into the top frame.
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["checkout-core.js", "gs-content-script.js"] });
+      console.log(`[SNKRSBot BG] re-injected checkout scripts into tab ${tab.id} (${reason})`);
+    } catch (e) { /* tab not scriptable (chrome://, etc.) */ }
+  }
+}
 chrome.runtime.onInstalled.addListener(() => {
   scheduleDropAlarm();
   armUpcomingPoll();
@@ -430,6 +701,9 @@ chrome.runtime.onInstalled.addListener(() => {
   // so the dashboard banner flips this profile to green without waiting for
   // the next browser restart.
   reportVersionToHost();
+  // Re-inject into open checkout tabs so a reload/update doesn't require a
+  // manual page refresh for the card to fill.
+  reinjectOpenTabs("installed/updated");
 });
 
 // ── Drop-time tab reload (survives Memory Saver / SW sleep) ────
@@ -502,7 +776,15 @@ const LAUNCH_GRACE_MS = 90 * 1000; // 90 seconds
 // primed to SUBMIT the instant the drop goes live. The content scripts hold the
 // actual SUBMIT click until the real drop time (never before → no
 // LAUNCH_NOT_ACTIVE). Long enough to fill, short enough that Kasada stays valid.
-const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds
+const DASH_PREP_LEAD_MS = 30 * 1000; // 30 seconds (default)
+
+// Self-learning auto-tune: the dashboard can override the open-lead per its
+// observed fill times (options.prepLeadSec). Clamped to a sane 15–120s.
+function prepLeadMsFor(cfg) {
+  const secs = cfg && cfg.options && Number(cfg.options.prepLeadSec);
+  if (secs && secs > 0) return Math.max(15, Math.min(120, secs)) * 1000;
+  return DASH_PREP_LEAD_MS;
+}
 
 // Returns the list of boot URLs to open for an account. Multi-product: one per
 // product target (each its own checkout URL + drop time). Single: one.
@@ -558,7 +840,7 @@ async function rescheduleDashLaunch() {
   }
   // Open PREP seconds before the drop so the page is primed; the content scripts
   // hold SUBMIT until the real drop time.
-  const openAt = dropMs - DASH_PREP_LEAD_MS;
+  const openAt = dropMs - prepLeadMsFor(cfg);
   if (dropMs <= Date.now() - LAUNCH_GRACE_MS) {
     // Drop passed long ago — stale. Disarm silently.
     await chrome.storage.local.remove(DASH_LAUNCH_STORE);
@@ -612,10 +894,27 @@ async function getSelfProfileDir() {
   return d[SELF_PROFILE_KEY] || "";
 }
 
+// How this profile got the extension: "development" = Load unpacked (only
+// updates on a full Chrome restart — the stale-prone case), "admin" =
+// force-installed by policy (auto-updates), "normal" = Web Store. Available via
+// chrome.management.getSelf() without the "management" permission.
+function getInstallType() {
+  return new Promise((resolve) => {
+    try {
+      if (!chrome.management || !chrome.management.getSelf) { resolve(""); return; }
+      chrome.management.getSelf((info) => {
+        if (chrome.runtime.lastError) { resolve(""); return; }
+        resolve((info && info.installType) || "");
+      });
+    } catch (e) { resolve(""); }
+  });
+}
+
 async function reportVersionToHost(profileDir) {
   const dir = profileDir || await getSelfProfileDir();
   if (!dir) return; // never booted by the dashboard yet — nothing to attribute
-  await nativeSend({ cmd: "reportVersion", profileDir: dir, entry: { version: EXT_VERSION, ts: Date.now() } });
+  const installType = await getInstallType();
+  await nativeSend({ cmd: "reportVersion", profileDir: dir, entry: { version: EXT_VERSION, ts: Date.now(), installType } });
 }
 
 // Dotted-numeric version compare: -1 / 0 / 1.
@@ -637,39 +936,6 @@ function cmpVer(a, b) {
 // version), try an authenticated identity call for the delivery address,
 // then write the whole result to the shared preflight folder and close the
 // tab. The dashboard aggregates the folder into the red/green checklist.
-
-// Best-effort: ask Nike who this token belongs to, and whether the account
-// has address data. 200 = definitely logged in. Anything else = "unknown",
-// never "failed" — the page signals still decide login.
-async function preflightIdentityCheck(accessToken) {
-  const out = { tokenAccepted: null, addressOk: null, detail: "" };
-  if (!accessToken) { out.detail = "no session token on page"; return out; }
-  try {
-    const res = await fetch("https://api.nike.com/identity/user/v1/users/me", {
-      headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-      cache: "no-store",
-    });
-    if (res.status === 401 || res.status === 403) {
-      out.tokenAccepted = false;
-      out.detail = `token rejected (HTTP ${res.status})`;
-      return out;
-    }
-    if (!res.ok) { out.detail = `identity HTTP ${res.status}`; return out; }
-    out.tokenAccepted = true;
-    const body = await res.json();
-    // Look for anything address-shaped in the profile payload.
-    const json = JSON.stringify(body).toLowerCase();
-    if (/"(shippingaddress|addressline1|address1|postalcode|postcode)"/.test(json)) {
-      out.addressOk = true;
-      out.detail = "identity OK · address data present";
-    } else {
-      out.detail = "identity OK · no address in profile payload";
-    }
-  } catch (e) {
-    out.detail = "identity call failed: " + String(e && e.message || e);
-  }
-  return out;
-}
 
 async function runPreflight(profileDir, page, accessToken) {
   await rememberSelfProfileDir(profileDir);
@@ -703,12 +969,13 @@ async function runPreflight(profileDir, page, accessToken) {
     entry.checks.cookies = { ok: null, detail: "cookies API unavailable" };
   }
 
-  // 4) Login + delivery address: page signals + authenticated identity call.
-  const idc = await preflightIdentityCheck(accessToken);
+  // 4) Login: page signals only. (We used to also hit Nike's identity API from
+  //    here for the delivery address, but Akamai 403s that cookieless
+  //    background call for every account — so it was pure noise. Login is judged
+  //    from the page's own token/DOM signals, which are what actually work.)
   const pageLogin = page && page.login || {};
   let loginOk;
-  if (idc.tokenAccepted === true) loginOk = true;
-  else if (pageLogin.hasToken && pageLogin.tokenFresh) loginOk = true;
+  if (pageLogin.hasToken && pageLogin.tokenFresh) loginOk = true;
   else if (pageLogin.signInVisible && !pageLogin.hasToken) loginOk = false;
   else if (pageLogin.accountMenu) loginOk = true;
   else loginOk = pageLogin.hasToken ? null : false;
@@ -717,13 +984,70 @@ async function runPreflight(profileDir, page, accessToken) {
     detail: [
       pageLogin.hasToken ? (pageLogin.tokenFresh ? "session token valid" : "session token EXPIRED") : "no session token",
       pageLogin.signInVisible ? "Sign-In button visible" : "",
-      idc.tokenAccepted === true ? "API accepted token" : (idc.tokenAccepted === false ? "API rejected token" : ""),
     ].filter(Boolean).join(" · "),
   };
-  entry.checks.address = { ok: idc.addressOk, detail: idc.detail };
+
+  // 5) Profile info the PAGE read for us (phone / country / address line 1).
+  //    Phone drives region classification (SG vs MY); address is informational
+  //    (printed, never a pass/fail — it can't be reliably read for every acct).
+  const prof = (page && page.profile) || {};
+  const phone = (prof.phone || "").trim();
+  const region = classifyRegion(phone) || (/(singapore|^sg$)/i.test(prof.country || "") ? "SG" : /(malaysia|^my$)/i.test(prof.country || "") ? "MY" : "");
+  const shownPhone = displayPhone(phone) || phone;
+  entry.phone = shownPhone;
+  entry.country = prof.country || "";
+  entry.region = region;
+  entry.addressLine1 = prof.addressLine1 || "";
+  entry.checks.region = {
+    ok: region ? true : null,
+    detail: region
+      ? `${region === "SG" ? "🇸🇬 Singapore" : "🇲🇾 Malaysia"}${shownPhone ? " · " + shownPhone : ""}`
+      : (phone ? `unclassified · ${phone} — set region manually` : "phone not read — set region manually"),
+  };
+  entry.checks.address = {
+    ok: prof.addressLine1 ? true : null,          // informational — never red
+    detail: prof.addressLine1 || (prof.profileFetched ? "no address on file" : "not read"),
+  };
 
   await nativeSend({ cmd: "setPreflight", profileDir, entry });
   return entry;
+}
+
+// Cache the shared config bits this profile needs at status/notify time so the
+// hot log path never has to round-trip the native host. Called whenever we
+// freshly fetch the shared config.
+function cacheCentralConfig(config, profileDir) {
+  if (!config) return;
+  _notifyCfg = config.notify || null;
+  const accounts = Array.isArray(config.accounts) ? config.accounts : [];
+  for (const a of accounts) {
+    if (a && a.profileDir) _profileLabels[a.profileDir] = a.label || a.profileDir;
+  }
+  if (profileDir && !_profileLabels[profileDir]) _profileLabels[profileDir] = profileDir;
+}
+
+// Lazily fetch + cache the shared config once per worker lifetime. The MV3
+// worker is recycled often; on a cold restart mid-drop _notifyCfg would be null
+// and the assigned proxy un-applied. This refreshes both without a fetch per
+// log line. Also (re)applies this profile's proxy.
+let _centralConfigDone = false;
+let _centralConfigInflight = null;
+async function ensureCentralConfig() {
+  if (_centralConfigDone) return;
+  if (_centralConfigInflight) return _centralConfigInflight;
+  _centralConfigInflight = (async () => {
+    try {
+      const dir = await getSelfProfileDir();
+      const resp = await nativeSend({ cmd: "getConfig" });
+      if (resp && resp.ok && resp.config) {
+        cacheCentralConfig(resp.config, dir);
+        await applyProxyFromConfig(resp.config, dir).catch(() => {});
+        _centralConfigDone = true;
+      }
+    } catch (e) { /* host offline — retry on next call */ }
+    finally { _centralConfigInflight = null; }
+  })();
+  return _centralConfigInflight;
 }
 
 // Build the per-profile settings object that the existing content scripts
@@ -748,10 +1072,16 @@ function buildSettingsForProfile(config, profileDir) {
   return {
     enabled:             opts.enabled ?? true,
     testMode:            opts.testMode ?? false,
+    leoMode:             opts.leoMode ?? false,   // ⚡ LEO = FCFS speed checkout
+    danJitterSec:        opts.danJitterSec ?? 0,  // DAN raffle human submit delay
     preferredSize:       account.size || "",
     preferredSizeType:   account.sizeType || "footwear",
     productKeyword:      keyword,
     profileLabel:        account.label || profileDir,
+    // The profile's own directory, so content scripts can self-identify in the
+    // messages they send — the background then never depends on a volatile
+    // in-memory tab→profile map to attribute their status.
+    profileDir:          profileDir,
     logWebhook:          account.logWebhook || opts.logWebhook || "",
     alertWebhook:        account.alertWebhook || opts.alertWebhook || "",
     cardName:            card.cardName   || "",
@@ -778,11 +1108,106 @@ function buildSettingsForProfile(config, profileDir) {
 // can retrieve it even if it arms the listener after the signal was sent.
 const cardFillCache = {};
 
+// CRITICAL: invalidate the cache the moment a tab starts loading a new page.
+// A reload keeps the SAME tabId, so without this a refreshed checkout (e.g.
+// after an "Oops"/error page) would read the PREVIOUS page's "card filled"
+// result and race ahead to SUBMIT before the fresh card is actually entered —
+// leaving it stuck waiting at submit. Clearing on navigation forces the fresh
+// page to wait for its own real card-fill signal.
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading") delete cardFillCache[tabId];
+});
+chrome.tabs.onRemoved.addListener((tabId) => { delete cardFillCache[tabId]; });
+
+// ── Small tiled windows: resize from the BACKGROUND, on ANY link ──
+// The launch URL carries #snkrsWin=w,h,x,y. Reading it here (instead of relying
+// on a content script that only runs on certain Nike URLs) means the window is
+// sized no matter what page the tab lands on — gs.nike.com, an error page, a
+// login redirect, anything. Still needs the extension loaded in that profile.
+const _tiledWindows = {}; // windowId -> "wxh@x,y" already applied (avoid loops)
+function parseWinMarker(url) {
+  const m = String(url || "").match(/snkrsWin=(\d+),(\d+),(-?\d+),(-?\d+)/);
+  return m ? { w: +m[1], h: +m[2], x: +m[3], y: +m[4] } : null;
+}
+function tileWindowFromUrl(url, windowId) {
+  if (windowId == null) return;
+  const g = parseWinMarker(url);
+  if (!g) return;
+  const sig = `${g.w}x${g.h}@${g.x},${g.y}`;
+  if (_tiledWindows[windowId] === sig) return; // already sized this window
+  _tiledWindows[windowId] = sig;
+  chrome.windows.update(windowId, {
+    left: Math.max(0, g.x | 0), top: Math.max(0, g.y | 0),
+    width: Math.max(200, g.w | 0), height: Math.max(200, g.h | 0),
+    state: "normal", focused: false,
+  }, () => { if (chrome.runtime.lastError) { /* window gone / clamped */ } });
+}
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Fires on the initial load (tab.url set) and on navigations (changeInfo.url).
+  tileWindowFromUrl(changeInfo.url || (tab && tab.url) || "", tab && tab.windowId);
+});
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab && tab.url) tileWindowFromUrl(tab.url, tab.windowId);
+});
+chrome.windows.onRemoved.addListener((windowId) => { delete _tiledWindows[windowId]; });
+
 // ── Live status board support ─────────────────────────────────
-// Maps tabId → profileDir so log messages from a launched Nike tab
-// can be attributed to the correct dashboard account row.
+// Maps tabId → profileDir so log messages from a launched Nike tab can be
+// attributed to the correct dashboard account row.
+//
+// IMPORTANT (MV3): the service worker is ephemeral — Chrome terminates it after
+// ~30s idle, under memory pressure, and at a 5-minute hard cap. A plain
+// in-memory object is lost on every restart, so any log/status/replay message
+// that arrives after a restart could not be attributed to a profile and was
+// silently dropped — which is why the LIVE board went stale while profiles sat
+// holding for a drop. We now BACK the map with chrome.storage.session (survives
+// worker restarts within the browser session) and rehydrate on startup. Content
+// scripts also self-identify (msg.profileDir) as the primary source of truth.
+const TAB_PROFILE_STORE = "snkrsTabProfiles";
 const tabProfileMap = {};
-chrome.tabs.onRemoved.addListener((tabId) => { delete tabProfileMap[tabId]; });
+
+// Rehydrate the in-memory cache whenever the worker (re)starts.
+chrome.storage.session.get(TAB_PROFILE_STORE).then((d) => {
+  Object.assign(tabProfileMap, d[TAB_PROFILE_STORE] || {});
+}).catch(() => {});
+
+async function persistTabProfile(tabId, profileDir) {
+  if (tabId == null || !profileDir) return;
+  tabProfileMap[tabId] = profileDir;
+  try {
+    const d = await chrome.storage.session.get(TAB_PROFILE_STORE);
+    const m = d[TAB_PROFILE_STORE] || {};
+    if (m[tabId] === profileDir) return;
+    m[tabId] = profileDir;
+    await chrome.storage.session.set({ [TAB_PROFILE_STORE]: m });
+  } catch (e) { /* session storage unavailable — in-memory still works */ }
+}
+
+// Resolve the profile for a tab, most-authoritative first:
+//   1. the profileDir the content script stamped into the message (survives
+//      worker restarts AND tab reloads),
+//   2. the in-memory cache,
+//   3. the persisted session store (rehydrates the cache on a cold worker).
+async function resolveTabProfile(tabId, msgProfileDir) {
+  if (msgProfileDir) { persistTabProfile(tabId, msgProfileDir); return msgProfileDir; }
+  if (tabId == null) return null;
+  if (tabProfileMap[tabId]) return tabProfileMap[tabId];
+  try {
+    const d = await chrome.storage.session.get(TAB_PROFILE_STORE);
+    const m = d[TAB_PROFILE_STORE] || {};
+    if (m[tabId]) { tabProfileMap[tabId] = m[tabId]; return m[tabId]; }
+  } catch (e) {}
+  return null;
+}
+
+chrome.tabs.onRemoved.addListener(async (tabId) => {
+  delete tabProfileMap[tabId];
+  try {
+    const d = await chrome.storage.session.get(TAB_PROFILE_STORE);
+    const m = d[TAB_PROFILE_STORE] || {};
+    if (m[tabId] != null) { delete m[tabId]; await chrome.storage.session.set({ [TAB_PROFILE_STORE]: m }); }
+  } catch (e) {}
+});
 
 // A short human label for a tab (the product it's on) for the live monitor.
 function tabLabel(tab) {
@@ -870,12 +1295,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: false, error: resp && resp.error || "host error" });
         return;
       }
+      // Cache the shared notification config + this account's label, and point
+      // this profile at its assigned proxy — all derived from the same config
+      // fetch so we don't spawn extra host processes.
+      cacheCentralConfig(resp.config, msg.profileDir);
+      applyProxyFromConfig(resp.config, msg.profileDir).catch(() => {});
       const settings = buildSettingsForProfile(resp.config, msg.profileDir);
       if (!settings) {
         sendResponse({ ok: false, error: "No matching account in shared config." });
         return;
       }
-      if (sender?.tab?.id) tabProfileMap[sender.tab.id] = msg.profileDir;
+      if (sender?.tab?.id) {
+        persistTabProfile(sender.tab.id, msg.profileDir);
+        // Heartbeat: publish a "connected" status to the shared folder the
+        // instant this profile boots, so it appears on the dashboard's LIVE
+        // board immediately — before any checkout log. If a launched profile
+        // never shows up here, its native-host write is failing (extension not
+        // loaded / ID mismatch), which is the usual reason cross-profile status
+        // is missing.
+        const key = `${msg.profileDir}#${sender.tab.id}`;
+        const entry = {
+          key, profileDir: msg.profileDir, tabId: sender.tab.id,
+          label: tabLabel(sender.tab), code: "waiting",
+          message: "🟢 Connected — extension loaded, waiting for drop.", time: Date.now(),
+        };
+        chrome.storage.local.get("snkrsStatus", (data) => {
+          const s = data.snkrsStatus || {}; s[key] = entry;
+          chrome.storage.local.set({ snkrsStatus: s });
+        });
+        nativeSend({ cmd: "setStatus", profileDir: key, entry }).catch(() => {});
+      }
       sendResponse({ ok: true, settings });
     });
     return true;
@@ -906,10 +1355,136 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
+  // PANIC: the dashboard raises/clears a shared abort flag; a checkout tab
+  // polls it (throttled) while holding SUBMIT so every profile can be stopped
+  // at once. Both go through the native host's shared abort.json.
+  if (msg.type === "set_abort") {
+    nativeSend({ cmd: "setAbort", on: !!msg.on }).then(r => sendResponse(r || { ok: false }));
+    return true;
+  }
+  if (msg.type === "check_abort") {
+    nativeSend({ cmd: "getAbort" }).then(r => {
+      sendResponse({ ok: !!(r && r.ok), on: !!(r && r.abort && r.abort.on), ts: r && r.abort && r.abort.ts });
+    });
+    return true;
+  }
+
+  // CLOSE ALL: the dashboard raises a shared close flag; each profile's content
+  // scripts poll it and ask us to close this profile's bot windows.
+  if (msg.type === "set_close") {
+    nativeSend({ cmd: "setClose", on: !!msg.on }).then(r => sendResponse(r || { ok: false }));
+    return true;
+  }
+  if (msg.type === "check_close") {
+    nativeSend({ cmd: "getAbort" }).then(r => {
+      sendResponse({ ok: !!(r && r.ok), on: !!(r && r.abort && r.abort.close) });
+    });
+    return true;
+  }
+  if (msg.type === "close_windows") {
+    // Close every window in THIS profile that holds a Nike/checkout tab. The
+    // dashboard lives on a chrome-extension:// page, so it never matches and
+    // survives. Removing whole windows makes the profile's bot windows vanish.
+    chrome.tabs.query({ url: ["*://*.nike.com/*", "*://gs.nike.com/*", "*://gs-payments.nike.com/*"] }, (tabs) => {
+      const winIds = [...new Set((tabs || []).map(t => t.windowId))];
+      if (!winIds.length) {
+        // No window-scoped Nike tab (rare) — fall back to closing the tabs.
+        (tabs || []).forEach(t => chrome.tabs.remove(t.id, () => chrome.runtime.lastError));
+      } else {
+        winIds.forEach(id => chrome.windows.remove(id, () => chrome.runtime.lastError));
+      }
+    });
+    return false;
+  }
+
+  // Small tiled windows: a launched tab asks us to resize/position ITS window.
+  // chrome.windows.update works regardless of whether Chrome cold-started the
+  // profile — unlike the command-line --window-size flag, which a
+  // already-running profile ignores (the reason tiling appeared to do nothing).
+  if (msg.type === "tile_window") {
+    const g = msg.geom || {};
+    const winId = sender?.tab?.windowId;
+    if (winId != null && g.w && g.h) {
+      chrome.windows.update(winId, {
+        left: Math.max(0, g.x | 0), top: Math.max(0, g.y | 0),
+        width: Math.max(200, g.w | 0), height: Math.max(200, g.h | 0),
+        state: "normal", focused: false,
+      }, () => { if (chrome.runtime.lastError) { /* window gone / clamped — fine */ } });
+    }
+    return false;
+  }
+
   // Generic relay so extension pages (the dashboard) could also reach the
   // host through us if they prefer. {cmd} is forwarded verbatim.
   if (msg.type === "native") {
     nativeSend(msg.payload || {}).then(sendResponse);
+    return true;
+  }
+
+  // Proxy TEST: temporarily route THIS profile through the given proxy, fetch a
+  // public IP echo, then restore the previous proxy. Reports the egress IP so
+  // the user can confirm the proxy works (and that the IP actually changed)
+  // before the drop. Runs in the dashboard's own profile.
+  if (msg.type === "test_proxy") {
+    (async () => {
+      const parsed = parseProxy(msg.proxy || "");
+      if (!parsed) { sendResponse({ ok: false, error: "Could not parse proxy. Use host:port:user:pass." }); return; }
+      let baseline = null;
+      try {
+        // What's our IP WITHOUT the proxy (for comparison)?
+        baseline = await fetchEgressIp(6000).catch(() => null);
+        const ap = await applyProxy(msg.proxy);
+        if (!ap.ok) { await clearProxy(); sendResponse({ ok: false, error: ap.error || "Chrome rejected the proxy." }); return; }
+        // Small settle so the proxy setting takes effect before the fetch.
+        await new Promise(r => setTimeout(r, 400));
+        const ip = await fetchEgressIp(9000);
+        sendResponse({
+          ok: true, ip, baseline,
+          changed: !!(ip && baseline && ip !== baseline),
+          endpoint: `${parsed.scheme}://${parsed.host}:${parsed.port}`,
+          auth: !!parsed.username,
+        });
+      } catch (e) {
+        sendResponse({ ok: false, error: "No response through proxy: " + String(e && e.message || e) });
+      } finally {
+        // Restore whatever proxy THIS profile is actually assigned (or clear if
+        // none) — never leave the profile stuck on the test proxy, and never
+        // strip a real assigned proxy that a checkout run depends on.
+        _centralConfigDone = false;
+        await ensureCentralConfig().catch(() => clearProxy().catch(() => {}));
+      }
+    })();
+    return true;
+  }
+
+  // Re-apply this profile's proxy from the shared config immediately (used after
+  // the dashboard saves proxy settings, so the change takes effect without a
+  // restart in whichever profile the dashboard runs).
+  if (msg.type === "apply_proxy_now") {
+    (async () => {
+      _centralConfigDone = false;
+      await ensureCentralConfig();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+
+  // Notification TEST: send a sample outcome message through whatever channels
+  // are configured, so the user can confirm Discord/Telegram delivery.
+  if (msg.type === "test_outcome_notify") {
+    (async () => {
+      _notifyCfg = msg.cfg || _notifyCfg;
+      if (!_notifyCfg || (!_notifyCfg.webhook && !((_notifyCfg.telegramToken || "").trim() && (_notifyCfg.telegramChatId || "").trim()))) {
+        sendResponse({ ok: false, error: "No Discord webhook or Telegram token + chat ID configured." });
+        return;
+      }
+      try {
+        const results = await sendTestNotify("🎉 GOT 'EM — WON — Test account. This is a test from your SNKRS Bot dashboard. Notifications are working.");
+        const failed = results.filter(r => !r.ok);
+        if (!failed.length) sendResponse({ ok: true, channels: results.map(r => r.ch) });
+        else sendResponse({ ok: false, error: failed.map(r => `${r.ch}: ${r.error}`).join(" · ") });
+      } catch (e) { sendResponse({ ok: false, error: String(e && e.message || e) }); }
+    })();
     return true;
   }
 
@@ -987,6 +1562,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ cached });
     return true;
   }
+  // gs-bootstrap resets it at document_start on every (re)load, so a refreshed
+  // checkout never reuses the previous page's card-fill result.
+  if (msg.type === "reset_card_fill") {
+    const tabId = sender?.tab?.id;
+    if (tabId != null) delete cardFillCache[tabId];
+    return false;
+  }
+
+  // UPDATE ALL: hot-reload THIS profile's extension from disk (picks up the
+  // latest unpacked code — the update path for machines that can't force-install).
+  // Deduped by a monotonic timestamp persisted in storage.local so a profile
+  // reloads at most once per click and never loops (the reloaded instance sees
+  // ts == lastHandled and does nothing).
+  if (msg.type === "check_reload") {
+    const ts = Number(msg.ts) || 0;
+    if (!ts) return false;
+    (async () => {
+      const d = await chrome.storage.local.get(RELOAD_HANDLED_KEY);
+      const last = Number(d[RELOAD_HANDLED_KEY]) || 0;
+      if (ts > last) {
+        await chrome.storage.local.set({ [RELOAD_HANDLED_KEY]: ts });
+        // Small delay so the dedup write flushes before the worker restarts.
+        setTimeout(() => { try { chrome.runtime.reload(); } catch (e) {} }, 300);
+      }
+    })();
+    return false;
+  }
   if (msg.type === "get_settings") {
     getSettings().then(s => sendResponse({ settings: s }));
     return true;
@@ -1063,7 +1665,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
       // Open PREP seconds before the drop (fresh page/Kasada + time to fill);
       // the content scripts hold SUBMIT until the real drop time.
-      const openAt = dropMs - DASH_PREP_LEAD_MS;
+      const openAt = dropMs - prepLeadMsFor(cfg);
       if (dropMs <= Date.now() - LAUNCH_GRACE_MS) {
         // Drop passed long ago → stale. Disarm silently.
         await chrome.storage.local.remove(DASH_LAUNCH_STORE);
@@ -1102,26 +1704,36 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     // id) so the command-center monitor can show every product tab in every
     // browser — not just the last one per profile. Stored locally AND mirrored
     // to the shared status folder so the dashboard (a different Chrome profile)
-    // can see them all.
+    // can see them all. Resolve the profile from the message first (content
+    // scripts self-identify), falling back to the persisted tab→profile map, so
+    // a restarted service worker never drops status.
     const tabId = sender?.tab?.id;
-    const profileDir = tabId != null ? tabProfileMap[tabId] : null;
-    if (profileDir != null && tabId != null) {
-      const code = parseStatusFromLog(msg.message);
-      const key = `${profileDir}#${tabId}`;
-      const label = tabLabel(sender && sender.tab);
-      chrome.storage.local.get("snkrsStatus", (data) => {
-        const s = data.snkrsStatus || {};
-        const prev = s[key] || {};
-        const entry = {
-          key, profileDir, tabId,
-          label: label || prev.label || "",
-          code: code || prev.code || "checkout", // keep last known stage if none
-          message: msg.message,
-          time: Date.now(),
-        };
-        s[key] = entry;
-        chrome.storage.local.set({ snkrsStatus: s });
-        pushStatusToShared(key, entry); // throttled, best-effort
+    if (tabId != null) {
+      resolveTabProfile(tabId, msg.profileDir).then((profileDir) => {
+        if (profileDir == null) return;
+        const code = parseStatusFromLog(msg.message);
+        const key = `${profileDir}#${tabId}`;
+        const label = tabLabel(sender && sender.tab);
+        chrome.storage.local.get("snkrsStatus", (data) => {
+          const s = data.snkrsStatus || {};
+          const prev = s[key] || {};
+          const entry = {
+            key, profileDir, tabId,
+            label: label || prev.label || "",
+            code: code || prev.code || "checkout", // keep last known stage if none
+            message: msg.message,
+            time: Date.now(),
+          };
+          s[key] = entry;
+          chrome.storage.local.set({ snkrsStatus: s });
+          pushStatusToShared(key, entry); // throttled, best-effort
+        });
+        // Notifications run OUT of the status write path so a cold-worker
+        // config fetch can never delay the live status board during a drop.
+        if (code) {
+          if (_centralConfigDone) maybeNotifyOutcome(profileDir, tabId, code, msg.message);
+          else ensureCentralConfig().then(() => maybeNotifyOutcome(profileDir, tabId, code, msg.message)).catch(() => {});
+        }
       });
     }
     return false;
@@ -1134,23 +1746,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Chrome profile) can build its per-account Drop Replay view.
   if (msg.type === "checkout_event") {
     const tabId = sender?.tab?.id;
-    const profileDir = tabId != null ? tabProfileMap[tabId] : null;
     if (tabId == null) return false;
-    const key = `${profileDir || "local"}#${tabId}`;
-    const ev = { code: msg.code, t: Number(msg.t) || Date.now(), extra: msg.extra || null };
-    chrome.storage.local.get("snkrsTimeline", (data) => {
-      const store = data.snkrsTimeline || {};
-      const entry = store[key] || { key, profileDir: profileDir || "", tabId, events: [], dropAt: 0, updated: 0 };
-      entry.profileDir = profileDir || entry.profileDir;
-      if (msg.dropAt) entry.dropAt = Number(msg.dropAt) || entry.dropAt;
-      entry.events.push(ev);
-      if (entry.events.length > 60) entry.events = entry.events.slice(-60);
-      entry.updated = Date.now();
-      entry.label = tabLabel(sender && sender.tab) || entry.label || "";
-      store[key] = entry;
-      chrome.storage.local.set({ snkrsTimeline: store });
-      // Events are infrequent (~10/drop) so no throttling — flush each to disk.
-      if (profileDir) nativeSend({ cmd: "setTimeline", profileDir: key, entry }).catch(() => {});
+    resolveTabProfile(tabId, msg.profileDir).then((profileDir) => {
+      const key = `${profileDir || "local"}#${tabId}`;
+      const ev = { code: msg.code, t: Number(msg.t) || Date.now(), extra: msg.extra || null };
+      chrome.storage.local.get("snkrsTimeline", (data) => {
+        const store = data.snkrsTimeline || {};
+        const entry = store[key] || { key, profileDir: profileDir || "", tabId, events: [], dropAt: 0, updated: 0 };
+        entry.profileDir = profileDir || entry.profileDir;
+        if (msg.dropAt) entry.dropAt = Number(msg.dropAt) || entry.dropAt;
+        entry.events.push(ev);
+        if (entry.events.length > 60) entry.events = entry.events.slice(-60);
+        entry.updated = Date.now();
+        entry.label = tabLabel(sender && sender.tab) || entry.label || "";
+        store[key] = entry;
+        chrome.storage.local.set({ snkrsTimeline: store });
+        // Events are infrequent (~10/drop) so no throttling — flush each to disk.
+        if (profileDir) nativeSend({ cmd: "setTimeline", profileDir: key, entry }).catch(() => {});
+      });
     });
     return false;
   }
@@ -1159,10 +1772,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // Dashboard.js normalises and displays it.
   if (msg.type === "orders_api_data" || msg.type === "orders_dom_data") {
     const tabId     = sender?.tab?.id;
-    const profileDir = msg.profileDir || (tabId ? tabProfileMap[tabId] : "");
-    if (!profileDir) return false;
-
-    chrome.storage.local.get("snkrsOrders", (data) => {
+    resolveTabProfile(tabId, msg.profileDir).then((profileDir) => {
+      if (!profileDir) return;
+      chrome.storage.local.get("snkrsOrders", (data) => {
       const store   = data.snkrsOrders || {};
       const entry   = store[profileDir] || {};
       entry.ts      = Date.now();
@@ -1190,6 +1802,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // DASHBOARD (which runs in a different Chrome profile and therefore can't
       // see this profile's chrome.storage.local) can read these orders.
       nativeSend({ cmd: "setOrders", profileDir, entry }).catch(() => {});
+      });
     });
     return false;
   }

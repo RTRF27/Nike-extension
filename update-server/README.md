@@ -17,6 +17,81 @@ Every profile installs + auto-updates the same build.
 Dashboard banner + Preflight page show which profiles are still stale.
 ```
 
+## ⚠ Requirement: the machine must be "managed" (important)
+
+Chrome only **force-installs a self-hosted extension** (our local
+`http://127.0.0.1:38473/update.xml`) when the browser is **enterprise-managed**.
+On a plain personal PC it **blocks it** — `chrome://policy` shows
+`[BLOCKED] … not detected as enterprise managed`, and the extension never
+installs. This is a Chrome security rule, not a bug in this project. There are
+two ways forward:
+
+### Option A — keep Load-unpacked (works today, no managed machine)
+This is the simplest reliable path on a personal PC:
+1. Load the extension unpacked in each profile once.
+2. To update **all** profiles at once, either:
+   - **Dashboard → Setup → Preflight → ⟳ UPDATE ALL** (after `git pull`): opens
+     each profile with a reload marker so its bot hot-reloads the latest code
+     from the folder — **no Chrome restart**. Do it between drops. *(This only
+     works once every profile is already on the build that added the button, so
+     the very first time you still need the full restart below.)*
+   - or `git pull`, then **fully quit Chrome** (Task Manager → end every
+     `chrome.exe`) and reopen — every profile reloads from the folder.
+3. The dashboard's **🔍 DIAGNOSE** shows any profile still on an old version.
+
+You don't get silent background auto-update, but one click (or one restart)
+updates everything — no 14×-reload.
+
+> The dashboard reloads its own profile last. Run the dashboard in a profile
+> that isn't one of your bot accounts so a mid-update reload can't interrupt it;
+> if it does, just click UPDATE ALL again.
+
+### Option B — enroll in Chrome Browser Cloud Management (free) → force-install works
+Makes your browser "managed" so the self-hosted force-install is allowed:
+1. Go to <https://chromeenterprise.google/> → get **Chrome Enterprise Core**
+   (free) with any Google account; in the Admin console create an **enrollment
+   token** (Devices → Chrome → Managed Browsers → Enroll).
+2. Set it on the PC (admin cmd):
+   `reg add "HKLM\SOFTWARE\Policies\Google\Chrome" /v CloudManagementEnrollmentToken /t REG_SZ /d <TOKEN> /f`
+3. Restart Chrome; `chrome://policy` → the browser is now enrolled/managed.
+4. **Then** run `install-windows.bat` — the force-install is no longer blocked.
+
+### Clean up a blocked policy
+If you already ran the installer and see `[BLOCKED]` at `chrome://policy`, remove
+it: run **`uninstall-windows.bat`** as admin (removes the forcelist policy + the
+server task), then restart Chrome. You're back to Load-unpacked with nothing
+broken.
+
+## Migrating from "Load unpacked" (do this on a calm day)
+
+If your profiles currently run the extension via **Load unpacked**, switching to
+force-install ends the manual-reload / mixed-version / ID-drift pain for good —
+one policy entry installs and auto-updates the extension in **every** profile.
+
+1. **Run it:** right-click `install-windows.bat` → **Run as administrator**.
+   It packs + signs, starts the local update server, verifies the download, then
+   writes the Chrome policy. It prints the extension ID and whether it changed.
+   - **If it found your signing key** (`.keys\crx-signing-key.pem`): the ID stays
+     `gkfbg…` — same as your unpacked copies and native host. Cleanest case.
+   - **If no key was found:** it mints a NEW id **once** and saves the key. The
+     new id differs from your old unpacked copies, so you'll remove those in
+     step 4.
+2. **Quit Chrome completely** (Task Manager → end every `chrome.exe`), reopen.
+3. `chrome://policy` → **Reload policies** → confirm `ExtensionInstallForcelist`
+   shows the ID. In a couple of profiles, `chrome://extensions` should show the
+   extension as **"Installed by enterprise policy."**
+4. **Remove the old "Load unpacked" copies** from every profile
+   (`chrome://extensions` → Remove). Especially important if the ID changed —
+   otherwise the bot runs twice per profile.
+5. **Back up** `.keys\crx-signing-key.pem` somewhere safe. Losing it is the only
+   thing that forces another ID change; `pack.js` now refuses to regenerate
+   silently without it.
+
+From then on: bump `version` in `manifest.json`, run `node update-server/pack.js`
+(no admin, no ID change), and every profile updates within ~5h (or instantly via
+the Update button). The dashboard's **DIAGNOSE** shows each profile as
+`force-installed` once migrated.
+
 ## Install (Windows)
 
 1. Make sure Node.js is installed.

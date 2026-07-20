@@ -18,11 +18,39 @@ let entryAttempted = false;
 
 function log(...args) { console.log("[SNKRSBot]", ...args); }
 function logBG(msg) {
-  try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
+  // Stamp profileDir so the background attributes status even after an MV3
+  // service-worker restart wiped its in-memory tab→profile map.
+  try { chrome.runtime.sendMessage({ type: "log", message: msg, profileDir: settings?.profileDir }); }
   catch (e) { console.warn("[SNKRSBot] logBG:", e); }
 }
 function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
 function randInt(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+// ── PANIC / abort ─────────────────────────────────────────────
+// Shared abort flag the dashboard can raise to stop every profile entering.
+let _abortCache = { on: false, at: 0 };
+async function checkAbort() {
+  if (Date.now() - _abortCache.at < 1200) return _abortCache.on;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "check_abort" });
+    _abortCache = { on: !!(resp && resp.on), at: Date.now() };
+  } catch (e) {}
+  return _abortCache.on;
+}
+
+// ── CLOSE ALL polling ─────────────────────────────────────────
+// Poll the shared close flag; when raised, ask the background to close this
+// profile's bot windows. Runs regardless of bot state so a launch tab can be
+// closed even if the bot is disabled or already entered.
+function startControlPoller() {
+  const iv = setInterval(async () => {
+    let close = false;
+    try { const r = await chrome.runtime.sendMessage({ type: "check_close" }); close = !!(r && r.on); }
+    catch (e) { clearInterval(iv); return; } // context invalidated — stop
+    if (close) { clearInterval(iv); try { chrome.runtime.sendMessage({ type: "close_windows" }); } catch (e) {} }
+  }, 2500);
+}
+startControlPoller();
 
 // ── Profile tag ──────────────────────────────────────────────
 function profileTag() {
@@ -786,6 +814,12 @@ function startDropWatcher(tag, preferred) {
 // ── Core entry logic (extracted for reuse) ────────────────────
 async function executeEntry(tag, preferred) {
   if (entryAttempted) return; // prevent double-fire
+  // PANIC: dashboard raised a global abort — do not enter this draw.
+  if (await checkAbort()) {
+    logBG(`🛑${tag} PANIC — abort raised. NOT entering the draw.`);
+    showBanner("🛑 ABORTED — bot stopped, no entry made.", "#e03131");
+    return;
+  }
   entryAttempted = true;
 
   // Wait for size button to be fully ready (brief grace period)
@@ -957,6 +991,16 @@ async function runSNKRSFlow() {
   if (!settings?.enabled) { log("Bot disabled."); return; }
   if (settings?.testMode) showBanner("SNKRS BOT — TEST MODE (will not submit)");
   if (!isLaunchPage()) { log("Not a SNKRS launch page."); return; }
+
+  // Warm-then-flip: bootstrap-content-script will navigate this tab to the gs
+  // checkout link shortly before the drop. Do NOT run the launch-page submit
+  // flow or the status poller here — this tab only warms and then flips.
+  try {
+    if (sessionStorage.getItem("snkrsWarmFlip") === "1") {
+      log("Warm-then-flip mode — launch-page submit + poller suppressed; waiting to flip to checkout.");
+      return;
+    }
+  } catch (e) {}
 
   runSNKRSFlow().catch(err => {
     logBG(`❌ SNKRS flow error: ${err}`);

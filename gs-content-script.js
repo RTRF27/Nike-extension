@@ -50,7 +50,9 @@ function extAlive() { try { return !!(chrome.runtime && chrome.runtime.id); } ca
 
 function logBG(msg) {
   if (!extAlive()) return; // orphaned tab — extension reloaded; stop quietly
-  try { chrome.runtime.sendMessage({ type: "log", message: msg }); }
+  // Stamp our profileDir so the background can attribute this status even after
+  // its (ephemeral MV3) service worker restarted and lost its in-memory map.
+  try { chrome.runtime.sendMessage({ type: "log", message: msg, profileDir: settings?.profileDir }); }
   catch (e) { /* context invalidated mid-call — ignore */ }
 }
 
@@ -66,6 +68,7 @@ function emitEvent(evt) {
       dropAt: evt.dropAt || 0,
       extra: evt.extra || null,
       url: location.href,
+      profileDir: settings?.profileDir,
     });
   } catch (e) { /* ignore */ }
 }
@@ -123,6 +126,43 @@ async function armCardFillSignal(timeoutMs = 60000) {
   });
 }
 
+// ── PANIC / abort polling ─────────────────────────────────────
+// Asks our background (which reads the shared abort.json via the native host)
+// whether the dashboard has raised a global abort. Throttled so the HOLDING
+// loop can call it freely without hammering the native host.
+let _abortCache = { on: false, at: 0 };
+async function checkAbort() {
+  if (!extAlive()) return false;
+  if (Date.now() - _abortCache.at < 1200) return _abortCache.on;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "check_abort" });
+    _abortCache = { on: !!(resp && resp.on), at: Date.now() };
+  } catch (e) { /* keep last value */ }
+  return _abortCache.on;
+}
+
+// ── CLOSE ALL polling ─────────────────────────────────────────
+// The dashboard can raise a shared "close" flag; every profile's content
+// scripts poll it and ask the background to close this profile's bot windows
+// (e.g. wrong sizes assigned — bail out of everything).
+async function checkClose() {
+  if (!extAlive()) return false;
+  try {
+    const resp = await chrome.runtime.sendMessage({ type: "check_close" });
+    return !!(resp && resp.on);
+  } catch (e) { return false; }
+}
+function startControlPoller() {
+  const iv = setInterval(async () => {
+    if (!extAlive()) { clearInterval(iv); return; }
+    if (await checkClose()) {
+      clearInterval(iv);
+      try { chrome.runtime.sendMessage({ type: "close_windows" }); } catch (e) {}
+    }
+  }, 2500);
+}
+startControlPoller();
+
 // ── Drop-time gate resolution ─────────────────────────────────
 // The exact drop time this tab must hold SUBMIT until. Per-TAB value
 // (multi-product) from sessionStorage, else the shared per-profile setting.
@@ -177,7 +217,16 @@ async function runCheckoutFlow() {
     getCardFill: () => _cardFillPromise,
     cancelCardFill: () => cancelCardFillWait(),
     isTestMode: () => !!settings?.testMode,
+    isLeoMode: () => !!settings?.leoMode,
+    // Saved-card checkouts sometimes still ask for the CVV inline — supply it,
+    // plus the configured card's last 4 so the bot can confirm the card on file
+    // matches this account before submitting.
+    getCvv: () => settings?.cardCvv || "",
+    getCardLast4: () => (settings?.cardNumber || "").replace(/\D/g, "").slice(-4),
+    // DAN raffle only: max random human delay before submit (seconds → ms).
+    getSubmitJitterMs: () => Math.max(0, Number(settings?.danJitterSec) || 0) * 1000,
     getDropAt: () => resolveDropAt(),
+    checkAbort: () => checkAbort(),
   });
 
   const result = await machine.run();

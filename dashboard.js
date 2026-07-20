@@ -15,23 +15,72 @@
 // commands as a fallback.
 // ============================================================
 
-// ── Page navigation ──────────────────────────────────────────
-let _currentPage = "home";
-function navigateTo(name) {
+// ── Page navigation (CyberAIO sidebar + grouped sections) ─────
+// Four primary groups in the sidebar. Each maps to one or more of the existing
+// page-sections (so all their element IDs + wiring stay intact). Multi-section
+// groups get a secondary tab row; "stack" groups show their sections together.
+const NAV_GROUPS = {
+  dashboard: { sections: ["home", "live"], stack: true },
+  setup:     { sections: ["drop", "profiles", "cards", "preflight"], tabs: ["Drop", "Profiles", "Cards", "Preflight"] },
+  history:   { sections: ["history", "orders"], tabs: ["Insights & Replay", "Orders"] },
+  settings:  { sections: ["settings"], stack: true },
+};
+const SECTION_TO_GROUP = {};
+for (const [g, def] of Object.entries(NAV_GROUPS)) def.sections.forEach(s => (SECTION_TO_GROUP[s] = g));
+
+let _currentGroup = "dashboard";
+let _currentPage = "home";                 // the active (sub)section
+let _visibleSections = new Set(["home", "live"]);
+const isVisible = (section) => _visibleSections.has(section);
+
+function runSectionHooks(section) {
+  if (section === "home") { renderHomeStats(); if (!_upcomingLoaded) loadUpcoming(false); }
+  else if (section === "live") { renderLivePage(); refreshPanicBanner(); }
+  else if (section === "preflight") { renderPreflight(); refreshVersionBanner(); }
+  else if (section === "history") { renderDropReplay(); renderInsights(); }
+  else if (section === "drop") { renderSelfLearningForDrop(); }
+}
+
+function buildSubnav(group, active) {
+  const nav = document.getElementById("subNav");
+  if (!nav) return;
+  const g = NAV_GROUPS[group];
+  nav.innerHTML = "";
+  if (!g || g.stack || g.sections.length <= 1) { nav.style.display = "none"; return; }
+  nav.style.display = "flex";
+  g.sections.forEach((sec, i) => {
+    const b = document.createElement("button");
+    b.className = "subtab" + (sec === active ? " active" : "");
+    b.textContent = (g.tabs && g.tabs[i]) || sec.toUpperCase();
+    b.addEventListener("click", () => navigateTo(group, sec));
+    nav.appendChild(b);
+  });
+}
+
+// Accepts a group name ("setup") OR a section name ("preflight") so every
+// existing navigateTo("preflight"/"settings"/…) call keeps working.
+function navigateTo(name, subSection) {
+  let group, active;
+  if (NAV_GROUPS[name]) { group = name; active = subSection || NAV_GROUPS[name].sections[0]; }
+  else { group = SECTION_TO_GROUP[name] || "dashboard"; active = name; }
+  const g = NAV_GROUPS[group];
+
   document.querySelectorAll(".page-section").forEach(s => s.classList.remove("active"));
-  document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
-  const sec = document.getElementById("page-" + name);
-  const tab = document.querySelector(`.nav-tab[data-nav="${name}"]`);
-  if (sec) sec.classList.add("active");
-  if (tab) tab.classList.add("active");
-  _currentPage = name;
-  if (name === "home") {
-    renderHomeStats();
-    if (!_upcomingLoaded) loadUpcoming(false);
-  }
-  if (name === "live") renderLivePage();
-  if (name === "preflight") { renderPreflight(); refreshVersionBanner(); }
-  if (name === "history") renderDropReplay();
+  _visibleSections = new Set();
+  const shown = g.stack ? g.sections : [active];
+  shown.forEach(sec => {
+    const el = document.getElementById("page-" + sec);
+    if (el) { el.classList.add("active"); _visibleSections.add(sec); }
+  });
+
+  document.querySelectorAll(".side-item").forEach(t => t.classList.toggle("active", t.dataset.nav === group));
+  buildSubnav(group, active);
+
+  _currentGroup = group;
+  _currentPage = active;
+  shown.forEach(runSectionHooks);
+  const c = document.querySelector(".content");
+  if (c) c.scrollTop = 0;
 }
 
 function renderHomeStats() {
@@ -163,6 +212,11 @@ function renderUpcoming(drops, note) {
       const img = document.createElement("img");
       img.className = "upcoming-img";
       img.src = d.imageUrl; img.loading = "lazy"; img.alt = d.title || "";
+      if (d.url) {
+        img.classList.add("clickable");
+        img.title = "Open product page";
+        img.addEventListener("click", () => window.open(d.url, "_blank", "noopener"));
+      }
       card.appendChild(img);
     }
 
@@ -240,6 +294,7 @@ const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
+let proxyAssignments = {};     // {profileDir: "host:port:user:pass"} manual overrides (swap)
 let currentRunId  = null;      // ID of the most recently launched history entry
 let countdownTimer = null;
 
@@ -247,7 +302,10 @@ const TIMELINE_KEY = "snkrsTimeline";
 let timelines = {};            // {key(profileDir#tab): {profileDir,events:[],dropAt,label}}
 let timelinePollTimer = null;
 
-const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/profile"; // logged-in-only page — good login signal
+const WARM_KEY = "snkrsWarmTimes";
+let warmTimes = {};            // {profileDir: epochMs of last warm-up we opened}
+
+const NIKE_PREFLIGHT_URL = "https://www.nike.com/sg/member/settings"; // logged-in-only page; renders phone + country for region detection
 let preflightResults = {};     // {profileDir: {ts,version,checks:{...}}}
 let profileVersions = {};      // {profileDir: {version,ts}}
 let latestVersion = "";        // repo manifest version reported by the host
@@ -297,7 +355,7 @@ function buildSizePool(container, selected, onChange) {
 function applyMultiUI() {
   $("singleProductPanel").style.display = multiProduct ? "none" : "";
   $("multiProductPanel").style.display  = multiProduct ? "" : "none";
-  $("dropModeTag").textContent = multiProduct ? "ACCOUNTS SPLIT ACROSS PRODUCTS" : "EVERYONE COPS THE SAME DROP";
+  $("dropModeTag").textContent = multiProduct ? "EVERY ACCOUNT COPS ALL PRODUCTS" : "EVERYONE COPS THE SAME DROP";
   if (multiProduct && !products.length) { products.push(newProduct()); }
   renderProducts();
 }
@@ -319,11 +377,22 @@ function buildProductRow(p, idx) {
   const urlEl  = row.querySelector(".p-url");
   const kwEl   = row.querySelector(".p-keyword");
   const poolEl = row.querySelector(".p-sizepool");
+  const fetchBtn = row.querySelector(".p-fetch");
+  const preview  = row.querySelector(".p-preview");
   urlEl.value = p.url || "";
   kwEl.value  = p.keyword || "";
   buildSizePool(poolEl, p.sizePool || [], (s) => { p.sizePool = s; });
   urlEl.addEventListener("input", () => { p.url = urlEl.value.trim(); });
   kwEl.addEventListener("input",  () => { p.keyword = kwEl.value.trim(); });
+  fetchBtn.addEventListener("click", async () => {
+    const sku = (p.keyword || "").trim();
+    if (!sku) { previewError(preview, "Enter this product's SKU first."); return; }
+    previewLoading(preview, sku);
+    const meta = await resolveProductMeta(sku);
+    if (!meta.ok) { previewError(preview, `Couldn't resolve ${sku}: ${meta.error || "not found"}.`); return; }
+    renderProductPreview(preview, meta);
+    if (!(p.url || "").trim() && meta.url) { p.url = meta.url; urlEl.value = meta.url; }
+  });
   row.querySelector(".p-remove").addEventListener("click", () => {
     products = products.filter(x => x.id !== p.id);
     renderProducts();
@@ -335,6 +404,132 @@ function renderDropUI() {
   buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
   $("multiProductToggle").checked = multiProduct;
   applyMultiUI();
+}
+
+// ── Product lookup + thumbnail preview ────────────────────────
+// Resolve a SKU to its real product (name, image, /launch/t/ URL, drop time)
+// via Nike's feed. Confirms visually that the exact item is being targeted —
+// so a collection page can never silently cop the top-most product.
+function resolveProductMeta(sku) {
+  return new Promise((resolve) => {
+    const clean = (sku || "").trim().toUpperCase();
+    if (!clean) { resolve({ ok: false, error: "no SKU" }); return; }
+    chrome.runtime.sendMessage({ type: "resolve_launch", sku: clean, country: DIRECT_COUNTRY }, (res) => {
+      if (chrome.runtime.lastError) { resolve({ ok: false, error: chrome.runtime.lastError.message }); return; }
+      resolve(res || { ok: false, error: "no response from background" });
+    });
+  });
+}
+
+// Render a thumbnail card into `box`. The image is clickable → opens the
+// product's launch page in a new tab.
+function renderProductPreview(box, meta, pageUrl) {
+  box.innerHTML = "";
+  box.style.display = "";
+  const url = (meta && meta.url) || pageUrl || "";
+  const img = el("img", { className: "product-thumb", src: (meta && meta.imageUrl) || "", alt: (meta && meta.name) || "" });
+  if (url) {
+    img.classList.add("clickable");
+    img.title = "Open the product page";
+    img.addEventListener("click", () => window.open(url, "_blank", "noopener"));
+  }
+  box.appendChild(img);
+  const info = el("div", { className: "product-preview-info" });
+  info.appendChild(el("div", { className: "product-preview-name" }, (meta && meta.name) || (meta && meta.sku) || "Product"));
+  if (meta && meta.sku) info.appendChild(el("div", { className: "product-preview-sku" }, meta.sku));
+  if (meta && meta.dropTimeISO) info.appendChild(el("div", { className: "product-preview-date" }, "📅 " + fmtUpcomingDate(meta.dropTimeISO)));
+  // DRAW = raffle: you can't direct-checkout, you enter the draw. Flag it so the
+  // user doesn't expect BUILD DIRECT CHECKOUT URLS to work for this product.
+  if (meta && meta.method) {
+    const isDraw = /draw/i.test(meta.method);
+    info.appendChild(el("div", { className: "product-preview-date" },
+      isDraw ? "🎟️ DRAW (raffle) — enter, don't direct-checkout" : `🛒 ${meta.method} (first-come buy)`));
+  }
+  if (url) info.appendChild(el("div", { className: "product-preview-open" }, "▶ click image to open product page"));
+  box.appendChild(info);
+}
+
+function previewLoading(box, sku) {
+  box.style.display = "";
+  box.innerHTML = `<span class="hint">Looking up ${sku}…</span>`;
+}
+function previewError(box, text) {
+  box.style.display = "";
+  box.innerHTML = `<span class="hint" style="color:#fa5400">${text}</span>`;
+}
+
+// ── Manual gs.nike.com checkout-link generator ────────────────
+// Resolve a SKU and list a ready-to-paste checkout link for every size, so the
+// user can drop one straight into a logged-in tab. Reuses the same resolver and
+// URL builder the automatic flow uses, so the links are identical.
+async function generateGsLinks() {
+  const sku  = ($("gsLinkSku").value || "").trim().toUpperCase();
+  const msg  = $("gsLinkMsg");
+  const list = $("gsLinkList");
+  list.innerHTML = "";
+  if (!sku) { msg.style.color = "#fa5400"; msg.textContent = "Enter a SKU first."; return; }
+  msg.style.color = "#888"; msg.textContent = `Resolving ${sku} from Nike…`;
+
+  let d;
+  try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
+  if (!d || !d.ok) {
+    msg.style.color = "#fa5400";
+    msg.textContent = `Couldn't resolve ${sku}: ${(d && d.error) || "not found"}. Sizes often publish closer to drop time.`;
+    return;
+  }
+  const skus = d.skus || [];
+  if (!skus.length) {
+    msg.style.color = "#fa5400";
+    msg.textContent = `No sizes published for ${sku} yet — try again nearer the drop.`;
+    return;
+  }
+
+  msg.style.color = "var(--green)";
+  msg.textContent = `${d.name || sku} — ${skus.length} size(s). Note: links only load at go-live; before the drop they show Nike's error page.`;
+
+  skus.forEach((s) => {
+    const sizeText = s.localizedSize || s.nikeSize || "?";
+    const row   = el("div", { className: "gs-link-row" });
+    const label = el("span", { className: "gs-link-size" }, sizeText);
+    const input = el("input", { className: "inp gs-link-url", type: "text", value: buildDirectCheckoutUrl(d, s.id), readOnly: true });
+    const copy  = el("button", { className: "btn btn-mini btn-dark" }, "COPY");
+    copy.addEventListener("click", () => {
+      // Fresh checkoutId every copy — a reused session is a common Oops cause.
+      const fresh = buildDirectCheckoutUrl(d, s.id);
+      input.value = fresh;
+      const done = () => { copy.textContent = "COPIED"; setTimeout(() => { copy.textContent = "COPY"; }, 1200); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fresh).then(done).catch(() => { input.select(); document.execCommand("copy"); done(); });
+      } else { input.select(); document.execCommand("copy"); done(); }
+    });
+    row.appendChild(label); row.appendChild(input); row.appendChild(copy);
+    list.appendChild(row);
+  });
+
+  // Copy-all row.
+  const actions = el("div", { className: "gs-link-actions" });
+  const copyAll = el("button", { className: "btn btn-mini btn-purple" }, "COPY ALL LINKS");
+  copyAll.addEventListener("click", () => {
+    const all = skus.map(s => `${s.localizedSize || s.nikeSize}\t${buildDirectCheckoutUrl(d, s.id)}`).join("\n");
+    const done = () => { copyAll.textContent = "COPIED ALL"; setTimeout(() => { copyAll.textContent = "COPY ALL LINKS"; }, 1200); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(all).then(done).catch(done);
+    else done();
+  });
+  actions.appendChild(copyAll);
+  list.appendChild(actions);
+}
+
+// Fetch handler for the single-product panel.
+async function fetchSingleMeta() {
+  const sku = ($("dropKeyword").value || "").trim();
+  const box = $("singleProductPreview");
+  if (!sku) { previewError(box, "Enter the item's SKU (e.g. IH1610-052) first, then Fetch."); return; }
+  previewLoading(box, sku);
+  const meta = await resolveProductMeta(sku);
+  if (!meta.ok) { previewError(box, `Couldn't resolve ${sku}: ${meta.error || "not found"}. Sizes/details often publish closer to drop time.`); return; }
+  renderProductPreview(box, meta);
+  // Auto-fill the product URL if the user only gave a SKU.
+  if (!($("dropUrl").value || "").trim() && meta.url) $("dropUrl").value = meta.url;
 }
 
 // ── Random assignment of sizes / products to accounts ─────────
@@ -499,11 +694,13 @@ function cmpVer(a, b) {
   return 0;
 }
 
-// The seven checks shown per profile, in display order.
+// The checks shown per profile, in display order. "region" (SG/MY from the
+// account's phone) and "address" (printed, informational) sit together.
 const PF_CHECK_DEFS = [
   { key: "version", label: "Version" },
   { key: "host",    label: "Host" },
   { key: "login",   label: "Nike login" },
+  { key: "region",  label: "Region" },
   { key: "address", label: "Address" },
   { key: "card",    label: "Card" },
   { key: "cookies", label: "Cookies" },
@@ -527,11 +724,15 @@ function localChecksFor(acct) {
   return checks;
 }
 
+// Informational rows — shown for reference, never affect the pass/fail verdict.
+const PF_INFO_KEYS = new Set(["region", "address"]);
+
 // Reduce one profile's per-check map to a card verdict: red (any hard fail),
 // amber (any unknown/warning), green (all good), or pending.
 function preflightVerdict(checks) {
   let anyBad = false, anyWarn = false, seen = 0;
   for (const def of PF_CHECK_DEFS) {
+    if (PF_INFO_KEYS.has(def.key)) continue; // region/address are informational
     const c = checks[def.key];
     if (!c) continue;
     seen++;
@@ -549,7 +750,86 @@ function mergedChecksFor(acct) {
   const rec = preflightResults[acct.profileDir] || {};
   const remote = rec.checks || {};
   const local = localChecksFor(acct);
-  return { ...local, ...remote, __rec: rec };
+  const merged = { ...local, ...remote, __rec: rec };
+  // Annotate the cookies check with how long ago we last warmed this profile.
+  const warm = warmTimes[acct.profileDir];
+  if (warm && merged.cookies) {
+    const mins = Math.round((Date.now() - warm) / 60000);
+    const ago = mins <= 0 ? "just now" : mins === 1 ? "1 min ago" : `${mins} min ago`;
+    merged.cookies = { ...merged.cookies, detail: `${merged.cookies.detail} · warmed ${ago}` };
+  }
+  return merged;
+}
+
+// The region an account counts as: a manual override (SG/MY) wins, otherwise
+// the region auto-detected from its phone during Preflight.
+function effectiveRegionFor(acct) {
+  const ov = acct && acct.regionOverride;
+  if (ov === "SG" || ov === "MY") return ov;
+  const rec = preflightResults[acct.profileDir];
+  return (rec && rec.region) || "";
+}
+
+// ── Warm-up: open the SNKRS feed (no boot marker → bot idle) so each profile's
+// Kasada anti-bot cookies are fresh before the drop. Records when we warmed
+// each profile so the preflight cookies row can show its age.
+async function markWarm(profileDir) {
+  warmTimes[profileDir] = Date.now();
+  await chrome.storage.local.set({ [WARM_KEY]: warmTimes });
+}
+// ── UPDATE ALL: hot-reload the extension in every profile ─────
+// For machines that can't force-install (personal/unmanaged), this is the
+// one-click updater: after a `git pull`, it opens each profile with a reload
+// marker so its background calls chrome.runtime.reload() and re-reads the
+// latest unpacked code from the folder — no Chrome restart. Do it BETWEEN
+// drops (reloading mid-checkout would interrupt it).
+const NIKE_RELOAD_URL = "https://www.nike.com/sg/launch/"; // bootstrap runs here at document_start
+async function updateAllProfiles() {
+  const msg = $("preflightMsg");
+  const withProfile = accounts.filter(a => a.profileDir);
+  if (!withProfile.length) { flashTemp(msg, "No profiles to update.", "var(--orange)", 4000); return; }
+  if (!hostOk && !(await pingHost())) { flashTemp(msg, "Launcher offline — can't reach profiles.", "var(--orange)", 5000); return; }
+  if (!confirm(
+    "Update the extension in ALL profiles now?\n\n" +
+    "Pull the latest first (git pull), then this reloads every profile's bot from the folder.\n\n" +
+    "Do this BETWEEN drops — reloading during a live checkout would interrupt it.\n\n" +
+    "This dashboard's own profile reloads last (the page will refresh)."
+  )) return;
+
+  const ts = Date.now();
+  flash(msg, `Sending update to ${withProfile.length} profile(s)…`, "#888");
+  let ok = 0, lastErr = "";
+  for (const a of withProfile) {
+    const url = `${NIKE_RELOAD_URL}#snkrsReload=${ts}`;
+    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url });
+    if (resp.ok) ok++; else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 400));
+  }
+  flashTemp(msg, ok === withProfile.length
+    ? `⟳ Update sent to ${ok} profile(s) — each reloads to the current version. This dashboard reloads in 5s; reopen it after.`
+    : `Sent to ${ok}/${withProfile.length}. Last error: ${lastErr}`,
+    ok ? "var(--green)" : "var(--red)", 9000);
+  // Reload our OWN profile last so the dashboard picks up new code too.
+  if (ok) setTimeout(() => { try { chrome.runtime.reload(); } catch (e) {} }, 5000);
+}
+
+async function warmAll() {
+  const msg = $("preflightMsg");
+  const withProfile = accounts.filter(a => a.profileDir);
+  if (!withProfile.length) { flashTemp(msg, "No profiles to warm.", "var(--orange)", 4000); return; }
+  if (!hostOk && !(await pingHost())) { flashTemp(msg, "Launcher offline.", "var(--orange)", 5000); return; }
+  flash(msg, `Warming ${withProfile.length} profile(s) on the SNKRS feed…`, "#888");
+  let ok = 0, lastErr = "";
+  for (const a of withProfile) {
+    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url: WARMUP_URL });
+    if (resp.ok) { ok++; await markWarm(a.profileDir); } else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 350));
+  }
+  if (isVisible("preflight")) renderPreflight();
+  flashTemp(msg, ok === withProfile.length
+    ? `🔥 Warmed ${ok} profile(s) — cookies/Kasada refreshed. Re-run preflight to confirm.`
+    : `Warmed ${ok}/${withProfile.length}. Last error: ${lastErr}`,
+    ok ? "var(--green)" : "var(--red)", 7000);
 }
 
 function pfIcon(ok) {
@@ -600,6 +880,13 @@ function renderPreflight() {
     const card = el("div", { className: `pf-card ${verdict}` });
     const head = el("div", { className: "pf-card-head" });
     head.appendChild(el("span", { className: "pf-card-name" }, acct.label || acct.profileDir));
+    // Region tag (SG/MY/?) — manual override or phone-detected.
+    const reg = effectiveRegionFor(acct);
+    const overridden = acct.regionOverride === "SG" || acct.regionOverride === "MY";
+    const regCls = reg === "SG" ? "sg" : reg === "MY" ? "my" : "unknown";
+    head.appendChild(el("span", { className: `pf-region ${regCls}`,
+      title: overridden ? "Region set manually" : "Region detected from phone number" },
+      (reg === "SG" ? "🇸🇬 SG" : reg === "MY" ? "🇲🇾 MY" : "? REGION") + (overridden ? " ·set" : "")));
     const verdictText = pendingRun ? "CHECKING…"
       : timedOut ? "NO RESPONSE"
       : verdict === "green" ? "READY"
@@ -620,6 +907,24 @@ function renderPreflight() {
     }
     card.appendChild(list);
 
+    // ── Remediation actions for a non-green profile ──
+    if (!pendingRun && (verdict === "red" || verdict === "amber")) {
+      const actions = el("div", { className: "pf-actions" });
+      const addBtn = (label, kind) => {
+        const b = el("button", { className: "btn btn-mini btn-dark" }, label);
+        b.addEventListener("click", () => remediateProfile(acct.profileDir, kind));
+        actions.appendChild(b);
+      };
+      if (checks.login && checks.login.ok === false) addBtn("🔑 LOG IN", "login");
+      if (checks.version && checks.version.ok === false) addBtn("⬆ UPDATE", "version");
+      if (checks.cookies && checks.cookies.ok !== true) addBtn("🔥 WARM", "warm");
+      // Always offer a plain re-check.
+      const rc = el("button", { className: "btn btn-mini btn-dark" }, "↻ RE-CHECK");
+      rc.addEventListener("click", () => { if (hostOk) launchPreflightFor(acct.profileDir); });
+      actions.appendChild(rc);
+      card.appendChild(actions);
+    }
+
     if (rec.ts) {
       const d = new Date(rec.ts);
       card.appendChild(el("div", { className: "pf-card-time" },
@@ -631,11 +936,33 @@ function renderPreflight() {
   if (summary) {
     const chip = (n, label, color) =>
       `<div class="pf-chip" style="color:${color}"><span class="n">${n}</span><span>${label}</span></div>`;
+    const rc = { SG: 0, MY: 0, unknown: 0 };
+    for (const acct of withProfile) { const r = effectiveRegionFor(acct); rc[r === "SG" ? "SG" : r === "MY" ? "MY" : "unknown"]++; }
     summary.innerHTML =
       chip(counts.green, "READY", "var(--green)") +
       chip(counts.amber, "REVIEW", "var(--orange)") +
       chip(counts.red, "BLOCKED", "var(--red)") +
-      (counts.pending ? chip(counts.pending, "CHECKING", "var(--purple2)") : "");
+      (counts.pending ? chip(counts.pending, "CHECKING", "var(--purple2)") : "") +
+      `<div class="pf-chip-sep"></div>` +
+      chip(rc.SG, "🇸🇬 SG", "var(--green)") +
+      chip(rc.MY, "🇲🇾 MY", "var(--purple2)") +
+      (rc.unknown ? chip(rc.unknown, "? REGION", "#8a8a9e") : "");
+  }
+
+  // Open-by-region toolbar: open just the SG or just the MY profiles, now.
+  // Additive — click SG and MY to open both.
+  const bar = $("preflightRegionBar");
+  if (bar) {
+    const rc = { SG: 0, MY: 0 };
+    for (const acct of withProfile) { const r = effectiveRegionFor(acct); if (r === "SG") rc.SG++; else if (r === "MY") rc.MY++; }
+    bar.innerHTML =
+      `<span class="pf-bar-lbl">Open profiles:</span>` +
+      `<button id="openSGBtn" class="btn btn-mini btn-accent">🇸🇬 OPEN SG (${rc.SG})</button>` +
+      `<button id="openMYBtn" class="btn btn-mini btn-accent">🇲🇾 OPEN MY (${rc.MY})</button>` +
+      `<span class="pf-bar-hint">Additive — click both to open both.</span>` +
+      `<span id="preflightRegionMsg" class="status-msg" style="margin:0 0 0 10px; text-align:left; display:inline-block;"></span>`;
+    const sg = $("openSGBtn"); if (sg) sg.addEventListener("click", () => launchRegion("SG"));
+    const my = $("openMYBtn"); if (my) my.addEventListener("click", () => launchRegion("MY"));
   }
 }
 
@@ -738,9 +1065,7 @@ async function runPreflight() {
   flash(msg, `Opening ${withProfile.length} profile(s) to health-check…`, "#888");
   let opened = 0, lastErr = "";
   for (const a of withProfile) {
-    const sep = NIKE_PREFLIGHT_URL.includes("#") ? "&" : "#";
-    const url = `${NIKE_PREFLIGHT_URL}${sep}snkrsPreflight=${encodeURIComponent(a.profileDir)}`;
-    const resp = await hostSend({ cmd: "launch", profileDir: a.profileDir, url });
+    const resp = await launchPreflightFor(a.profileDir);
     if (resp.ok) opened++; else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 400));
   }
@@ -751,6 +1076,42 @@ async function runPreflight() {
   } else {
     flashTemp(msg, `Couldn't open any profile. ${lastErr || "Is the launcher installed?"}`, "var(--red)", 7000);
   }
+}
+
+// Launch ONE profile on the preflight page (marks it pending first).
+async function launchPreflightFor(profileDir) {
+  preflightResults[profileDir] = { __pending: true, startedAt: Date.now(), profileDir };
+  if (isVisible("preflight")) renderPreflight();
+  const sep = NIKE_PREFLIGHT_URL.includes("#") ? "&" : "#";
+  const url = `${NIKE_PREFLIGHT_URL}${sep}snkrsPreflight=${encodeURIComponent(profileDir)}`;
+  return hostSend({ cmd: "launch", profileDir, url });
+}
+
+// ── Preflight remediation: one-click fix for a red/amber profile ──
+// Opens the profile at the page that fixes the specific problem, then
+// re-runs its preflight so the card goes green without a full re-check.
+async function remediateProfile(profileDir, kind) {
+  const msg = $("preflightMsg");
+  const urls = {
+    login:   NIKE_LOGIN_URL,                                   // sign in
+    version: "chrome://extensions/",                           // click Update
+    warm:    WARMUP_URL,                                       // warm Kasada/cookies
+  };
+  const url = urls[kind];
+  if (!url) return;
+  const resp = await hostSend({ cmd: "launch", profileDir, url });
+  if (!resp.ok) {
+    flashTemp(msg, `Couldn't open ${profileDir}: ${resp.error || (resp.hostMissing ? "launcher offline" : "unknown")}`, "var(--red)", 6000);
+    return;
+  }
+  if (kind === "warm") await markWarm(profileDir);
+  const note = kind === "login" ? "Sign in there, then it re-checks automatically."
+    : kind === "version" ? "Click Update on the extension, then it re-checks."
+    : "Let the feed load to warm cookies, then it re-checks.";
+  flashTemp(msg, `Opened ${profileDir} — ${note}`, "var(--green)", 8000);
+  // Give the user time to act, then re-run this profile's preflight.
+  const delay = kind === "login" ? 25000 : kind === "version" ? 12000 : 12000;
+  setTimeout(() => { if (hostOk) launchPreflightFor(profileDir); }, delay);
 }
 
 // Poll the shared preflight folder (results arrive from OTHER Chrome profiles).
@@ -771,7 +1132,7 @@ function startPreflightPolling() {
     // Re-render on any change, OR while entries are still pending so the
     // no-response timeout can flip a stuck profile to a hard fail on schedule.
     const anyPending = Object.values(preflightResults).some(r => r && r.__pending && !r.ts);
-    if (_currentPage === "preflight" && (changed || anyPending)) { renderPreflight(); refreshVersionBanner(); }
+    if (isVisible("preflight") && (changed || anyPending)) { renderPreflight(); refreshVersionBanner(); }
   };
   tick();
   preflightPollTimer = setInterval(tick, 2500);
@@ -908,7 +1269,7 @@ function startStatusPolling() {
       }
     }
     if (changed) refreshAllBadges();
-    else if (_currentPage === "live") renderLivePage(); // keep the monitor fresh
+    else if (isVisible("live")) renderLivePage(); // keep the monitor fresh
   };
   tick();
   statusPollTimer = setInterval(tick, 2500);
@@ -932,12 +1293,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
+    if (isVisible("history")) renderInsights();
+    if (isVisible("drop")) renderSelfLearningForDrop();
   }
   if (changes[TIMELINE_KEY]) {
     // Merge the local mirror (this profile's own tabs) with polled cross-profile
     // entries so neither source clobbers the other.
     timelines = { ...timelines, ...(changes[TIMELINE_KEY].newValue || {}) };
-    if (_currentPage === "history") renderDropReplay();
+    if (isVisible("history")) renderDropReplay();
   }
   if (changes[CARDS_KEY]) {
     cardProfiles = changes[CARDS_KEY].newValue || [];
@@ -1723,6 +2086,27 @@ function buildHistoryEntry(entry) {
   if (limits)  chip(`⚠ ${limits} limit`, "#fa5400");
 
   div.append(dateEl, urlEl, resultsDiv);
+
+  // Persisted replay timing (from the drop's per-account timeline).
+  const replay = entry.replay && typeof entry.replay === "object" ? entry.replay : null;
+  if (replay && Object.keys(replay).length) {
+    const strip = el("div", { className: "history-replay" });
+    for (const s of Object.values(replay)) {
+      const acct = (entry.accounts || []).find(a => a.profileDir === s.profileDir);
+      const name = (acct && (acct.label || acct.profileDir)) || s.profileDir;
+      const parts = [];
+      if (s.loadedT && s.filledT) parts.push(`fill ${fmtDelta(s.filledT - s.loadedT)}`);
+      if (s.error) parts.push(`✕ ${String(s.error).replace(/_/g, " ")}`);
+      else if (s.offsetMs != null) parts.push(`${s.offsetMs >= 0 ? "+" : "−"}${fmtDelta(Math.abs(s.offsetMs))} vs go-live`);
+      else if (s.submittedT) parts.push("submitted");
+      const row = el("div", { className: "history-replay-row" });
+      row.appendChild(el("span", { className: "hr-name" }, name));
+      row.appendChild(el("span", { className: "hr-detail" + (s.error ? " bad" : (s.offsetMs != null && s.offsetMs < 0 ? " warn" : "")) },
+        parts.join(" · ") || "—"));
+      strip.appendChild(row);
+    }
+    div.appendChild(strip);
+  }
   return div;
 }
 
@@ -1838,6 +2222,358 @@ function renderDropReplay() {
   }
 }
 
+// ══════════════════ LIVE STATUS DIAGNOSTIC ══════════════════
+// Answers "why don't I see the other profiles?" by walking the exact chain:
+// this profile → native host → shared status folder → per-profile version
+// reports. Pinpoints whether launched profiles are writing at all.
+async function runLiveDiagnostic() {
+  const out = $("liveDiag");
+  if (!out) return;
+  out.style.display = "block";
+  out.textContent = "Running diagnostic…";
+  const L = [];
+
+  // 1) Can THIS (dashboard) profile reach the launcher?
+  const ping = await hostSend({ cmd: "ping" });
+  if (ping.ok) {
+    L.push(`✓ This dashboard profile reaches the launcher (host v${ping.version} · ${ping.platform}).`);
+    // Show how launched profiles get the extension (the "no extension on Launch
+    // All" fix). Requires host v1.3.0+.
+    if (ping.extensionDir) {
+      L.push(`  Extension folder: ${ping.extensionDir}${ping.extensionDirValid === false ? "  (⚠ no manifest.json here!)" : ""}`);
+      if (ping.loadExtensionOnLaunch)
+        L.push(`  (opt-in --load-extension is ON — only affects the first fresh profile; not reliable for many profiles.)`);
+    }
+  } else {
+    L.push(`✗ This dashboard CANNOT reach the launcher: ${ping.error || "no response"}.`);
+    L.push(`  → Cross-profile status can't be read until the native host is installed for this profile.`);
+    out.textContent = L.join("\n");
+    return;
+  }
+
+  // 2) What's in the shared status folder (written by the launched profiles)?
+  const st = await hostSend({ cmd: "getStatus" });
+  const entries = (st.ok && st.status) ? Object.values(st.status) : [];
+  const byProfile = {};
+  entries.forEach(e => { const p = String(e.profileDir || "").split("#")[0]; if (p) (byProfile[p] = byProfile[p] || []).push(e); });
+  const profs = Object.keys(byProfile);
+  L.push("");
+  L.push(`SHARED STATUS FOLDER — ${entries.length} tab entr${entries.length === 1 ? "y" : "ies"} from ${profs.length} profile(s):`);
+  if (!entries.length) {
+    L.push(`  ⚠ EMPTY. The launched profiles are NOT writing any status. Almost always one of:`);
+    L.push(`     1. Those profiles run a STALE loaded copy of the extension. Unpacked extensions`);
+    L.push(`        do NOT hot-reload when files change — each profile keeps the old code until you`);
+    L.push(`        reload it (chrome://extensions → ↻) or fully restart that Chrome. The fix that`);
+    L.push(`        removes this for good is the force-install auto-update (update-server/), which`);
+    L.push(`        pushes the SAME build to every profile automatically.`);
+    L.push(`     2. The native host isn't reachable from those profiles (rare if it works here).`);
+  } else {
+    profs.sort().forEach(p => {
+      const es = byProfile[p].slice().sort((a, b) => (b.time || 0) - (a.time || 0));
+      const age = Math.round((Date.now() - (es[0].time || 0)) / 1000);
+      L.push(`  • ${p}: ${es.length} tab(s), latest "${es[0].code}" ${age}s ago`);
+    });
+    const missing = accounts.filter(a => a.profileDir && !byProfile[a.profileDir]);
+    if (missing.length) {
+      L.push("");
+      L.push(`  ✗ NO status from: ${missing.map(a => a.label || a.profileDir).join(", ")}.`);
+      L.push(`    Those profiles didn't report — likely running stale code, not launched, or their`);
+      L.push(`    account's "Chrome profile" doesn't match the real profile directory.`);
+    }
+  }
+
+  // 3) Which profiles have reported their extension version (i.e. booted current code)?
+  const vr = await hostSend({ cmd: "getVersions" });
+  if (vr.ok) {
+    const vs = Object.entries(vr.versions || {});
+    L.push("");
+    L.push(`REPORTED VERSIONS (latest is v${vr.latestVersion || "?"}):`);
+    if (!vs.length) L.push(`  ⚠ No profile has reported a version — none have booted with current code yet.`);
+    let anyUnpacked = false;
+    vs.sort().forEach(([p, v]) => {
+      const age = Math.round((Date.now() - (v.ts || 0)) / 1000);
+      const stale = vr.latestVersion && v.version !== vr.latestVersion;
+      const kind = v.installType === "development" ? " · unpacked"
+        : v.installType === "admin" ? " · force-installed"
+        : v.installType === "normal" ? " · web-store" : "";
+      if (v.installType === "development") anyUnpacked = true;
+      L.push(`  • ${p}: v${v.version}${kind}${stale ? "  ← STALE, restart this profile" : ""} (${age}s ago)`);
+    });
+    if (anyUnpacked) {
+      L.push("");
+      L.push(`  ℹ Unpacked profiles only pick up new code when that profile's Chrome fully RESTARTS.`);
+      L.push(`    To make them all current now: quit Chrome COMPLETELY (check Task Manager for stray`);
+      L.push(`    chrome.exe), then reopen. To stop managing versions by hand, force-install`);
+      L.push(`    (update-server/install-windows.bat) so every profile auto-updates.`);
+    }
+  }
+
+  out.textContent = L.join("\n");
+}
+
+// ══════════════════ PANIC / GLOBAL ABORT ══════════════════
+// Raises (or clears) a shared abort flag that every profile's checkout script
+// polls while holding SUBMIT — one click stops all held submits at once.
+async function setAbort(on) {
+  const resp = await hostSend({ cmd: "setAbort", on });
+  return resp && resp.ok;
+}
+async function refreshPanicBanner() {
+  const banner = $("panicBanner");
+  const btn = $("panicBtn");
+  if (!banner) return;
+  const resp = await hostSend({ cmd: "getAbort" });
+  const on = !!(resp && resp.ok && resp.abort && resp.abort.on);
+  if (on) {
+    banner.style.display = "flex";
+    banner.className = "panic-banner active";
+    const when = resp.abort.ts ? new Date(resp.abort.ts).toLocaleTimeString() : "";
+    banner.innerHTML =
+      `<span>🛑 <strong>ABORT ACTIVE</strong> — every profile is holding / not submitting${when ? " (since " + when + ")" : ""}.</span>` +
+      `<button id="panicClearBtn" class="btn btn-mini btn-light">✓ CLEAR ABORT</button>`;
+    const clr = $("panicClearBtn");
+    if (clr) clr.addEventListener("click", async () => {
+      await setAbort(false);
+      await refreshPanicBanner();
+      flashTemp($("statusMsg"), "Abort cleared — profiles may submit again on the next drive.", "#888");
+    });
+    if (btn) { btn.textContent = "🛑 ABORT ACTIVE"; btn.disabled = true; }
+  } else {
+    banner.style.display = "none";
+    if (btn) { btn.textContent = "🛑 PANIC — STOP ALL SUBMITS"; btn.disabled = false; }
+  }
+}
+async function raisePanic() {
+  const ok = await setAbort(true);
+  if (!ok) {
+    flashTemp($("statusMsg"), "Couldn't raise abort — is the launcher connected?", "var(--red)", 6000);
+    return;
+  }
+  await refreshPanicBanner();
+  flashTemp($("statusMsg"), "🛑 ABORT raised — all holding profiles will cancel their SUBMIT.", "var(--red)", 8000);
+}
+
+// CLOSE ALL: raise a shared close flag every profile's content scripts poll,
+// closing their bot windows within a couple of seconds. Auto-clears so it can't
+// linger and close the next launch.
+async function closeAllProfiles() {
+  if (!confirm("Close every profile's Nike/checkout windows now? (The dashboard stays open.)")) return;
+  const resp = await hostSend({ cmd: "setClose", on: true });
+  if (!resp || !resp.ok) {
+    flashTemp($("statusMsg"), "Couldn't send close — is the launcher connected?", "var(--red)", 6000);
+    return;
+  }
+  flashTemp($("statusMsg"), "✖ Closing all profile windows… (takes a couple of seconds per profile)", "var(--red)", 8000);
+  // Clear the flag after the pollers have had time to act, so a later launch
+  // isn't immediately closed.
+  setTimeout(() => { hostSend({ cmd: "setClose", on: false }); }, 8000);
+}
+
+// Compact per-account summary of a timeline, for persisting into history.
+function summarizeTimeline(entry) {
+  const events = entry.events || [];
+  const startedT = eventTime(events, "started") || (events[0] && events[0].t) || 0;
+  const submittedEv = events.find(e => e.code === "submitted");
+  const submittedT = submittedEv ? submittedEv.t : null;
+  let offsetMs = null;
+  if (submittedEv && submittedEv.extra && submittedEv.extra.offsetMs != null) offsetMs = submittedEv.extra.offsetMs;
+  else if (submittedT && entry.dropAt) offsetMs = submittedT - entry.dropAt;
+  const err = events.find(e => e.code === "error");
+  return {
+    profileDir: entry.profileDir || "",
+    startedT,
+    loadedT: eventTime(events, "loaded"),
+    filledT: eventTime(events, "filled"),
+    submittedT,
+    dropAt: entry.dropAt || 0,
+    offsetMs,
+    error: err ? ((err.extra && err.extra.reason) || "error") : null,
+  };
+}
+
+// Snapshot the live timelines into the CURRENT history run so past drops keep
+// their timing (the live timeline store is cleared on each new launch).
+async function persistTimelineToHistory() {
+  if (!currentRunId) return;
+  // One summary per profile — prefer the tab that actually submitted.
+  const byProfile = {};
+  for (const entry of Object.values(timelines)) {
+    const pd = entry.profileDir;
+    if (!pd) continue;
+    const s = summarizeTimeline(entry);
+    const prev = byProfile[pd];
+    if (!prev || (s.submittedT && !prev.submittedT) || (s.startedT > prev.startedT)) byProfile[pd] = s;
+  }
+  if (!Object.keys(byProfile).length) return;
+  const data = await chrome.storage.local.get(HISTORY_KEY);
+  const history = Array.isArray(data[HISTORY_KEY]) ? data[HISTORY_KEY] : [];
+  const entry = history.find(e => e.id === currentRunId);
+  if (!entry) return;
+  if (JSON.stringify(entry.replay || {}) === JSON.stringify(byProfile)) return; // no change
+  entry.replay = byProfile;
+  await chrome.storage.local.set({ [HISTORY_KEY]: history });
+}
+
+// ══════════════════ SELF-LEARNING ══════════════════
+// The bot mines its own drop history (persisted runs + per-account replay
+// timings) to learn: how fast checkout fills, how close to go-live it submits,
+// which sizes hit, and what usually goes wrong — then turns that into an
+// Insights panel, a recommended open-lead (auto-tune), and size hints.
+
+let _insights = null;          // cached compute
+let _prepLeadSec = 0;          // user/auto-tuned open-lead (0 = default 30s)
+
+function computeInsights(history) {
+  const runs = Array.isArray(history) ? history : [];
+  const out = {
+    runs: runs.length,
+    wins: 0, entered: 0, losses: 0, limits: 0, entries: 0,
+    fills: [], offsets: [], failures: {}, sizes: {},
+  };
+  for (const run of runs) {
+    const results = (run.results && typeof run.results === "object") ? run.results : {};
+    const replay = (run.replay && typeof run.replay === "object") ? run.replay : {};
+    for (const acct of (run.accounts || [])) {
+      const code = results[acct.profileDir];
+      const size = acct.size;
+      if (size) {
+        const s = out.sizes[size] || (out.sizes[size] = { size, win: 0, entered: 0, total: 0 });
+        s.total++;
+        if (code === "win") s.win++;
+        else if (code === "entered" || code === "success") s.entered++;
+      }
+      if (code) {
+        out.entries++;
+        if (code === "win") out.wins++;
+        else if (code === "loss") { out.losses++; out.failures["not selected"] = (out.failures["not selected"] || 0) + 1; }
+        else if (code === "entered" || code === "success") out.entered++;
+        else if (code === "limit") { out.limits++; out.failures["entry limit"] = (out.failures["entry limit"] || 0) + 1; }
+      }
+    }
+    for (const s of Object.values(replay)) {
+      if (s.loadedT && s.filledT) out.fills.push(s.filledT - s.loadedT);
+      if (s.offsetMs != null) out.offsets.push(s.offsetMs);
+      if (s.error) out.failures[String(s.error).replace(/_/g, " ")] = (out.failures[String(s.error).replace(/_/g, " ")] || 0) + 1;
+    }
+  }
+  const avg = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  out.avgFill = avg(out.fills);
+  out.maxFill = out.fills.length ? Math.max(...out.fills) : null;
+  out.avgOffset = avg(out.offsets);
+  // Recommended open-lead: cover the slowest observed fill + a safety buffer,
+  // clamped to a sane 20–90s window. Null until we have fill data.
+  out.recommendedLeadSec = out.maxFill != null
+    ? Math.max(20, Math.min(90, Math.ceil(out.maxFill / 1000) + 15))
+    : null;
+  const failEntries = Object.entries(out.failures).sort((a, b) => b[1] - a[1]);
+  out.topFailure = failEntries.length ? failEntries[0] : null;
+  out.winRate = out.entries ? (out.wins + out.entered) / out.entries : null;
+  out.topSizes = Object.values(out.sizes)
+    .map(s => ({ ...s, rate: s.total ? (s.win + s.entered) / s.total : 0 }))
+    .sort((a, b) => b.rate - a.rate || b.total - a.total);
+  return out;
+}
+
+async function loadInsights() {
+  const d = await chrome.storage.local.get(HISTORY_KEY);
+  _insights = computeInsights(Array.isArray(d[HISTORY_KEY]) ? d[HISTORY_KEY] : []);
+  return _insights;
+}
+
+async function renderInsights() {
+  const body = $("insightsBody");
+  const msg = $("insightsMsg");
+  if (!body) return;
+  const ins = await loadInsights();
+  if (!ins.runs) {
+    body.innerHTML = "";
+    if (msg) msg.textContent = "The bot studies every drop it runs. Run a few and it learns your fill speed, timing margin, and which sizes hit.";
+    return;
+  }
+  if (msg) msg.textContent = `Learned from ${ins.runs} drop${ins.runs > 1 ? "s" : ""} · ${ins.entries} entr${ins.entries === 1 ? "y" : "ies"}.`;
+
+  const fmtMs = (ms) => ms == null ? "—" : ms < 1000 ? Math.round(ms) + "ms" : (ms / 1000).toFixed(1) + "s";
+  const tile = (val, label, cls) => `<div class="insight-tile ${cls || ""}"><div class="it-val">${val}</div><div class="it-label">${label}</div></div>`;
+
+  const offTxt = ins.avgOffset == null ? "—"
+    : (ins.avgOffset >= 0 ? "+" : "−") + fmtMs(Math.abs(ins.avgOffset));
+  const winPct = ins.winRate == null ? "—" : Math.round(ins.winRate * 100) + "%";
+
+  let html = `<div class="insight-tiles">` +
+    tile(winPct, "hit rate", ins.winRate >= 0.5 ? "good" : "") +
+    tile(fmtMs(ins.avgFill), "avg fill time") +
+    tile(offTxt, "avg submit vs go-live", ins.avgOffset != null && ins.avgOffset < 0 ? "warn" : "good") +
+    tile(ins.wins, "wins", ins.wins ? "good" : "") +
+    `</div>`;
+
+  // Recommendation line.
+  const recs = [];
+  if (ins.recommendedLeadSec != null) {
+    const curLead = _prepLeadSec || 30;
+    if (ins.recommendedLeadSec > curLead + 3)
+      recs.push(`⏱ Your slowest checkout filled in ${fmtMs(ins.maxFill)} — open accounts <strong>${ins.recommendedLeadSec}s</strong> early (currently ${curLead}s) so nothing's still filling at go-live.`);
+    else
+      recs.push(`✅ Fills complete well within your ${curLead}s open-lead — timing margin looks safe.`);
+  }
+  if (ins.avgOffset != null && ins.avgOffset < -150)
+    recs.push(`⚠ On average you submit <strong>${fmtMs(Math.abs(ins.avgOffset))} early</strong> — that risks LAUNCH_NOT_ACTIVE. The drop-time gate should hold to exactly go-live.`);
+  if (ins.topFailure && ins.topFailure[1] >= 2)
+    recs.push(`🔎 Most common issue: <strong>${escapeHtml(ins.topFailure[0])}</strong> (${ins.topFailure[1]}×).`);
+  if (recs.length) html += `<div class="insight-recs">` + recs.map(r => `<div class="insight-rec">${r}</div>`).join("") + `</div>`;
+
+  // Top sizes by hit rate.
+  if (ins.topSizes.length) {
+    const rows = ins.topSizes.slice(0, 6).map(s =>
+      `<div class="size-stat"><span class="ss-size">${escapeHtml(s.size)}</span>` +
+      `<span class="ss-bar"><span class="ss-fill" style="width:${Math.round(s.rate * 100)}%"></span></span>` +
+      `<span class="ss-rate">${Math.round(s.rate * 100)}% <span class="muted">(${s.win + s.entered}/${s.total})</span></span></div>`).join("");
+    html += `<div class="insight-sizes"><div class="insight-sub">HIT RATE BY SIZE</div>${rows}</div>`;
+  }
+  body.innerHTML = html;
+}
+
+// Drop-page self-learning: recommended open-lead (auto-tune) + size hints.
+async function renderSelfLearningForDrop() {
+  const ins = await loadInsights();
+
+  // Auto-tune box.
+  const box = $("autoTuneBox"), txt = $("autoTuneText");
+  if (box && txt) {
+    if (ins.recommendedLeadSec != null) {
+      const cur = _prepLeadSec || 30;
+      box.style.display = "flex";
+      txt.innerHTML = `🧠 Recommended open-lead <strong>${ins.recommendedLeadSec}s</strong> ` +
+        `<span class="muted">(from your ${(ins.maxFill / 1000).toFixed(1)}s slowest fill · currently ${cur}s)</span>`;
+      const btn = $("autoTuneApplyBtn");
+      if (btn) btn.style.display = (ins.recommendedLeadSec !== cur) ? "" : "none";
+    } else {
+      box.style.display = "none";
+    }
+  }
+
+  // Size hints.
+  const sh = $("sizeHints");
+  if (sh) {
+    if (ins.topSizes.length && ins.entries >= 2) {
+      const top = ins.topSizes.slice(0, 4).filter(s => s.total >= 1)
+        .map(s => `<span class="size-hint-chip">${escapeHtml(s.size)} · ${Math.round(s.rate * 100)}%</span>`).join("");
+      sh.style.display = "";
+      sh.innerHTML = `<span class="muted">🧠 Best historical sizes:</span> ${top}`;
+    } else {
+      sh.style.display = "none";
+    }
+  }
+}
+
+async function applyAutoTune() {
+  const ins = _insights || await loadInsights();
+  if (ins.recommendedLeadSec == null) return;
+  _prepLeadSec = ins.recommendedLeadSec;
+  await saveAll(true);           // persists options.prepLeadSec + re-arms
+  renderSelfLearningForDrop();
+  flashTemp($("statusMsg"), `🧠 Open-lead set to ${_prepLeadSec}s — accounts will open that early before the drop.`, "var(--green)", 6000);
+}
+
 // Poll the shared timeline folder (accounts run in OTHER Chrome profiles).
 function startTimelinePolling() {
   if (timelinePollTimer) clearInterval(timelinePollTimer);
@@ -1852,7 +2588,10 @@ function startTimelinePolling() {
         changed = true;
       }
     }
-    if (changed && _currentPage === "history") renderDropReplay();
+    if (changed) {
+      persistTimelineToHistory();
+      if (isVisible("history")) renderDropReplay();
+    }
   };
   tick();
   timelinePollTimer = setInterval(tick, 2500);
@@ -1960,6 +2699,27 @@ function renderAccounts() {
   accounts.forEach((acct) => list.appendChild(buildAccountRow(acct)));
   updateProfileSourceNote();
   refreshOrderCheckerProfiles();
+  if (typeof renderProxyAssignments === "function") renderProxyAssignments();
+  updateSelectedCount();
+}
+
+// Reflect how many profiles are ticked, on both the Profiles and Drop pages.
+function updateSelectedCount() {
+  const n = accounts.filter(a => a.profileDir && a.selected).length;
+  const el = $("selectedCount");
+  if (el) el.textContent = String(n);
+  const btn = $("openSelectedBtn");
+  if (btn) {
+    btn.textContent = `🎯 OPEN SELECTED (${n})`;
+    btn.disabled = n === 0;
+    btn.style.opacity = n === 0 ? "0.5" : "";
+  }
+}
+
+function selectAllProfiles(on) {
+  accounts.forEach(a => { if (a.profileDir) a.selected = on; });
+  renderAccounts();
+  saveAll(true);
 }
 
 function buildAccountRow(acct) {
@@ -1971,6 +2731,8 @@ function buildAccountRow(acct) {
   const manualEl    = row.querySelector(".f-profile-manual");
   const sizeEl      = row.querySelector(".f-size");
   const autoEl      = row.querySelector(".f-autolaunch");
+  const selectEl    = row.querySelector(".f-select");
+  const regionEl    = row.querySelector(".f-region");
   const cardSel     = row.querySelector(".f-card-select");
   const msgEl       = row.querySelector(".acct-msg");
   const assignedEl  = row.querySelector(".f-assigned");
@@ -1981,6 +2743,8 @@ function buildAccountRow(acct) {
 
   labelEl.value = acct.label || "";
   autoEl.checked = !!acct.autoLaunch;
+  if (selectEl) selectEl.checked = !!acct.selected;
+  if (regionEl) regionEl.value = (acct.regionOverride === "SG" || acct.regionOverride === "MY") ? acct.regionOverride : "auto";
   fillSizeSelect(sizeEl, acct.size, acct.sizeType);
   fillProfileSelect(profileEl, manualEl, acct.profileDir);
 
@@ -2013,6 +2777,16 @@ function buildAccountRow(acct) {
 
   // ── Wire field → state ──
   labelEl.addEventListener("input", () => { acct.label = labelEl.value.trim(); });
+  if (selectEl) selectEl.addEventListener("change", () => {
+    acct.selected = selectEl.checked;
+    updateSelectedCount();
+    saveAll(true);
+  });
+  if (regionEl) regionEl.addEventListener("change", () => {
+    acct.regionOverride = regionEl.value === "auto" ? "" : regionEl.value;
+    saveAll(true);
+    if (isVisible("preflight")) renderPreflight();
+  });
   sizeEl.addEventListener("change", () => {
     const { size, sizeType } = parseSizeValue(sizeEl.value);
     acct.size = size; acct.sizeType = sizeType;
@@ -2105,6 +2879,197 @@ function setDropTimeField(iso) {
   return true;
 }
 
+// ── Drop mode (DAN raffle / LEO FCFS) ─────────────────────────
+function isLeoModeSelected() {
+  const leo = document.getElementById("dropModeLeo");
+  return !!(leo && leo.checked);
+}
+// Show the right hint + only show the DAN human-delay row in DAN mode.
+function syncDropModeUI() {
+  const leo = isLeoModeSelected();
+  const dh = $("dropModeHintDan"), lh = $("dropModeHintLeo"), jr = $("danJitterRow");
+  if (dh) dh.style.display = leo ? "none" : "";
+  if (lh) lh.style.display = leo ? "" : "none";
+  if (jr) jr.style.display = leo ? "none" : "flex";
+}
+
+// ── Proxy + notification config (Settings) ────────────────────
+function proxyLines() {
+  const raw = ($("proxyList") && $("proxyList").value) || "";
+  return raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+}
+
+function buildProxyConfig() {
+  const enabled = !!($("proxyEnabled") && $("proxyEnabled").checked);
+  const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+  const list = proxyLines();
+  const gateway = (($("proxyGateway") && $("proxyGateway").value) || "").trim();
+  // Prune stale swap overrides: keep only overrides whose proxy is still in the
+  // current list (a proxy the user deleted can't stay assigned).
+  const inList = new Set(list);
+  const assignments = {};
+  for (const [dir, px] of Object.entries(proxyAssignments)) {
+    if (inList.has(px)) assignments[dir] = px;
+  }
+  proxyAssignments = assignments;
+  return {
+    enabled,
+    mode,
+    list,
+    gateway,
+    assignments,
+    // Flag so a launched profile knows to CLEAR its proxy when we turn this off
+    // (rather than only ever setting one).
+    hadProxy: enabled || list.length > 0 || !!gateway,
+  };
+}
+
+// Deterministic DEFAULT proxy for an account — mirrors the background's sticky
+// mapping (accounts sorted by profileDir, round-robin over the list).
+function defaultProxyForDir(dir) {
+  const list = proxyLines();
+  if (!list.length) return "";
+  const dirs = (accounts || []).map(a => a && a.profileDir).filter(Boolean).sort();
+  let i = dirs.indexOf(dir);
+  if (i < 0) i = 0;
+  return list[i % list.length];
+}
+
+// The proxy an account is CURRENTLY on (a manual swap override wins).
+function currentProxyForDir(dir) {
+  if (proxyAssignments[dir]) return proxyAssignments[dir];
+  return defaultProxyForDir(dir);
+}
+
+// Pick the next proxy after `cur`, preferring one no other account is using so a
+// dead resi is actually REPLACED (not just rotated onto another in-use IP).
+function nextProxyAfter(cur, list, excludeDir) {
+  const used = new Set((accounts || [])
+    .map(a => a && a.profileDir).filter(d => d && d !== excludeDir)
+    .map(d => currentProxyForDir(d)));
+  const start = Math.max(0, list.indexOf(cur));
+  for (let step = 1; step <= list.length; step++) {
+    const cand = list[(start + step) % list.length];
+    if (cand === cur) continue;
+    if (!used.has(cand)) return cand;
+  }
+  // Every other proxy is already in use — still move off the (dead) current one.
+  return list[(start + 1) % list.length];
+}
+
+// Swap one account onto a fresh proxy and relaunch it there. Used drop-day when
+// a residential IP dies with the tab still open.
+async function swapProxyForAccount(dir) {
+  const list = proxyLines();
+  const msgEl = $("proxyTestMsg");
+  if (list.length < 2) { if (msgEl) flashTemp(msgEl, "Add more proxies to the list to have spares to swap in.", "var(--orange)", 5000); return; }
+  const acct = (accounts || []).find(a => a && a.profileDir === dir);
+  if (!acct) return;
+  const chosen = nextProxyAfter(currentProxyForDir(dir), list, dir);
+  proxyAssignments[dir] = chosen;
+  renderProxyAssignments();
+  // Persist the new assignment first so it sticks even if the profile isn't
+  // currently launch-valid; then boot the profile — its background re-applies
+  // the new proxy on boot (boot_fetch_settings).
+  await saveAll(true);
+  await launchAccount(acct, msgEl);
+  if (msgEl) flashTemp(msgEl, `⟳ ${escapeHtml(acct.label || dir)} → ${escapeHtml(maskProxy(chosen))} (relaunched on the new IP).`, "var(--green)", 7000);
+}
+
+// Rotate EVERY account onto its next proxy — for when a whole batch/subnet dies.
+async function rotateAllProxies() {
+  const list = proxyLines();
+  const msgEl = $("proxyTestMsg");
+  if (list.length < 2) { if (msgEl) flashTemp(msgEl, "Add more proxies to rotate between.", "var(--orange)", 5000); return; }
+  const withDir = (accounts || []).filter(a => a && a.profileDir);
+  if (!withDir.length) return;
+  if (!confirm(`Rotate all ${withDir.length} account(s) to a different IP and relaunch them?`)) return;
+  for (const a of withDir) {
+    const cur = currentProxyForDir(a.profileDir);
+    const idx = Math.max(0, list.indexOf(cur));
+    proxyAssignments[a.profileDir] = list[(idx + 1) % list.length];
+  }
+  renderProxyAssignments();
+  await saveAll(true);
+  let ok = 0;
+  for (const a of withDir) { await launchAccount(a, msgEl); ok++; }
+  if (msgEl) flashTemp(msgEl, `⟳ Rotated ${withDir.length} account(s) — relaunched on new IPs.`, "var(--green)", 7000);
+}
+
+function buildNotifyConfig() {
+  const evt = (id) => !!($(id) && $(id).checked);
+  return {
+    enabled: !!($("notifyEnabled") && $("notifyEnabled").checked),
+    webhook: (($("notifyWebhook") && $("notifyWebhook").value) || "").trim(),
+    telegramToken: (($("notifyTgToken") && $("notifyTgToken").value) || "").trim(),
+    telegramChatId: (($("notifyTgChat") && $("notifyTgChat").value) || "").trim(),
+    events: {
+      win:        evt("notifyEvtWin"),
+      success:    evt("notifyEvtWin"),   // "Won / order confirmed" is one toggle
+      entered:    evt("notifyEvtEntered"),
+      submitting: evt("notifyEvtSubmitting"),
+      error:      evt("notifyEvtError"),
+      loss:       evt("notifyEvtLoss"),
+      limit:      evt("notifyEvtError"), // group entry-limit under "problems"
+    },
+  };
+}
+
+// Show the list box or the single-gateway box depending on the chosen mode.
+function syncProxyModeUI() {
+  const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+  const listWrap = $("proxyListWrap");
+  const gwWrap = $("proxyGatewayWrap");
+  if (listWrap) listWrap.style.display = mode === "list" ? "" : "none";
+  if (gwWrap) gwWrap.style.display = mode === "gateway" ? "" : "none";
+}
+
+// Mask credentials so the preview never shows the password.
+function maskProxy(str) {
+  const s = String(str || "").trim();
+  if (!s) return "";
+  // Strip scheme + any user:pass@, then keep host:port from either style.
+  let body = s.replace(/^(https?|socks5|socks4):\/\//i, "");
+  const at = body.lastIndexOf("@");
+  if (at >= 0) body = body.slice(at + 1);
+  const parts = body.split(":");
+  return parts.length >= 2 ? `${parts[0]}:${parts[1]}` : body;
+}
+
+// Preview which account gets which IP — same deterministic sticky mapping the
+// background uses (accounts sorted by profileDir, round-robin over the list).
+function renderProxyAssignments() {
+  const el = $("proxyAssignPreview");
+  if (!el) return;
+  const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+  const withDir = (accounts || []).filter(a => a && a.profileDir);
+  if (!withDir.length) { el.innerHTML = '<span class="muted">Add accounts (with a Chrome profile) to see IP assignments.</span>'; return; }
+  let rows = "";
+  if (mode === "gateway") {
+    const gw = maskProxy(($("proxyGateway") && $("proxyGateway").value) || "");
+    if (!gw) { el.innerHTML = '<span class="muted">Enter a gateway endpoint above.</span>'; return; }
+    rows = withDir.map(a => `<div class="pa-row"><span>${escapeHtml(a.label || a.profileDir)}</span><span class="muted">→ ${escapeHtml(gw)} <em>(rotating)</em></span></div>`).join("");
+  } else {
+    const list = proxyLines();
+    if (!list.length) { el.innerHTML = '<span class="muted">Paste one proxy per line above.</span>'; return; }
+    const sorted = withDir.slice().sort((a, b) => a.profileDir.localeCompare(b.profileDir));
+    const canSwap = list.length >= 2;
+    rows = sorted.map((a) => {
+      const cur = currentProxyForDir(a.profileDir);
+      const swapped = !!proxyAssignments[a.profileDir];
+      const swapBtn = canSwap
+        ? `<button class="pa-swap" data-dir="${escapeHtml(a.profileDir)}" title="Swap this account to a fresh IP and relaunch it">⟳</button>`
+        : "";
+      return `<div class="pa-row"><span>${escapeHtml(a.label || a.profileDir)}</span>` +
+             `<span class="muted">→ ${escapeHtml(maskProxy(cur))}${swapped ? ' <em>(swapped)</em>' : ''} ${swapBtn}</span></div>`;
+    }).join("");
+    if (withDir.length > list.length) {
+      rows += `<div class="pa-row muted" style="margin-top:4px;">⚠ ${withDir.length} accounts share ${list.length} proxies — some reuse the same IP. Add spare lines so ⟳ Swap has fresh IPs.</div>`;
+    }
+  }
+  el.innerHTML = rows;
+}
+
 function buildConfig() {
   return {
     drop: {
@@ -2129,11 +3094,32 @@ function buildConfig() {
     options: {
       enabled: $("optEnabled").checked,
       testMode: $("optTestMode").checked,
+      leoMode: isLeoModeSelected(),
+      dropMode: isLeoModeSelected() ? "LEO" : "DAN",
+      danJitterSec: $("danJitterSec") ? Math.max(0, parseInt($("danJitterSec").value, 10) || 0) : 0,
       statusPollerEnabled: $("optPoller").checked,
       pollerIntervalMin: parseInt($("optPollerMin").value) || 3,
       logWebhook: $("logWebhook").value.trim(),
       alertWebhook: $("alertWebhook").value.trim(),
+      // Self-learning auto-tune: how many seconds early to open accounts before
+      // the drop (0/absent = background default of 30s).
+      prepLeadSec: _prepLeadSec || 0,
+      // Warm-page-then-flip-to-checkout: launch page first, switch to the gs
+      // checkout link N minutes before the drop.
+      warmFlipEnabled: !!($("warmFlipToggle") && $("warmFlipToggle").checked),
+      flipLeadMin: $("flipLeadMin") ? (parseFloat($("flipLeadMin").value) || 7) : 7,
+      // Small tiled launch windows instead of full-size.
+      tileWindows: !!($("tileWindowsToggle") && $("tileWindowsToggle").checked),
+      tileW: $("tileW") ? (parseInt($("tileW").value, 10) || 500) : 500,
+      tileH: $("tileH") ? (parseInt($("tileH").value, 10) || 680) : 680,
+      // Load the unpacked extension at launch (for profiles that keep losing it).
+      loadExtOnLaunch: !!($("loadExtToggle") && $("loadExtToggle").checked),
+      // "organic" = launch page → select size → Buy (Nike navigates to checkout);
+      // "direct" = jump straight to the gs.nike.com checkout link.
+      checkoutMode: checkoutModeValue(),
     },
+    proxies: buildProxyConfig(),
+    notify:  buildNotifyConfig(),
     accounts: accounts.map(a => ({
       id: a.id,
       label: a.label || "",
@@ -2151,6 +3137,8 @@ function buildConfig() {
         checkoutUrl: t.checkoutUrl || "", dropAtMs: t.dropAtMs || 0,
       })) : [],
       autoLaunch: !!a.autoLaunch,
+      selected: !!a.selected,        // ticked for OPEN SELECTED
+      regionOverride: a.regionOverride || "",   // "" = auto (detect from phone)
       cardId: a.cardId || "",
       card: resolveCard(a.cardId),   // resolved card object the bot fills
     })),
@@ -2359,7 +3347,7 @@ async function assignCheckoutUrls(msgEl) {
   await saveAll(true);
   if (msgEl) {
     if (ok && !fail) {
-      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — launches skip the size screen.`, "#1db954", 6000);
+      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — LAUNCH ALL opens straight onto them, skipping the size screen. (They only resolve at go-live; opening early shows Nike's error page — that's normal.)`, "#1db954", 8000);
     } else if (ok) {
       flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
     } else if (notLaunch) {
@@ -2396,17 +3384,171 @@ function launchTargetsFor(acct) {
   return [{ checkoutUrl: (acct.checkoutUrl || "").trim(), url: resolvedUrl(acct), dropAtMs: acct.dropAtMs || 0, size: acct.size || "" }];
 }
 
+// URL-safe base64, for embedding a full gs checkout URL inside a hash param.
+function b64url(str) {
+  return btoa(unescape(encodeURIComponent(str)))
+    .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function warmFlipEnabled() {
+  return !!($("warmFlipToggle") && $("warmFlipToggle").checked);
+}
+
+// ── Small tiled launch windows ────────────────────────────────
+function tileWindowsEnabled() {
+  return !!($("tileWindowsToggle") && $("tileWindowsToggle").checked);
+}
+function loadExtOnLaunch() {
+  return !!($("loadExtToggle") && $("loadExtToggle").checked);
+}
+// Checkout method: "organic" (launch page → size → Buy) or "direct" (gs link).
+function checkoutModeValue() {
+  const d = document.getElementById("checkoutModeDirect");
+  return (d && d.checked) ? "direct" : "organic";
+}
+function isOrganicCheckout() { return checkoutModeValue() === "organic"; }
+function syncCheckoutModeUI() {
+  const organic = isOrganicCheckout();
+  const oh = $("checkoutHintOrganic"), dh = $("checkoutHintDirect");
+  if (oh) oh.style.display = organic ? "" : "none";
+  if (dh) dh.style.display = organic ? "none" : "";
+}
+// Draw a scaled mock of the screen with the windows tiled the way they'll open,
+// so the size/position can be judged before launching.
+function renderTilePreview() {
+  const box = $("tilePreview");
+  if (!box) return;
+  if (!tileWindowsEnabled()) {
+    box.style.display = "none";
+    box.innerHTML = "";
+    return;
+  }
+  box.style.display = "block";
+  const availW = (window.screen && screen.availWidth)  || 1920;
+  const availH = (window.screen && screen.availHeight) || 1040;
+  // Chrome clamps window width to ~500px, so preview at the size it'll REALLY be.
+  const reqW = tileWH().w, reqH = tileWH().h;
+  const effW = Math.max(500, reqW);
+  const scale = 320 / availW;
+  const n = Math.max(1, accounts.filter(a => a.profileDir).length || 6);
+  box.style.width  = Math.round(availW * scale) + "px";
+  box.style.height = Math.round(availH * scale) + "px";
+  const cols = Math.max(1, Math.floor(availW / effW));
+  const rows = Math.max(1, Math.floor(availH / reqH));
+  const per = cols * rows;
+  let html = "";
+  for (let i = 0; i < n; i++) {
+    const idx = ((i % per) + per) % per;
+    const x = (idx % cols) * effW;
+    const y = Math.floor(idx / cols) * reqH;
+    const overlap = i >= per;   // grid full → this one stacks on an earlier tile
+    html += `<div class="tile-cell${overlap ? " overlap" : ""}" style="left:${x * scale}px; top:${y * scale}px; width:${effW * scale}px; height:${reqH * scale}px;">${i + 1}</div>`;
+  }
+  const clampNote = reqW < 500 ? ` · width clamped 500` : "";
+  box.innerHTML = html +
+    `<div class="tile-cap">${n} window(s) · ${effW}×${reqH}px · ${cols}×${rows} grid${clampNote}</div>`;
+}
+function tileWH() {
+  const w = $("tileW") ? parseInt($("tileW").value, 10) : NaN;
+  const h = $("tileH") ? parseInt($("tileH").value, 10) : NaN;
+  // Chrome won't render a window narrower than ~500px, but we allow smaller
+  // requests (it clamps) so the position tiling still works for tight grids.
+  return {
+    w: isNaN(w) ? 500 : Math.max(200, Math.min(2000, w)),
+    h: isNaN(h) ? 680 : Math.max(200, Math.min(2000, h)),
+  };
+}
+// The tile geometry {w,h,x,y} for the index-th launched profile, or null when
+// tiling is off. Shared by the launcher hint AND the in-page resize (below).
+function tileGeomFor(index) {
+  if (!tileWindowsEnabled()) return null;
+  const { w, h } = tileWH();
+  const availW = (window.screen && screen.availWidth)  || 1920;
+  const availH = (window.screen && screen.availHeight) || 1040;
+  const cols = Math.max(1, Math.floor(availW / w));
+  const rows = Math.max(1, Math.floor(availH / h));
+  const per  = cols * rows;
+  const idx  = ((index % per) + per) % per;   // wrap; overlaps once the grid fills
+  const x = (idx % cols) * w;
+  const y = Math.floor(idx / cols) * h;
+  return { w, h, x, y };
+}
+// Return { size, position } for the native-host launch hint (best-effort — only
+// honoured when Chrome cold-starts the profile's process).
+function windowFor(index) {
+  const g = tileGeomFor(index);
+  return g ? { size: `${g.w},${g.h}`, position: `${g.x},${g.y}` } : undefined;
+}
+function flipLeadMs() {
+  const m = $("flipLeadMin") ? parseFloat($("flipLeadMin").value) : NaN;
+  const min = isNaN(m) ? 7 : Math.max(0.5, Math.min(60, m));
+  return Math.round(min * 60 * 1000);
+}
+
 // Build the boot URL for one launch target.
+//
+// WARM → FLIP (default): open the launch PAGE first so it warms Kasada / keeps
+// the profile present, and hand it the fully-marked gs.nike.com checkout URL to
+// switch to a few minutes before the drop. The checkout page then loads FRESH,
+// so its Kasada token is current at submit time and it never rots into
+// gs.nike.com/error. Needs a checkout URL, a launch page, and a future drop.
+//
+// Otherwise the direct gs.nike.com checkout link is opened straight away (the
+// fast flow — it only resolves at go-live; opening early shows Nike's error
+// page, which is expected).
 function bootUrlForTarget(acct, target) {
-  let url = target.checkoutUrl || target.url || "";
-  if (!url) return null;
-  if (!/^https?:\/\//i.test(url)) url = "https://" + url;
-  const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
+  const checkout = (target.checkoutUrl || "").trim();
+  const page     = (target.url || "").trim();
+
+  // Resolve this target's drop time (from the target, else the Drop Time field).
   let t = target.dropAtMs || 0;
   if (!t) { const iso = dropTimeFieldISO(); const p = iso ? Date.parse(iso) : NaN; if (!isNaN(p)) t = p; }
-  if (t) params.push(`snkrsDrop=${t}`);
-  const sep = url.includes("#") ? "&" : "#";
-  return `${url}${sep}${params.join("&")}`;
+
+  // Tile geometry for THIS account, carried in the URL so the content script can
+  // resize its own window reliably (the command-line --window-size only works on
+  // a cold profile process). "w,h,x,y".
+  const gi = Math.max(0, accounts.findIndex(a => a.id === acct.id));
+  const geom = tileGeomFor(gi);
+  const winMarker = geom ? `snkrsWin=${geom.w},${geom.h},${geom.x},${geom.y}` : "";
+
+  // Append our #snkrsBoot / #snkrsDrop markers to a URL.
+  const boot = (u) => {
+    if (!/^https?:\/\//i.test(u)) u = "https://" + u;
+    const params = [`snkrsBoot=${encodeURIComponent(acct.profileDir)}`];
+    if (t) params.push(`snkrsDrop=${t}`);
+    if (winMarker) params.push(winMarker);
+    const sep = u.includes("#") ? "&" : "#";
+    return `${u}${sep}${params.join("&")}`;
+  };
+
+  // ── ORGANIC checkout ──────────────────────────────────────────
+  // Open the LAUNCH PAGE and let snkrs-content-script select the size and click
+  // Buy / Join Draw — Nike then navigates to gs.nike.com itself, so the entry is
+  // established the natural way (no "entry invalid" from a pre-built gs link).
+  // Ignores the direct checkout URL and warm-flip entirely.
+  if (isOrganicCheckout()) {
+    if (page) return boot(page);
+    if (checkout) return boot(checkout); // no launch page set — fall back
+    return null;
+  }
+
+  if (warmFlipEnabled() && checkout && page && t && Date.now() < t) {
+    const gsBoot = boot(checkout); // gs URL carrying its own boot/drop markers
+    let pageUrl = page;
+    if (!/^https?:\/\//i.test(pageUrl)) pageUrl = "https://" + pageUrl;
+    const params = [
+      `snkrsBoot=${encodeURIComponent(acct.profileDir)}`,
+      `snkrsDrop=${t}`,
+      `snkrsGs=${b64url(gsBoot)}`,
+      `snkrsFlip=${flipLeadMs()}`,
+    ];
+    if (winMarker) params.push(winMarker);
+    const sep = pageUrl.includes("#") ? "&" : "#";
+    return `${pageUrl}${sep}${params.join("&")}`;
+  }
+
+  const url = checkout || page;
+  if (!url) return null;
+  return boot(url);
 }
 
 function validateForLaunch(acct, msgEl) {
@@ -2430,7 +3572,8 @@ async function launchAccount(acct, msgEl) {
   const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
   flash(msgEl, `Opening ${urls.length} tab(s)…`, "#888");
   // All tabs in ONE chrome command so they reliably open together.
-  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+  const idx = Math.max(0, accounts.findIndex(a => a.id === acct.id));
+  const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: windowFor(idx), loadExtension: loadExtOnLaunch() });
   if (resp.ok) {
     flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${urls.length} tab(s).`, "#1db954");
   } else if (resp.hostMissing) {
@@ -2473,25 +3616,31 @@ async function launchAll() {
   await appendHistory(config);
 
   // Fresh drop → clear the previous run's replay timelines so the Drop Replay
-  // view reflects THIS launch.
+  // view reflects THIS launch, and clear any stale PANIC abort so a prior
+  // panic can't silently block this drop's submits.
   timelines = {};
   await chrome.storage.local.set({ [TIMELINE_KEY]: {} });
   await hostSend({ cmd: "clearTimeline" });
+  await setAbort(false);
+  await hostSend({ cmd: "setClose", on: false }); // clear any stale CLOSE ALL
+  refreshPanicBanner();
 
   flash($("statusMsg"), `Launching ${all.length} profiles…`, "#888");
   let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
+  let winIdx = 0;
   for (const acct of all) {
+    const win = windowFor(winIdx); winIdx++;
     const targets = launchTargetsFor(acct);
     if (!targets.length) {
       // Not configured — open a warm-up tab (idle, just warms Kasada/cookies).
-      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL });
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL, window: win });
       if (resp.ok) { profOk++; warmCount++; } else lastErr = resp.error || "unknown";
       await new Promise(r => setTimeout(r, 400));
       continue;
     }
     const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
     // All of this account's product tabs open in ONE chrome command.
-    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls });
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win, loadExtension: loadExtOnLaunch() });
     if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
     await new Promise(r => setTimeout(r, 450)); // stagger BETWEEN profiles
   }
@@ -2507,6 +3656,81 @@ async function launchAll() {
     flashTemp($("statusMsg"), `Launched ${profOk}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
   } else {
     flashTemp($("statusMsg"), `Couldn't launch. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
+  }
+}
+
+// Open ONLY the accounts of one region (SG or MY), now. Additive by design:
+// launching SG never closes MY, so a Singapore + Malaysia drop is just two
+// clicks. Each account keeps its stable window tile so SG and MY don't overlap.
+async function launchRegion(region) {
+  const msgEl = $("preflightRegionMsg") || $("statusMsg");
+  const list = accounts.filter(a => a.profileDir && effectiveRegionFor(a) === region);
+  if (!list.length) {
+    flashTemp(msgEl, `No ${region} accounts detected yet — run Preflight, or set Region manually on the Profiles page.`, "var(--orange)", 6000);
+    return;
+  }
+  const flag = region === "SG" ? "🇸🇬" : "🇲🇾";
+  await openProfileSet(list, `${flag} ${region}`, msgEl);
+}
+
+// Open just the accounts the user ticked on the Profiles page.
+async function launchSelected() {
+  const msgEl = $("statusMsg");
+  const list = accounts.filter(a => a.profileDir && a.selected);
+  if (!list.length) {
+    flashTemp(msgEl, "No profiles selected — tick the ☑ boxes on the Profiles page first.", "var(--orange)", 6000);
+    return;
+  }
+  await openProfileSet(list, "selected", msgEl);
+}
+
+// Shared launcher for a SUBSET of accounts (region / selected). Additive: it
+// doesn't wipe the other set's replay timelines or history. Warns on BLOCKED
+// profiles, clears stale PANIC/CLOSE, disarms the scheduler, then opens each.
+async function openProfileSet(list, labelText, msgEl) {
+  const blockers = list.filter(a => {
+    const rec = preflightResults[a.profileDir];
+    return rec && rec.ts && preflightVerdict(mergedChecksFor(a)) === "red";
+  });
+  if (blockers.length) {
+    const names = blockers.map(a => a.label || a.profileDir).join(", ");
+    if (!confirm(`⚠️ Preflight flagged ${blockers.length} ${labelText} profile(s) as BLOCKED:\n\n${names}\n\nOpen anyway?`)) {
+      flashTemp(msgEl, `Cancelled — fix ${blockers.length} blocked profile(s) first.`, "var(--orange)", 6000);
+      return;
+    }
+  }
+
+  await saveAll(true);
+  await setAbort(false);
+  await hostSend({ cmd: "setClose", on: false });
+  refreshPanicBanner();
+  await new Promise(res => chrome.runtime.sendMessage({ type: "cancel_dash_launch" }, res));
+
+  flash(msgEl, `Opening ${list.length} ${labelText} profile(s)…`, "#888");
+  let profOk = 0, tabOk = 0, warmCount = 0, lastErr = "";
+  for (const acct of list) {
+    // Stable per-account tile (global index) so windows don't stack.
+    const win = windowFor(Math.max(0, accounts.findIndex(a => a.id === acct.id)));
+    const targets = launchTargetsFor(acct);
+    if (!targets.length) {
+      const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, url: WARMUP_URL, window: win, loadExtension: loadExtOnLaunch() });
+      if (resp.ok) { profOk++; warmCount++; } else lastErr = resp.error || "unknown";
+      await new Promise(r => setTimeout(r, 400));
+      continue;
+    }
+    const urls = targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean);
+    const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: win, loadExtension: loadExtOnLaunch() });
+    if (resp.ok) { profOk++; tabOk += urls.length; } else lastErr = resp.error || "unknown";
+    await new Promise(r => setTimeout(r, 450));
+  }
+
+  if (profOk === list.length) {
+    const tail = warmCount ? ` (${warmCount} warm-up)` : "";
+    flashTemp(msgEl, `🚀 Opened ${profOk} ${labelText} profile(s) · ${tabOk} tab(s)${tail}. Each holds SUBMIT until drop.`, "var(--green)", 8000);
+  } else if (profOk > 0) {
+    flashTemp(msgEl, `Opened ${profOk}/${list.length} ${labelText}. Last error: ${lastErr}`, "#f0c070", 6000);
+  } else {
+    flashTemp(msgEl, `Couldn't open ${labelText}. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
   }
 }
 
@@ -2577,12 +3801,54 @@ function applyConfigToUI(cfg) {
     }));
   }
 
+  _prepLeadSec = Number(opts.prepLeadSec) || 0;
+  if ($("warmFlipToggle")) $("warmFlipToggle").checked = opts.warmFlipEnabled ?? true;
+  if ($("flipLeadMin")) $("flipLeadMin").value = opts.flipLeadMin ?? 7;
+  if ($("tileWindowsToggle")) $("tileWindowsToggle").checked = opts.tileWindows ?? true;
+  if ($("loadExtToggle")) $("loadExtToggle").checked = !!opts.loadExtOnLaunch;
+  // Checkout method (default organic — the safe/"entry valid" path).
+  const direct = opts.checkoutMode === "direct";
+  if ($("checkoutModeDirect")) $("checkoutModeDirect").checked = direct;
+  if ($("checkoutModeOrganic")) $("checkoutModeOrganic").checked = !direct;
+  syncCheckoutModeUI();
+  if ($("tileW")) $("tileW").value = opts.tileW ?? 500;
+  if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
+  const isLeo = opts.dropMode ? opts.dropMode === "LEO" : !!opts.leoMode;
+  if ($("dropModeLeo")) $("dropModeLeo").checked = isLeo;
+  if ($("dropModeDan")) $("dropModeDan").checked = !isLeo;
+  if ($("danJitterSec") && opts.danJitterSec != null) $("danJitterSec").value = opts.danJitterSec;
+  syncDropModeUI();
   $("optPoller").checked = opts.statusPollerEnabled ?? true;
   $("optPollerMin").value = opts.pollerIntervalMin ?? 3;
   $("logWebhook").value = opts.logWebhook || "";
   $("alertWebhook").value = opts.alertWebhook || "";
+
+  // Proxies
+  const px = cfg.proxies || {};
+  if ($("proxyEnabled")) $("proxyEnabled").checked = !!px.enabled;
+  if ($("proxyMode")) $("proxyMode").value = px.mode === "gateway" ? "gateway" : "list";
+  if ($("proxyList")) $("proxyList").value = Array.isArray(px.list) ? px.list.join("\n") : "";
+  if ($("proxyGateway")) $("proxyGateway").value = px.gateway || "";
+  proxyAssignments = (px.assignments && typeof px.assignments === "object") ? { ...px.assignments } : {};
+  if (typeof syncProxyModeUI === "function") syncProxyModeUI();
+  if (typeof renderProxyAssignments === "function") renderProxyAssignments();
+
+  // Outcome notifications
+  const nt = cfg.notify || {};
+  const nEvt = nt.events || {};
+  if ($("notifyEnabled")) $("notifyEnabled").checked = !!nt.enabled;
+  if ($("notifyWebhook")) $("notifyWebhook").value = nt.webhook || "";
+  if ($("notifyTgToken")) $("notifyTgToken").value = nt.telegramToken || "";
+  if ($("notifyTgChat")) $("notifyTgChat").value = nt.telegramChatId || "";
+  // Defaults when this is a fresh config with no notify block yet.
+  const dEvt = (k, def) => (k in nEvt) ? !!nEvt[k] : def;
+  if ($("notifyEvtWin")) $("notifyEvtWin").checked = dEvt("win", true);
+  if ($("notifyEvtEntered")) $("notifyEvtEntered").checked = dEvt("entered", true);
+  if ($("notifyEvtError")) $("notifyEvtError").checked = dEvt("error", true);
+  if ($("notifyEvtSubmitting")) $("notifyEvtSubmitting").checked = dEvt("submitting", false);
+  if ($("notifyEvtLoss")) $("notifyEvtLoss").checked = dEvt("loss", false);
 
   singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
   multiProduct = !!cfg.multiProduct;
@@ -2605,6 +3871,8 @@ function applyConfigToUI(cfg) {
     dropAtMs: a.dropAtMs || 0,
     targets: Array.isArray(a.targets) ? a.targets.map(t => ({ ...t })) : [],
     autoLaunch: !!a.autoLaunch,
+    selected: !!a.selected,
+    regionOverride: a.regionOverride || "",
     cardId: a.cardId || "",
   }));
 }
@@ -2731,10 +3999,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("cpSaveBtn").addEventListener("click", saveCardProfile);
   $("cpCancelBtn").addEventListener("click", resetCardForm);
 
-  // ── Page navigation ──
-  document.querySelectorAll(".nav-tab").forEach(tab => {
+  // ── Page navigation (sidebar) ──
+  document.querySelectorAll(".side-item").forEach(tab => {
     tab.addEventListener("click", () => navigateTo(tab.dataset.nav));
   });
+  // Persistent sidebar quick-actions.
+  if ($("sideLaunchBtn")) $("sideLaunchBtn").addEventListener("click", launchAll);
+  if ($("sidePanicBtn")) $("sidePanicBtn").addEventListener("click", raisePanic);
+  if ($("sideCloseBtn")) $("sideCloseBtn").addEventListener("click", closeAllProfiles);
+  navigateTo("dashboard");
   renderHomeStats();
 
   // ── Getting Started guide (collapsible, lives on HOME page) ──
@@ -2751,6 +4024,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   // ── Setup link → navigate to settings ──
   const sl = $("setupLink");
   if (sl) sl.addEventListener("click", e => { e.preventDefault(); navigateTo("settings"); });
+
+  // ── Drop mode (DAN / LEO) selector ──
+  ["dropModeDan", "dropModeLeo"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", () => { syncDropModeUI(); saveAll(true); });
+  });
+  syncDropModeUI();
+
+  // ── Checkout method (Organic / Direct) selector ──
+  ["checkoutModeOrganic", "checkoutModeDirect"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", () => { syncCheckoutModeUI(); saveAll(true); });
+  });
+  syncCheckoutModeUI();
 
   // ── Chrome Profile Creator ──
   $("createProfileBtn").addEventListener("click", createProfile);
@@ -2773,6 +4060,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderAccounts();
     saveAll(true).then(() => flashTemp($("statusMsg"), "Unarm All — scheduler cleared.", "#888", 3000));
   });
+  if ($("selectAllBtn")) $("selectAllBtn").addEventListener("click", () => selectAllProfiles(true));
+  if ($("selectNoneBtn")) $("selectNoneBtn").addEventListener("click", () => selectAllProfiles(false));
+  if ($("openSelectedBtn")) $("openSelectedBtn").addEventListener("click", launchSelected);
+  // Tile-layout preview: toggle on the button, live-update as the size changes.
+  if ($("tilePreviewBtn")) $("tilePreviewBtn").addEventListener("click", () => {
+    const box = $("tilePreview");
+    if (box && box.style.display === "block" && tileWindowsEnabled()) { box.style.display = "none"; }
+    else { if ($("tileWindowsToggle") && !$("tileWindowsToggle").checked) $("tileWindowsToggle").checked = true; renderTilePreview(); }
+  });
+  ["tileW", "tileH"].forEach(id => { const el = $(id); if (el) el.addEventListener("input", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); }); });
+  if ($("tileWindowsToggle")) $("tileWindowsToggle").addEventListener("change", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); });
   $("scheduleEnabled").addEventListener("change", () => {
     // Toggle only controls AUTO-OPEN; the drop time + countdown stay either way.
     startCountdown();
@@ -2790,6 +4088,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     liveStatuses = {};
     refreshAllBadges();
   });
+  const _panic = $("panicBtn");
+  if (_panic) _panic.addEventListener("click", raisePanic);
+  const _closeAll = $("closeAllBtn");
+  if (_closeAll) _closeAll.addEventListener("click", closeAllProfiles);
+  if ($("liveDiagBtn")) $("liveDiagBtn").addEventListener("click", runLiveDiagnostic);
+  refreshPanicBanner();
 
   // ── Preflight page ──
   if ($("preflightRunBtn")) $("preflightRunBtn").addEventListener("click", runPreflight);
@@ -2800,6 +4104,12 @@ document.addEventListener("DOMContentLoaded", async () => {
     flashTemp($("preflightMsg"), "Preflight results cleared.", "#888");
   });
   startPreflightPolling();
+  if ($("warmAllBtn")) $("warmAllBtn").addEventListener("click", warmAll);
+  if ($("updateAllBtn")) $("updateAllBtn").addEventListener("click", updateAllProfiles);
+  {
+    const w = await chrome.storage.local.get(WARM_KEY);
+    if (w[WARM_KEY]) warmTimes = w[WARM_KEY];
+  }
 
   // ── Drop replay / analytics ──
   {
@@ -2814,15 +4124,54 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderDropReplay();
     flashTemp($("replayMsg"), "Replay cleared.", "#888");
   });
+  // Carry the single-panel entry into PRODUCT 1 (so a typed/loaded URL is never
+  // lost when switching to multi). Returns product[0] after seeding.
+  function carrySingleIntoProducts() {
+    const su = ($("dropUrl").value || "").trim();
+    const sk = ($("dropKeyword").value || "").trim();
+    if (!products.length) products.push(newProduct());
+    const p0 = products[0];
+    if (!p0.url && su) p0.url = su;
+    if (!p0.keyword && sk) p0.keyword = sk;
+    if (!(p0.sizePool || []).length && singleSizePool.length) p0.sizePool = singleSizePool.slice();
+    return p0;
+  }
+
   $("multiProductToggle").addEventListener("change", () => {
-    multiProduct = $("multiProductToggle").checked;
+    const goingMulti = $("multiProductToggle").checked;
+    if (goingMulti) {
+      carrySingleIntoProducts();
+    } else if (products.length === 1) {
+      // Coming back to a single product — pull it back into the fields so nothing
+      // silently disappears from view.
+      const p0 = products[0];
+      if (p0.url) $("dropUrl").value = p0.url;
+      if (p0.keyword) $("dropKeyword").value = p0.keyword;
+      if ((p0.sizePool || []).length) singleSizePool = p0.sizePool.slice();
+    }
+    multiProduct = goingMulti;
     applyMultiUI();
+    buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
     renderAccounts(); // refresh assigned-product notes
   });
   $("addProductBtn").addEventListener("click", () => {
     products.push(newProduct());
     renderProducts();
   });
+  // One-click: single → multi carrying the current entry as PRODUCT 1 and adding
+  // a blank PRODUCT 2 (e.g. the jacket + the shirt). No toggle dance.
+  if ($("toMultiBtn")) $("toMultiBtn").addEventListener("click", () => {
+    carrySingleIntoProducts();
+    if (products.length < 2) products.push(newProduct());
+    multiProduct = true;
+    $("multiProductToggle").checked = true;
+    applyMultiUI();
+    renderAccounts();
+  });
+  if ($("fetchSingleMetaBtn")) $("fetchSingleMetaBtn").addEventListener("click", fetchSingleMeta);
+  if ($("gsLinkGenBtn")) $("gsLinkGenBtn").addEventListener("click", generateGsLinks);
+  if ($("gsLinkSku")) $("gsLinkSku").addEventListener("keydown", (e) => { if (e.key === "Enter") generateGsLinks(); });
+  if ($("autoTuneApplyBtn")) $("autoTuneApplyBtn").addEventListener("click", applyAutoTune);
   $("randomAssignBtn").addEventListener("click", randomAssign);
   $("directUrlsBtn").addEventListener("click", () => assignCheckoutUrls($("assignMsg")));
   $("saveBtn").addEventListener("click", () => saveAll(false));
@@ -2927,6 +4276,79 @@ document.addEventListener("DOMContentLoaded", async () => {
       });
     });
   }
+  // ── Proxies ──
+  if ($("proxyMode")) $("proxyMode").addEventListener("change", () => { syncProxyModeUI(); renderProxyAssignments(); });
+  if ($("proxyList")) $("proxyList").addEventListener("input", renderProxyAssignments);
+  if ($("proxyGateway")) $("proxyGateway").addEventListener("input", renderProxyAssignments);
+  // Per-account ⟳ swap (delegated — the preview re-renders on every change).
+  if ($("proxyAssignPreview")) {
+    $("proxyAssignPreview").addEventListener("click", (e) => {
+      const btn = e.target.closest(".pa-swap");
+      if (btn && btn.dataset.dir) swapProxyForAccount(btn.dataset.dir);
+    });
+  }
+  if ($("rotateProxiesBtn")) $("rotateProxiesBtn").addEventListener("click", rotateAllProxies);
+  if ($("saveProxyBtn")) {
+    $("saveProxyBtn").addEventListener("click", async () => {
+      const msgEl = $("proxyTestMsg");
+      const px = buildProxyConfig();
+      if (px.enabled && px.mode === "list" && !px.list.length) { if (msgEl) flashTemp(msgEl, "Paste at least one proxy, or turn proxies off.", "var(--orange)", 4000); return; }
+      if (px.enabled && px.mode === "gateway" && !px.gateway) { if (msgEl) flashTemp(msgEl, "Enter the gateway endpoint, or turn proxies off.", "var(--orange)", 4000); return; }
+      if (msgEl) flash(msgEl, "Saving…", "#888");
+      await saveAll(true);
+      // Apply immediately in THIS profile so the change takes effect now; other
+      // profiles pick it up when they next boot / on their next restart.
+      chrome.runtime.sendMessage({ type: "apply_proxy_now" }, () => {
+        if (msgEl) flashTemp(msgEl, px.enabled ? "✓ Saved & applied. Launched profiles use their IP on next boot." : "✓ Saved. Proxies OFF — profiles use your normal IP on next boot.", "var(--green)", 6000);
+      });
+    });
+  }
+  if ($("testProxyBtn")) {
+    $("testProxyBtn").addEventListener("click", () => {
+      const msgEl = $("proxyTestMsg");
+      const list = proxyLines();
+      const mode = ($("proxyMode") && $("proxyMode").value) || "list";
+      const proxy = mode === "gateway" ? (($("proxyGateway") && $("proxyGateway").value) || "").trim() : list[0];
+      if (!proxy) { if (msgEl) flashTemp(msgEl, "Enter a proxy to test first.", "var(--orange)", 4000); return; }
+      if (msgEl) flash(msgEl, "Testing egress IP through the proxy… (a few seconds)", "#888");
+      chrome.runtime.sendMessage({ type: "test_proxy", proxy }, (resp) => {
+        if (resp && resp.ok) {
+          const changed = resp.changed ? "✓ different from your real IP" : "⚠ same as your real IP — proxy may be bypassed";
+          const col = resp.changed ? "var(--green)" : "var(--orange)";
+          if (msgEl) flashTemp(msgEl, `✓ Proxy live — egress IP ${resp.ip} (${changed}).`, col, 9000);
+        } else {
+          if (msgEl) flashTemp(msgEl, "Proxy test failed: " + ((resp && resp.error) || "no response"), "var(--red)", 9000);
+        }
+      });
+    });
+  }
+
+  // ── Outcome notifications ──
+  if ($("saveNotifyBtn")) {
+    $("saveNotifyBtn").addEventListener("click", async () => {
+      const msgEl = $("notifyTestMsg");
+      const nt = buildNotifyConfig();
+      if (nt.enabled && !nt.webhook && !(nt.telegramToken && nt.telegramChatId)) {
+        if (msgEl) flashTemp(msgEl, "Add a Discord webhook or Telegram token+chat first.", "var(--orange)", 5000); return;
+      }
+      if (msgEl) flash(msgEl, "Saving…", "#888");
+      await saveAll(true);
+      if (msgEl) flashTemp(msgEl, nt.enabled ? "✓ Saved — every launched account will ping on these events." : "✓ Saved (notifications off).", "var(--green)", 5000);
+    });
+  }
+  if ($("testNotifyBtn")) {
+    $("testNotifyBtn").addEventListener("click", () => {
+      const msgEl = $("notifyTestMsg");
+      const cfg = buildNotifyConfig();
+      if (!cfg.webhook && !(cfg.telegramToken && cfg.telegramChatId)) { if (msgEl) flashTemp(msgEl, "Add a Discord webhook or Telegram token+chat first.", "var(--orange)", 5000); return; }
+      if (msgEl) flash(msgEl, "Sending test notification…", "#888");
+      chrome.runtime.sendMessage({ type: "test_outcome_notify", cfg }, (resp) => {
+        if (resp && resp.ok) { if (msgEl) flashTemp(msgEl, "✓ Sent — check Discord/Telegram.", "var(--green)", 6000); }
+        else { if (msgEl) flashTemp(msgEl, "Failed: " + ((resp && resp.error) || "no response"), "var(--red)", 6000); }
+      });
+    });
+  }
+
   // Re-route home action messages to the home action msg div
   // (saveAll and launchAll use statusMsg; we'll update home separately via storage listener)
 
