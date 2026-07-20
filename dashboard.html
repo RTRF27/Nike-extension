@@ -185,6 +185,27 @@
         <span class="section-sub">Configure the product every account will cop</span>
       </div>
 
+      <section class="card" style="margin-bottom:22px;">
+        <div class="card-head">
+          <h2>🛒 CHECKOUT METHOD</h2>
+          <span class="card-tag">HOW EACH ACCOUNT COPS</span>
+        </div>
+        <div class="dropmode">
+          <div class="dropmode-opts">
+            <label class="dropmode-opt">
+              <input type="radio" name="checkoutMode" id="checkoutModeOrganic" value="organic" checked>
+              <span class="dropmode-pill"><strong>🌱 Organic</strong> — launch page → size → Buy</span>
+            </label>
+            <label class="dropmode-opt">
+              <input type="radio" name="checkoutMode" id="checkoutModeDirect" value="direct">
+              <span class="dropmode-pill"><strong>⚡ Direct link</strong> — jump to gs checkout</span>
+            </label>
+          </div>
+          <p class="hint" id="checkoutHintOrganic" style="margin:8px 0 0;">Opens the SNKRS <strong>launch page</strong>, selects the size, and clicks <strong>Buy / Join Draw</strong> — letting Nike navigate to checkout the natural way. Slower by a moment, but avoids the <strong>“entry invalid”</strong> error you get from a pre-built checkout link. Recommended.</p>
+          <p class="hint" id="checkoutHintDirect" style="margin:8px 0 0; display:none;">Jumps each account straight to its <strong>gs.nike.com</strong> checkout link (built below), skipping the launch page. Fastest, but Nike can reject the entry (<em>“entry invalid”</em>) if the link wasn’t established through the launch flow.</p>
+        </div>
+      </section>
+
       <div class="two-col">
         <div class="col">
           <section class="card">

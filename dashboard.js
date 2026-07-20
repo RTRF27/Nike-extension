@@ -3114,6 +3114,9 @@ function buildConfig() {
       tileH: $("tileH") ? (parseInt($("tileH").value, 10) || 680) : 680,
       // Load the unpacked extension at launch (for profiles that keep losing it).
       loadExtOnLaunch: !!($("loadExtToggle") && $("loadExtToggle").checked),
+      // "organic" = launch page → select size → Buy (Nike navigates to checkout);
+      // "direct" = jump straight to the gs.nike.com checkout link.
+      checkoutMode: checkoutModeValue(),
     },
     proxies: buildProxyConfig(),
     notify:  buildNotifyConfig(),
@@ -3397,6 +3400,18 @@ function tileWindowsEnabled() {
 function loadExtOnLaunch() {
   return !!($("loadExtToggle") && $("loadExtToggle").checked);
 }
+// Checkout method: "organic" (launch page → size → Buy) or "direct" (gs link).
+function checkoutModeValue() {
+  const d = document.getElementById("checkoutModeDirect");
+  return (d && d.checked) ? "direct" : "organic";
+}
+function isOrganicCheckout() { return checkoutModeValue() === "organic"; }
+function syncCheckoutModeUI() {
+  const organic = isOrganicCheckout();
+  const oh = $("checkoutHintOrganic"), dh = $("checkoutHintDirect");
+  if (oh) oh.style.display = organic ? "" : "none";
+  if (dh) dh.style.display = organic ? "none" : "";
+}
 // Draw a scaled mock of the screen with the windows tiled the way they'll open,
 // so the size/position can be judged before launching.
 function renderTilePreview() {
@@ -3504,6 +3519,17 @@ function bootUrlForTarget(acct, target) {
     const sep = u.includes("#") ? "&" : "#";
     return `${u}${sep}${params.join("&")}`;
   };
+
+  // ── ORGANIC checkout ──────────────────────────────────────────
+  // Open the LAUNCH PAGE and let snkrs-content-script select the size and click
+  // Buy / Join Draw — Nike then navigates to gs.nike.com itself, so the entry is
+  // established the natural way (no "entry invalid" from a pre-built gs link).
+  // Ignores the direct checkout URL and warm-flip entirely.
+  if (isOrganicCheckout()) {
+    if (page) return boot(page);
+    if (checkout) return boot(checkout); // no launch page set — fall back
+    return null;
+  }
 
   if (warmFlipEnabled() && checkout && page && t && Date.now() < t) {
     const gsBoot = boot(checkout); // gs URL carrying its own boot/drop markers
@@ -3780,6 +3806,11 @@ function applyConfigToUI(cfg) {
   if ($("flipLeadMin")) $("flipLeadMin").value = opts.flipLeadMin ?? 7;
   if ($("tileWindowsToggle")) $("tileWindowsToggle").checked = opts.tileWindows ?? true;
   if ($("loadExtToggle")) $("loadExtToggle").checked = !!opts.loadExtOnLaunch;
+  // Checkout method (default organic — the safe/"entry valid" path).
+  const direct = opts.checkoutMode === "direct";
+  if ($("checkoutModeDirect")) $("checkoutModeDirect").checked = direct;
+  if ($("checkoutModeOrganic")) $("checkoutModeOrganic").checked = !direct;
+  syncCheckoutModeUI();
   if ($("tileW")) $("tileW").value = opts.tileW ?? 500;
   if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
@@ -4000,6 +4031,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (el) el.addEventListener("change", () => { syncDropModeUI(); saveAll(true); });
   });
   syncDropModeUI();
+
+  // ── Checkout method (Organic / Direct) selector ──
+  ["checkoutModeOrganic", "checkoutModeDirect"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", () => { syncCheckoutModeUI(); saveAll(true); });
+  });
+  syncCheckoutModeUI();
 
   // ── Chrome Profile Creator ──
   $("createProfileBtn").addEventListener("click", createProfile);

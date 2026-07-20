@@ -293,6 +293,23 @@ async function main() {
   });
   check("tile preview renders a cell per profile", preview.ok && preview.cells === 4 && preview.shown, "cells=" + preview.cells);
 
+  // 11) Checkout method: organic routes launches to the launch PAGE, not the gs link.
+  const cm = await page.evaluate(() => {
+    if (!document.getElementById("checkoutModeOrganic")) return { ok: false };
+    const acct = { id: "c1", profileDir: "Profile 1" };
+    const target = { url: "https://www.nike.com/sg/launch/t/england-x-palace", checkoutUrl: "https://gs.nike.com/?checkoutId=abc" };
+    document.getElementById("checkoutModeOrganic").checked = true;
+    document.getElementById("checkoutModeDirect").checked = false;
+    const organicUrl = bootUrlForTarget(acct, target) || "";
+    document.getElementById("checkoutModeDirect").checked = true;
+    document.getElementById("checkoutModeOrganic").checked = false;
+    const directUrl = bootUrlForTarget(acct, target) || "";
+    return { ok: true, organicUrl, directUrl, val: checkoutModeValue() };
+  });
+  check("checkout method selector present", cm.ok);
+  check("organic opens the launch page (not gs link)", /nike\.com\/sg\/launch\/t\//.test(cm.organicUrl) && !/gs\.nike\.com/.test(cm.organicUrl), cm.organicUrl);
+  check("direct opens the gs checkout link", /gs\.nike\.com/.test(cm.directUrl), cm.directUrl);
+
   check("no errors after full navigation", errors.length === 0, errors.slice(0, 3).join(" | "));
 
   await browser.close();
