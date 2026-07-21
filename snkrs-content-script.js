@@ -684,11 +684,19 @@ function findPreferredSizeButton() {
       return t.toUpperCase() === preferredNorm;
     }
 
-    // Footwear Format 1: "US 9.5"
-    const old = t.match(/^US\s+([\d.]+)$/i);
-    if (old && old[1] === preferred) return true;
+    // Footwear Format 1: "US 9.5" — and youth/toddler variants "US 5Y",
+    // "US 3.5Y", "US 10C". The trailing unit (Y=youth, C=child/toddler, GS/TD)
+    // is optional, so a preset like "5" still matches "US 5Y", and typing the
+    // full "5Y" matches too.
+    const preferredClean = String(preferred).trim().toUpperCase();
+    const old = t.toUpperCase().match(/^US\s+([\d.]+)(Y|C|TD|GS)?$/);
+    if (old) {
+      const digits = old[1];
+      const full = digits + (old[2] || "");
+      if (preferredClean === digits || preferredClean === full) return true;
+    }
 
-    // Footwear Format 2: "US M 9.5 / W 11"
+    // Footwear Format 2: "US M 9.5 / W 11" (men's/women's dual label)
     const newFmt = t.match(/^US\s+M\s+([\d.]+)/i);
     if (newFmt && newFmt[1] === preferred) return true;
 
@@ -765,6 +773,7 @@ async function waitFor(fn, timeoutMs = 20000, intervalMs = 200) {
 // re-renders that swap out the "Coming Soon" button for real size buttons.
 // When sizes appear and the drop is live, we fire the entry flow immediately.
 let dropWatcherActive = false;
+let _stuckDiagShown = false; // one-shot: "live but your size isn't offered" notice
 
 function startDropWatcher(tag, preferred) {
   if (dropWatcherActive) return;
@@ -820,6 +829,19 @@ function startDropWatcher(tag, preferred) {
         logBG(`🚀${tag} DROP IS LIVE (poll)! size ${sizeLabel(preferred)} found — entering now!`);
         showBanner("🚀 DROP LIVE — ENTERING NOW!", "#fa5400");
         await executeEntry(tag, preferred);
+      } else if (!_stuckDiagShown && !isRandomSize()) {
+        // Drop is LIVE and sizes exist, but none match the fixed target — the
+        // classic "stuck" case (e.g. youth "US 5Y" sizes vs an adult preset).
+        // Say so once, loudly, and point at 🎲 Random instead of hanging silent.
+        const kw = settings?.productKeyword;
+        const scope = (kw && kw.trim()) ? findProductScope(kw) : null;
+        const avail = getAllSizeButtons(scope).filter(isButtonAvailable)
+          .map(b => (b.innerText || "").trim()).filter(Boolean);
+        if (avail.length) {
+          _stuckDiagShown = true;
+          logBG(`⚠️${tag} Drop is LIVE but size ${sizeLabel(preferred)} isn't among the ${avail.length} available: ${avail.join(", ")}. Turn on 🎲 Random size (or pick one of these) — the bot will keep watching meanwhile.`);
+          showBanner(`⚠️ ${sizeLabel(preferred)} not offered — available: ${avail.slice(0, 8).join(", ")}. Use 🎲 Random.`, "#e8590c");
+        }
       }
     }
 
