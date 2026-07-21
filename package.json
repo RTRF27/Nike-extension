@@ -13,6 +13,6 @@
     "update-server": "node update-server/server.js"
   },
   "devDependencies": {
-    "playwright": "^1.56.0"
+    "playwright": "^1.61.1"
   }
 }
