@@ -208,6 +208,7 @@ const _notifiedEvents = new Set();    // `${key}:${code}` already sent this work
 const NOTIFY_META = {
   win:        { emoji: "🎉", label: "GOT 'EM — WON", important: true },
   success:    { emoji: "✅", label: "Order submitted", important: true },
+  carted:     { emoji: "🛒", label: "Added to bag", important: true },
   entered:    { emoji: "📋", label: "Draw entered", important: true },
   pending:    { emoji: "⏳", label: "Entry pending / in line", important: false },
   submitting: { emoji: "🛒", label: "Submitting order", important: false },
@@ -223,7 +224,7 @@ const NOTIFY_META = {
 };
 // States that default ON when the user hasn't customised the event list.
 const NOTIFY_DEFAULT_ON = {
-  win: true, success: true, entered: true, error: true, limit: true, closed: true, pending: true,
+  win: true, success: true, carted: true, entered: true, error: true, limit: true, closed: true, pending: true,
   submitting: false, payment: false, delivery: false, checkout: false, polling: false, waiting: false, loss: false,
 };
 
@@ -1261,6 +1262,9 @@ function parseStatusFromLog(message) {
     return "success";
   if (m.includes("entry confirmed") || (m.includes("📋") && m.includes("draw entered")))
     return "entered";
+  // Instant-buy drops: item added to bag (success milestone before checkout).
+  if (m.includes("added to bag") || m.includes("added to cart"))
+    return "carted";
 
   // ── Error / needs-attention ──
   if (m.includes("gs.nike.com/error") || m.includes("something went wrong") ||

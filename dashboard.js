@@ -3035,6 +3035,7 @@ async function rotateAllProxies() {
 const NOTIFY_EVENTS = [
   { code: "win",        emoji: "🎉", label: "Won / Got 'em",        def: true,  ex: "You won the draw — check your email" },
   { code: "success",    emoji: "✅", label: "Order submitted",       def: true,  ex: "Order submitted / entry complete / you're in" },
+  { code: "carted",     emoji: "🛒", label: "Added to bag",          def: true,  ex: "Instant-buy drop: item added to bag (US 6Y)" },
   { code: "entered",    emoji: "📋", label: "Draw entered",          def: true,  ex: "Draw entry confirmed" },
   { code: "pending",    emoji: "⏳", label: "Entry pending / in line",def: true,  ex: "You're in line — Nike is processing" },
   { code: "closed",     emoji: "🚫", label: "Draw closed / sold out", def: true,  ex: "Draw ended, closed, or sold out" },

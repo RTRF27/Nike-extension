@@ -655,6 +655,28 @@ function isButtonAvailable(btn) {
   return true;
 }
 
+// The DEFINITIVE success check for a "Buy" (instant-buy) drop: the item is in
+// the bag. Nike shows an "Added to bag" drawer and bumps the cart count — both
+// on the SAME url, so this is what "it worked" actually looks like (no
+// navigation). Returns true when the confirmation drawer / cart badge is up.
+function addedToBagConfirmed() {
+  // 1) The confirmation drawer text ("Added to bag").
+  const body = (document.body.innerText || "");
+  if (/added to bag/i.test(body)) return true;
+  // 2) A "View Bag (N>=1)" control (drawer CTA / header link).
+  const controls = Array.from(document.querySelectorAll("button, a"));
+  if (controls.some(el => /view bag\s*\(\s*[1-9]/i.test((el.innerText || "")))) return true;
+  // 3) Cart badge showing a non-zero count (data-qa/test-id or aria-label).
+  const cart = document.querySelector(
+    "[data-qa='cart-item-count'], [data-testid='cart-item-count'], [aria-label*='bag'], [aria-label*='cart']"
+  );
+  if (cart) {
+    const n = (cart.getAttribute("aria-label") || cart.innerText || "").match(/\d+/);
+    if (n && parseInt(n[0], 10) > 0) return true;
+  }
+  return false;
+}
+
 // Did a size click actually "take"? True when the button (or its <li>) shows a
 // selected/checked marker — used to confirm the pick before we go for the CTA.
 function sizeSelectionRegistered(btn) {
@@ -981,31 +1003,44 @@ async function executeEntry(tag, preferred) {
   const startUrl = location.href;
   logBG(`🛒${tag} Size selected — clicking "${ctaText}" now…`);
 
-  // Click Buy/Join and confirm the page actually advanced. On the SNKRS launch
-  // page the button is easy to click but the app can swallow the first tap while
-  // it finishes wiring up the selected size — so click, check, and re-click up
-  // to 5x until we navigate to checkout (gs.nike.com), the status flips to
-  // ENTRY_IN, or the button is gone. Each attempt uses the native-click path.
-  let advanced = false;
+  // Click Buy/Join and CONFIRM it actually worked. Success = one of:
+  //   • item added to bag (the "Added to bag" drawer / cart badge) — the real
+  //     signal for a Buy drop, which stays on the same URL;
+  //   • navigation to gs.nike.com checkout / any URL change;
+  //   • a draw status (ENTRY_IN / PENDING / PURCHASED).
+  // We STOP the instant one of these is true so we never add a second pair to
+  // the bag. Re-click only if nothing happened. Native-click path each time.
+  let advanced = false, addedToBag = false;
   for (let attempt = 1; attempt <= 5 && !advanced; attempt++) {
+    // Already in the bag from a prior attempt? Don't click again.
+    if (addedToBagConfirmed()) { advanced = true; addedToBag = true; break; }
     const btn = attempt === 1 ? ctaBtn : (findCTAButton() || ctaBtn);
     if (!btn) { advanced = true; break; } // button vanished → page moved on
     humanClick(btn, `${ctaText}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
-    // Give Nike a moment to navigate / open checkout / register the entry.
+    // Give Nike a moment to add-to-bag / navigate / register the entry.
     for (let i = 0; i < 12 && !advanced; i++) {
       await wait(250);
+      if (addedToBagConfirmed()) { advanced = true; addedToBag = true; break; }
       const movedToCheckout = location.href !== startUrl || location.hostname.includes("gs.nike.com");
       const st = detectPageStatus();
       if (movedToCheckout || st === STATUS.ENTRY_IN || st === STATUS.PENDING || st === STATUS.PURCHASED) {
         advanced = true;
       }
     }
-    if (!advanced && attempt < 5) logBG(`⚠️${tag} "${ctaText}" click didn't advance yet — re-clicking (${attempt}/5).`);
+    if (!advanced && attempt < 5) logBG(`⚠️${tag} "${ctaText}" click didn't add to bag yet — re-clicking (${attempt}/5).`);
   }
 
   if (!advanced) {
-    logBG(`❌${tag} Selected ${sizeLabel(preferred)} but "${ctaText}" didn't advance after 5 clicks — the button may need a manual tap. Check the window.`);
-    showBanner(`⚠️ Size in, but "${ctaText}" didn't fire — tap it manually.`, "#e8590c");
+    logBG(`❌${tag} Selected ${sizeLabel(preferred)} but "${ctaText}" didn't add to bag after 5 clicks — the button may need a manual tap. Check the window.`);
+    showBanner(`⚠️ Size in, but "${ctaText}" didn't add to bag — tap it manually.`, "#e8590c");
+    return;
+  }
+
+  // Instant-buy drop confirmed in the bag — the milestone the user watches for.
+  // This is the "it worked" signal; stop here (checkout is its own step/flow).
+  if (addedToBag) {
+    logBG(`🛒✅${tag} ADDED TO BAG — ${sizeLabel(preferred)} is in the cart. Proceed to checkout to complete the purchase.`);
+    showBanner(`🛒 ADDED TO BAG — ${sizeLabel(preferred)}! Go to bag to check out.`, "#1db954");
     return;
   }
 
