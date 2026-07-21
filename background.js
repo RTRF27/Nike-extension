@@ -201,17 +201,31 @@ let _notifyCfg = null;                // { enabled, webhook, telegramToken, tele
 const _profileLabels = {};            // profileDir → friendly account label
 const _notifiedEvents = new Set();    // `${key}:${code}` already sent this worker session
 
+// Every notifiable log line the bot can push. The `code` for each is derived
+// from the live log text by parseStatusFromLog(); anything listed here can be
+// toggled on/off individually from the dashboard's "Outcome notifications" card.
+// Keep this list in sync with NOTIFY_EVENTS in dashboard.js (same codes/order).
 const NOTIFY_META = {
   win:        { emoji: "🎉", label: "GOT 'EM — WON", important: true },
   success:    { emoji: "✅", label: "Order submitted", important: true },
   entered:    { emoji: "📋", label: "Draw entered", important: true },
+  pending:    { emoji: "⏳", label: "Entry pending / in line", important: false },
   submitting: { emoji: "🛒", label: "Submitting order", important: false },
+  payment:    { emoji: "💳", label: "Payment step", important: false },
+  delivery:   { emoji: "📦", label: "Delivery step", important: false },
+  checkout:   { emoji: "🧾", label: "Checkout started", important: false },
+  polling:    { emoji: "🔁", label: "Polling for result", important: false },
+  waiting:    { emoji: "🕒", label: "Holding for drop window", important: false },
+  closed:     { emoji: "🚫", label: "Draw closed / sold out", important: false },
   loss:       { emoji: "💔", label: "Not selected", important: false },
   limit:      { emoji: "⚠️", label: "Entry limit hit", important: false },
   error:      { emoji: "❌", label: "Needs attention", important: false },
 };
 // States that default ON when the user hasn't customised the event list.
-const NOTIFY_DEFAULT_ON = { win: true, success: true, entered: true, error: true, submitting: false, loss: false, limit: true };
+const NOTIFY_DEFAULT_ON = {
+  win: true, success: true, entered: true, error: true, limit: true, closed: true, pending: true,
+  submitting: false, payment: false, delivery: false, checkout: false, polling: false, waiting: false, loss: false,
+};
 
 function notifyEnabledFor(code) {
   if (!_notifyCfg || !_notifyCfg.enabled) return false;

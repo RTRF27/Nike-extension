@@ -291,6 +291,33 @@ Both are default-**off** and add no work to the checkout path — the 29-asserti
 checkout suite is unchanged. Proxy/notification config plumbing is covered by
 `test-harness/dashboard-smoke.mjs`.
 
+## Random size + full log control (v4.27)
+
+**🎲 Random size — cop any available size.** Some drops list sizes the preset
+picker never offered (half sizes, region-only sizes). Instead of a fixed size,
+turn on **🎲 Random size (cop any available)** in the PRODUCT card, pick the
+**🎲 Random** chip in any size pool, or choose **🎲 Random (any available size)**
+in a per-account size dropdown. At go-live the bot grabs *any* size that's
+actually clickable — scoped to your product keyword if one is set, so it still
+never buys the wrong item. Random accounts always run the **launch-page flow**
+(no direct link is built, since there's no fixed size to bake into a URL).
+
+**Waits for sizes, then goes.** Whether the size is fixed or random, each tab
+**sits on the launch page and watches** (MutationObserver + a 500 ms poll safety
+net). The moment real size buttons render and the drop is live, it selects and
+clicks **Buy / Join Draw** — no manual refresh. If your size disappears before
+the click, it re-arms and keeps watching.
+
+**Every log is individually toggleable.** **Settings → 🔔 Outcome Notifications**
+now lists **every** message the bot can push to Discord/Telegram — won, order
+submitted, draw entered, pending/in-line, closed/sold-out, entry-limit, error,
+plus the live checkout stages (submitting, payment, delivery, checkout started,
+polling, holding). Tick exactly what you want; each row's tooltip shows the
+sample text it sends. **All / None / Reset** set them in bulk, and changes save
+and apply to every launched account (default set stays the important outcomes;
+the noisy per-stage lines default off). Codes match `parseStatusFromLog()` +
+`NOTIFY_META` in `background.js`.
+
 ## Dashboard revamp (v4.0)
 
 CyberAIO-style **left sidebar** with four sections (all overlapping panels

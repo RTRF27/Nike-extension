@@ -292,6 +292,7 @@ let liveStatuses = {};         // {profileDir: {code,message,time}}
 const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl}
 
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
+let singleRandomSize = false;  // single-product: cop any available size (ignore pool)
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
 let proxyAssignments = {};     // {profileDir: "host:port:user:pass"} manual overrides (swap)
@@ -349,6 +350,9 @@ function buildSizePool(container, selected, onChange) {
   };
   addGroup("Footwear (US M)", FOOTWEAR_SIZES, "footwear", s => "US " + s);
   addGroup("Apparel", APPAREL_SIZES, "apparel", s => s);
+  // 🎲 Random: an account dealt this cops any size available at the drop.
+  // Mix it with fixed sizes, or pick it alone for an all-random pool.
+  addGroup("Any size", ["RANDOM"], "random", () => "🎲 Random");
 }
 
 // ── Multi-product UI ──────────────────────────────────────────
@@ -402,8 +406,18 @@ function buildProductRow(p, idx) {
 
 function renderDropUI() {
   buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
+  if ($("singleRandomSize")) $("singleRandomSize").checked = singleRandomSize;
+  applyRandomSizeUI();
   $("multiProductToggle").checked = multiProduct;
   applyMultiUI();
+}
+
+// Dim the size pool when 🎲 Random size is on — the pool is ignored then.
+function applyRandomSizeUI() {
+  const pool = $("singleSizePool");
+  if (!pool) return;
+  pool.style.opacity = singleRandomSize ? "0.4" : "";
+  pool.style.pointerEvents = singleRandomSize ? "none" : "";
 }
 
 // ── Product lookup + thumbnail preview ────────────────────────
@@ -569,8 +583,19 @@ async function randomAssign() {
     await saveAll(true);
     flashTemp(msg, `🎲 Each account will cop all ${prods.length} products (${prods.length} tabs each).`, "#1db954", 4000);
     await assignCheckoutUrls(msg); // build a direct checkout URL per product
+  } else if (singleRandomSize) {
+    // Random-size mode: no pool needed — every account copies any size that
+    // loads at the drop, via the launch-page flow.
+    accounts.forEach((acct) => {
+      acct.url = ""; acct.keyword = ""; acct.targets = [];
+      acct.size = "RANDOM"; acct.sizeType = "random";
+    });
+    renderAccounts();
+    await saveAll(true);
+    flashTemp(msg, `🎲 All ${accounts.length} account(s) set to RANDOM — each cops any size available at the drop.`, "#1db954", 5000);
+    await assignCheckoutUrls(msg);
   } else {
-    if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above.", "#fa5400"); return; }
+    if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above, or turn on 🎲 Random size.", "#fa5400"); return; }
     const sizes = dealFromPool(singleSizePool, accounts.length);
     accounts.forEach((acct, i) => {
       acct.url = ""; acct.keyword = ""; acct.targets = [];
@@ -2654,6 +2679,9 @@ function attachCardFormatters(numberEl, expiryEl, cvvEl) {
 function fillSizeSelect(sel, size, sizeType) {
   sel.innerHTML = "";
   sel.appendChild(el("option", { value: "" }, "— pick size —"));
+  // Random: cop whatever size is available at the drop (handles sizes the
+  // preset list never offered). Kept at the top so it's easy to reach.
+  sel.appendChild(el("option", { value: "random:RANDOM" }, "🎲 Random (any available size)"));
   const g1 = el("optgroup", { label: "Footwear (US M)" });
   FOOTWEAR_SIZES.forEach(s => g1.appendChild(el("option", { value: "footwear:" + s }, "US " + s)));
   sel.appendChild(g1);
@@ -2666,6 +2694,10 @@ function parseSizeValue(v) {
   if (!v) return { size: "", sizeType: "footwear" };
   const [type, size] = v.split(":");
   return { size: size || "", sizeType: type || "footwear" };
+}
+// True when a size means "cop any available size" (the 🎲 random option).
+function isRandomVal(size) {
+  return String(size || "").trim().toUpperCase() === "RANDOM";
 }
 
 // ── Profile <select> builder ──────────────────────────────────
@@ -2996,22 +3028,56 @@ async function rotateAllProxies() {
   if (msgEl) flashTemp(msgEl, `⟳ Rotated ${withDir.length} account(s) — relaunched on new IPs.`, "var(--green)", 7000);
 }
 
+// Every log line the bot can push to Discord/Telegram, each individually
+// toggleable. `code` MUST match a code in background.js parseStatusFromLog() +
+// NOTIFY_META. `def` is the default when the user hasn't customised it. `ex` is
+// a sample of the exact message that fires, so the user knows what they'll get.
+const NOTIFY_EVENTS = [
+  { code: "win",        emoji: "🎉", label: "Won / Got 'em",        def: true,  ex: "You won the draw — check your email" },
+  { code: "success",    emoji: "✅", label: "Order submitted",       def: true,  ex: "Order submitted / entry complete / you're in" },
+  { code: "entered",    emoji: "📋", label: "Draw entered",          def: true,  ex: "Draw entry confirmed" },
+  { code: "pending",    emoji: "⏳", label: "Entry pending / in line",def: true,  ex: "You're in line — Nike is processing" },
+  { code: "closed",     emoji: "🚫", label: "Draw closed / sold out", def: true,  ex: "Draw ended, closed, or sold out" },
+  { code: "limit",      emoji: "⚠️", label: "Entry limit hit",        def: true,  ex: "Entry limit exceeded for this account" },
+  { code: "error",      emoji: "❌", label: "Error / needs attention",def: true,  ex: "Something went wrong — needs a look" },
+  { code: "submitting", emoji: "🛒", label: "Submitting order",       def: false, ex: "Clicking Submit Order at checkout" },
+  { code: "payment",    emoji: "💳", label: "Payment step",           def: false, ex: "Filling / confirming card at checkout" },
+  { code: "delivery",   emoji: "📦", label: "Delivery step",          def: false, ex: "Delivery / address checkout step" },
+  { code: "checkout",   emoji: "🧾", label: "Checkout started",       def: false, ex: "Direct checkout script kicked off" },
+  { code: "polling",    emoji: "🔁", label: "Polling for result",     def: false, ex: "Poller checking the draw result" },
+  { code: "waiting",    emoji: "🕒", label: "Holding for drop",       def: false, ex: "Holding until the drop window opens" },
+  { code: "loss",       emoji: "💔", label: "Not selected",           def: false, ex: "Draw result: not selected" },
+];
+
+// Build the editable checklist. Each row is one notification the bot can send.
+function renderNotifyEvents(events) {
+  const grid = $("notifyEventsGrid");
+  if (!grid) return;
+  const ev = events || {};
+  grid.innerHTML = "";
+  NOTIFY_EVENTS.forEach(e => {
+    const on = (e.code in ev) ? !!ev[e.code] : e.def;
+    const label = el("label", { className: "chk", title: e.ex });
+    const box = el("input", { type: "checkbox", id: "notifyEvt_" + e.code });
+    box.checked = on;
+    label.appendChild(box);
+    label.appendChild(document.createTextNode(` ${e.emoji} ${e.label}`));
+    grid.appendChild(label);
+  });
+}
+
 function buildNotifyConfig() {
-  const evt = (id) => !!($(id) && $(id).checked);
+  const events = {};
+  NOTIFY_EVENTS.forEach(e => {
+    const box = $("notifyEvt_" + e.code);
+    events[e.code] = box ? !!box.checked : e.def;
+  });
   return {
     enabled: !!($("notifyEnabled") && $("notifyEnabled").checked),
     webhook: (($("notifyWebhook") && $("notifyWebhook").value) || "").trim(),
     telegramToken: (($("notifyTgToken") && $("notifyTgToken").value) || "").trim(),
     telegramChatId: (($("notifyTgChat") && $("notifyTgChat").value) || "").trim(),
-    events: {
-      win:        evt("notifyEvtWin"),
-      success:    evt("notifyEvtWin"),   // "Won / order confirmed" is one toggle
-      entered:    evt("notifyEvtEntered"),
-      submitting: evt("notifyEvtSubmitting"),
-      error:      evt("notifyEvtError"),
-      loss:       evt("notifyEvtLoss"),
-      limit:      evt("notifyEvtError"), // group entry-limit under "problems"
-    },
+    events,
   };
 }
 
@@ -3081,6 +3147,7 @@ function buildConfig() {
       autoOpen: scheduleIsEnabled(),
       scheduleEnabled: scheduleIsEnabled(),
       sizePool: singleSizePool.slice(),
+      randomSize: singleRandomSize,
     },
     multiProduct,
     products: products.map(p => ({
@@ -3292,13 +3359,16 @@ async function assignCheckoutUrls(msgEl) {
   launchCache = {};
   if (msgEl) flash(msgEl, "Resolving launch(es) from Nike…", "#888");
 
-  let ok = 0, fail = 0, notLaunch = 0; const errs = new Set();
+  let ok = 0, fail = 0, notLaunch = 0, randomCount = 0; const errs = new Set();
   let nikeDropISO = "";
 
   // Resolve one product SKU into a checkout URL + drop time for a given size.
   // Returns { checkoutUrl, dropAtMs, dropISO } or null (records the error).
   async function resolveOne(sku, size) {
     if (!sku || !size) return null;
+    // RANDOM sizes can't be baked into a direct link (no fixed skuId), so they
+    // always run the organic launch-page flow. Flag it, don't treat as failure.
+    if (isRandomVal(size)) return { random: true };
     let d;
     try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
     if (!d || !d.ok) {
@@ -3319,6 +3389,7 @@ async function assignCheckoutUrls(msgEl) {
       for (const t of (acct.targets || [])) {
         t.checkoutUrl = ""; t.dropAtMs = 0;
         const r = await resolveOne((t.keyword || "").toUpperCase(), t.size);
+        if (r && r.random) { randomCount++; continue; }
         if (!r) { fail++; continue; }
         t.checkoutUrl = r.checkoutUrl; t.dropAtMs = r.dropAtMs;
         if (r.dropISO && !nikeDropISO) nikeDropISO = r.dropISO;
@@ -3331,6 +3402,7 @@ async function assignCheckoutUrls(msgEl) {
       const sku = skuForAccount(acct);
       if (!acct.size || !sku) continue;
       const r = await resolveOne(sku, acct.size);
+      if (r && r.random) { randomCount++; continue; }
       if (!r) { fail++; continue; }
       acct.checkoutUrl = r.checkoutUrl; acct.dropAtMs = r.dropAtMs;
       if (r.dropISO && !nikeDropISO) nikeDropISO = r.dropISO;
@@ -3346,8 +3418,11 @@ async function assignCheckoutUrls(msgEl) {
   renderAccounts();
   await saveAll(true);
   if (msgEl) {
-    if (ok && !fail) {
-      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — LAUNCH ALL opens straight onto them, skipping the size screen. (They only resolve at go-live; opening early shows Nike's error page — that's normal.)`, "#1db954", 8000);
+    const randNote = randomCount ? ` 🎲 ${randomCount} on RANDOM size use the launch-page flow.` : "";
+    if (!ok && !fail && randomCount) {
+      flashTemp(msgEl, `🎲 ${randomCount} account(s) set to RANDOM size — they'll wait on the launch page and cop any size that loads. No direct URL needed.`, "#1db954", 8000);
+    } else if (ok && !fail) {
+      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — LAUNCH ALL opens straight onto them, skipping the size screen. (They only resolve at go-live; opening early shows Nike's error page — that's normal.)${randNote}`, "#1db954", 8000);
     } else if (ok) {
       flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
     } else if (notLaunch) {
@@ -3842,15 +3917,13 @@ function applyConfigToUI(cfg) {
   if ($("notifyWebhook")) $("notifyWebhook").value = nt.webhook || "";
   if ($("notifyTgToken")) $("notifyTgToken").value = nt.telegramToken || "";
   if ($("notifyTgChat")) $("notifyTgChat").value = nt.telegramChatId || "";
-  // Defaults when this is a fresh config with no notify block yet.
-  const dEvt = (k, def) => (k in nEvt) ? !!nEvt[k] : def;
-  if ($("notifyEvtWin")) $("notifyEvtWin").checked = dEvt("win", true);
-  if ($("notifyEvtEntered")) $("notifyEvtEntered").checked = dEvt("entered", true);
-  if ($("notifyEvtError")) $("notifyEvtError").checked = dEvt("error", true);
-  if ($("notifyEvtSubmitting")) $("notifyEvtSubmitting").checked = dEvt("submitting", false);
-  if ($("notifyEvtLoss")) $("notifyEvtLoss").checked = dEvt("loss", false);
+  // Render the full editable list, each row reflecting the saved choice (or its
+  // default when this is a fresh config with no notify block yet).
+  renderNotifyEvents(nEvt);
 
   singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
+  singleRandomSize = !!drop.randomSize;
+  if ($("singleRandomSize")) $("singleRandomSize").checked = singleRandomSize;
   multiProduct = !!cfg.multiProduct;
   products = Array.isArray(cfg.products) ? cfg.products.map(p => ({
     id: p.id || uid(),
@@ -4154,6 +4227,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
     renderAccounts(); // refresh assigned-product notes
   });
+  if ($("singleRandomSize")) $("singleRandomSize").addEventListener("change", () => {
+    singleRandomSize = $("singleRandomSize").checked;
+    applyRandomSizeUI();
+    saveAll(true);
+  });
   $("addProductBtn").addEventListener("click", () => {
     products.push(newProduct());
     renderProducts();
@@ -4324,6 +4402,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // ── Outcome notifications ──
+  // Make sure the event checklist exists even before a config loads.
+  if ($("notifyEventsGrid") && !$("notifyEventsGrid").children.length) renderNotifyEvents({});
+  const setAllNotify = (on) => NOTIFY_EVENTS.forEach(e => { const b = $("notifyEvt_" + e.code); if (b) b.checked = on; });
+  if ($("notifyAllBtn"))  $("notifyAllBtn").addEventListener("click",  () => setAllNotify(true));
+  if ($("notifyNoneBtn")) $("notifyNoneBtn").addEventListener("click", () => setAllNotify(false));
+  if ($("notifyResetBtn")) $("notifyResetBtn").addEventListener("click", () => NOTIFY_EVENTS.forEach(e => { const b = $("notifyEvt_" + e.code); if (b) b.checked = e.def; }));
   if ($("saveNotifyBtn")) {
     $("saveNotifyBtn").addEventListener("click", async () => {
       const msgEl = $("notifyTestMsg");

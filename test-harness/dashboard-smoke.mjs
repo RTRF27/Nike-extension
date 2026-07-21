@@ -222,15 +222,18 @@ async function main() {
     if (!document.getElementById("notifyEnabled")) return { present: false };
     document.getElementById("notifyEnabled").checked = true;
     document.getElementById("notifyWebhook").value = "https://discord.com/api/webhooks/x/y";
-    document.getElementById("notifyEvtWin").checked = true;
-    document.getElementById("notifyEvtSubmitting").checked = false;
+    // Ensure the editable event list is rendered, then tick per-event toggles.
+    if (typeof renderNotifyEvents === "function") renderNotifyEvents({});
+    if (document.getElementById("notifyEvt_win")) document.getElementById("notifyEvt_win").checked = true;
+    if (document.getElementById("notifyEvt_submitting")) document.getElementById("notifyEvt_submitting").checked = false;
     const cfg = buildNotifyConfig();
-    return { present: true, cfg };
+    return { present: true, cfg, hasGrid: !!document.getElementById("notifyEventsGrid") };
   });
   check("notifications card present", notify.present);
-  check("buildNotifyConfig maps webhook + win/success toggle",
+  check("editable per-event notification grid renders", notify.hasGrid);
+  check("buildNotifyConfig maps webhook + individual event toggles",
     notify.cfg && notify.cfg.enabled && notify.cfg.webhook.includes("discord") &&
-    notify.cfg.events.win === true && notify.cfg.events.success === true &&
+    notify.cfg.events.win === true &&
     notify.cfg.events.submitting === false);
 
   // 8) Region tagging: preflight has region row + arm-by-region bar; the

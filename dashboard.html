@@ -229,6 +229,13 @@
               <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IH1610-052">
               <button id="fetchSingleMetaBtn" type="button" class="btn btn-mini btn-dark" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
               <div id="singleProductPreview" class="product-preview" style="display:none;"></div>
+              <div class="toggle" style="margin-top:14px;">
+                <div>
+                  <div class="t-label">🎲 Random size (cop any available)</div>
+                  <div class="t-hint">Ignore the pool — every account grabs whatever size loads at the drop. Best when the drop lists sizes the picker below doesn't offer.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="singleRandomSize"><span class="track"></span></label>
+              </div>
               <label class="lbl" style="margin-top:14px;">Size pool <span class="muted">(randomly assigned to accounts)</span></label>
               <div class="size-pool" id="singleSizePool"></div>
               <button id="toMultiBtn" type="button" class="btn btn-ghost" style="margin-top:14px; width:100%;">➕ ADD A SECOND PRODUCT (JACKET + SHIRT…)</button>
@@ -720,14 +727,15 @@
                 <input type="text" id="notifyTgChat" class="inp" placeholder="12345678">
               </div>
             </div>
-            <div class="lbl" style="margin-top:12px;">Notify me on…</div>
-            <div class="chk-grid">
-              <label class="chk"><input type="checkbox" id="notifyEvtWin" checked> 🎉 Won / order confirmed</label>
-              <label class="chk"><input type="checkbox" id="notifyEvtEntered" checked> 📋 Draw entered</label>
-              <label class="chk"><input type="checkbox" id="notifyEvtError" checked> ❌ Error / needs attention</label>
-              <label class="chk"><input type="checkbox" id="notifyEvtSubmitting"> 🛒 Submitting order</label>
-              <label class="chk"><input type="checkbox" id="notifyEvtLoss"> 💔 Not selected</label>
+            <div class="row" style="margin-top:12px; align-items:baseline; justify-content:space-between;">
+              <div class="lbl" style="margin:0;">Notify me on… <span class="muted">(every log the bot can push — tick exactly what you want)</span></div>
+              <div class="row" style="gap:6px;">
+                <button id="notifyAllBtn" type="button" class="btn btn-mini btn-dark">All</button>
+                <button id="notifyNoneBtn" type="button" class="btn btn-mini btn-dark">None</button>
+                <button id="notifyResetBtn" type="button" class="btn btn-mini btn-dark">Reset</button>
+              </div>
             </div>
+            <div class="chk-grid" id="notifyEventsGrid"></div>
             <div class="actions" style="margin-top:12px;">
               <button id="saveNotifyBtn" class="btn btn-purple">SAVE</button>
               <button id="testNotifyBtn" class="btn btn-dark">Send test</button>

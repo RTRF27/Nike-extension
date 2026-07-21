@@ -606,10 +606,20 @@ function getAllSizeButtons(scope) {
   return scopedFiltered;
 }
 
+// Random-size mode: the user asked us to grab ANY available size at the drop
+// instead of a fixed one — useful when the real drop lists sizes the preset
+// picker never offered. Triggered by sizeType "random" or the "RANDOM" sentinel.
+function isRandomSize() {
+  return (settings?.preferredSizeType === "random")
+      || (String(settings?.preferredSize || "").trim().toUpperCase() === "RANDOM");
+}
+
 // Formats the configured size for display/logging.
-// Apparel → "L"; footwear → "US 9.5".
+// Apparel → "L"; footwear → "US 9.5"; random → "🎲 any available size".
 function sizeLabel(preferred) {
+  if (isRandomSize()) return "🎲 any available size";
   const norm = String(preferred || "").trim().toUpperCase();
+  if (norm === "RANDOM") return "🎲 any available size";
   if (APPAREL_SIZES.includes(norm)) return norm;
   return "US " + preferred;
 }
@@ -625,7 +635,7 @@ function isButtonAvailable(btn) {
 
 function findPreferredSizeButton() {
   const preferred = settings?.preferredSize;
-  if (!preferred) return null;
+  if (!preferred && !isRandomSize()) return null;
 
   const preferredNorm = String(preferred).trim().toUpperCase();
   const isApparelTarget = APPAREL_SIZES.includes(preferredNorm);
@@ -649,6 +659,19 @@ function findPreferredSizeButton() {
   }
 
   const buttons = getAllSizeButtons(scope);
+
+  // RANDOM mode: don't match a specific label — pick any size that's actually
+  // available right now. This is what lets us cop sizes the preset picker in
+  // the dashboard never listed. As soon as one clickable size exists, we go.
+  if (isRandomSize()) {
+    const available = buttons.filter(isButtonAvailable);
+    log(`Found ${buttons.length} size buttons (${available.length} available). RANDOM mode — picking any.`);
+    if (!available.length) return null;
+    const pick = available[Math.floor(Math.random() * available.length)];
+    log(`🎲 Random size picked: ${(pick.innerText || "").trim() || "(unlabelled)"}`);
+    return pick;
+  }
+
   log(`Found ${buttons.length} size buttons. Looking for ${isApparelTarget ? preferredNorm : "US " + preferred}`);
 
   return buttons.find(b => {

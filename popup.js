@@ -150,6 +150,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     selectedType = type;
   }
 
+  // ── Random-size button (cop any available size at the drop) ───
+  {
+    const rnd = document.createElement("button");
+    rnd.className = "size-btn";
+    rnd.dataset.size = "RANDOM";
+    rnd.dataset.type = "random";
+    rnd.textContent = "🎲 Random";
+    rnd.title = "Cop any available size when the drop goes live";
+    rnd.addEventListener("click", () => selectSizeButton(rnd, "RANDOM", "random"));
+    els.sizeGrid.appendChild(rnd);
+  }
+
   // ── Build footwear size grid ──────────────────────────────────
   US_SIZES.forEach(size => {
     const btn = document.createElement("button");
