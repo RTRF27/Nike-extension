@@ -1,15 +1,16 @@
 // ============================================================
 // Launch-flow test — proves the REAL snkrs-content-script.js drives a
-// random-size instant-buy drop all the way to "Added to bag".
+// random-size instant-buy drop all the way to "Added to bag" on a MULTI-PRODUCT
+// launch page (the real failure mode the user hit).
 //
-// It serves a faithful replica of Nike's SNKRS launch page (the exact size
-// grid <ul class="size-layout"> and Buy button .buying-tools-cta-button the
-// user captured), with realistic behaviour:
-//   • clicking a size marks its <li> .selected (like Nike);
-//   • clicking Buy ONLY adds to bag when a size is actually selected —
-//     otherwise nothing happens (so a premature/no-size Buy click fails).
-// Then it injects the real content script (chrome.* stubbed, random-size
-// settings) and asserts the bot reaches the "Added to bag" cart state.
+// The page mirrors nike.com/sg/launch/t/… : a HERO product (AJ4, US …Y youth
+// sizes, Buy S$215) PLUS two "you might also like" products with their OWN size
+// grids + Buy buttons (toddler …C sizes, S$119 / S$95). Behaviour is faithful:
+//   • clicking a size marks its <li> .selected within ITS product only;
+//   • a product's Buy adds THAT product to the bag ONLY if a size in that same
+//     product is selected — so picking a size on the wrong product carts nothing.
+// The bot must pick a HERO size and cart the S$215 item. If random selection
+// leaks across products (the old bug), this test fails.
 //
 //   node test-harness/launch-flow-test.mjs
 // ============================================================
@@ -25,15 +26,12 @@ const require = createRequire(import.meta.url);
 const ROOT = join(__dirname, "..");
 const { chromium } = require(join(execSync("npm root -g", { encoding: "utf8" }).trim(), "playwright"));
 
-// Random-size, enabled, not test mode — exactly how a launched profile is set.
 const SETTINGS = {
   enabled: true, testMode: false,
   preferredSize: "RANDOM", preferredSizeType: "random",
   profileLabel: "TESTER", profileDir: "Profile T", productKeyword: "",
 };
 
-// chrome.* stub. Captures every logBG() line into window.__botLogs so we can
-// assert the bot announced "ADDED TO BAG", and answers check_abort with off.
 const CHROME_STUB = `
 (function(){
   const sync = { snkrsBotSettings: ${JSON.stringify(SETTINGS)} };
@@ -70,14 +68,27 @@ const CHROME_STUB = `
 })();
 `;
 
-// The fake launch page. Uses Nike's real class names / data-qa. One size is
-// sold-out (data-qa="size-sold-out") to prove random never picks it. No "sold
-// out"/"coming soon" body text, so detectPageStatus() reads it as live (ENTER).
-const AVAILABLE = ["3.5Y","4Y","4.5Y","5Y","5.5Y","6Y","6.5Y","7Y"];
-const SOLD_OUT = "8Y";
+// Three products, each with its own size grid + Buy button. The HERO is first.
+const PRODUCTS = [
+  { name: "Air Jordan 4 Retro 'She's A Star'", price: "215.00", sizes: ["3.5Y","4Y","4.5Y","5Y","5.5Y","6Y","6.5Y","7Y"], soldOut: "8Y" },
+  { name: "Jordan 4 Retro (TD)",               price: "119.00", sizes: ["10.5C","11C","11.5C","12C"], soldOut: null },
+  { name: "Jordan 4 Retro (PS)",               price: "95.00",  sizes: ["4C","5C","6C","7C"], soldOut: null },
+];
 const sizeLi = (v, avail) =>
   `<li class="size va-sm-m d-sm-ib va-sm-t ta-sm-c" data-qa="${avail ? "size-available" : "size-sold-out"}">` +
   `<button type="button" class="size-grid-dropdown size-grid-button" id="size_item_radio${v}" value="${v}" data-qa="size-dropdown">US ${v}</button></li>`;
+const productBlock = (p) =>
+  `<section class="product">
+     <h2>${p.name}</h2>
+     <p>S$${p.price}</p>
+     <ul class="size-layout" style="width:100%;">
+       ${p.sizes.map(v => sizeLi(v, true)).join("")}
+       ${p.soldOut ? sizeLi(p.soldOut, false) : ""}
+     </ul>
+     <div class="button-container">
+       <button type="button" class="ncss-btn-primary-dark btn-lg buying-tools-cta-button">Buy S$${p.price}</button>
+     </div>
+   </section>`;
 
 const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Older Kids' Air Jordan 4 'She's a Star'</title></head>
 <body>
@@ -85,41 +96,35 @@ const PAGE_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Older
     <span data-qa="cart-item-count" aria-label="0 items in bag">0</span>
   </header>
   <h1>Older Kids' Air Jordan 4 'She's a Star'</h1>
-  <p>S$215.00</p>
-  <p>SKU: IO2829-600</p>
-  <ul class="size-layout" style="width:100%;">
-    ${AVAILABLE.map(v => sizeLi(v, true)).join("")}
-    ${sizeLi(SOLD_OUT, false)}
-  </ul>
-  <div class="button-container">
-    <button type="button" class="ncss-btn-primary-dark btn-lg buying-tools-cta-button">Buy S$215.00</button>
-  </div>
+  ${PRODUCTS.map(productBlock).join("")}
   <div id="cart-drawer"></div>
 
   <script>
-    // Realistic Nike behaviour ----------------------------------------------
-    // Size click → mark its <li> selected (only size-available lis respond).
-    document.querySelectorAll("ul.size-layout button.size-grid-button").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const li = btn.closest("li");
-        if (!li || li.getAttribute("data-qa") !== "size-available") return; // sold-out: no-op
-        document.querySelectorAll("ul.size-layout li.size").forEach(x => x.classList.remove("selected"));
-        li.classList.add("selected");
+    // Faithful per-product behaviour: selection + Buy are scoped to each section.
+    document.querySelectorAll("section.product").forEach(section => {
+      section.querySelectorAll("ul.size-layout button.size-grid-button").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const li = btn.closest("li");
+          if (!li || li.getAttribute("data-qa") !== "size-available") return; // sold-out no-op
+          section.querySelectorAll("ul.size-layout li.size").forEach(x => x.classList.remove("selected"));
+          li.classList.add("selected");
+        });
       });
-    });
-    // Buy click → add to bag ONLY when a size is actually selected.
-    document.querySelector("button.buying-tools-cta-button").addEventListener("click", () => {
-      const sel = document.querySelector("ul.size-layout li.size.selected");
-      if (!sel) return;                                   // no size → nothing (mimics Nike)
-      if (document.querySelector("#cart-drawer .added-to-bag")) return; // already added → no dup
-      const size = sel.querySelector("button").textContent.trim();
-      const badge = document.querySelector("[data-qa='cart-item-count']");
-      badge.textContent = "1"; badge.setAttribute("aria-label", "1 item in bag");
-      document.getElementById("cart-drawer").innerHTML =
-        '<div class="added-to-bag"><span>Added to bag</span>' +
-        '<div>Air Jordan 4 Retro "She\\'s A Star" — ' + size + '</div>' +
-        '<button type="button">View Bag (1)</button></div>';
-      window.__addedSize = size;
+      section.querySelector("button.buying-tools-cta-button").addEventListener("click", () => {
+        const sel = section.querySelector("ul.size-layout li.size.selected");
+        if (!sel) return;                                    // no size in THIS product → nothing
+        if (window.__cart) return;                           // already carted → no dup
+        const size = sel.querySelector("button").textContent.trim();
+        const name = section.querySelector("h2").textContent.trim();
+        const price = section.querySelector("button.buying-tools-cta-button").textContent.replace(/^Buy\\s*/,"").trim();
+        const badge = document.querySelector("[data-qa='cart-item-count']");
+        badge.textContent = "1"; badge.setAttribute("aria-label", "1 item in bag");
+        document.getElementById("cart-drawer").innerHTML =
+          '<div class="added-to-bag"><span>Added to bag</span>' +
+          '<div>' + name + ' — Size ' + size + ' — ' + price + '</div>' +
+          '<button type="button">View Bag (1)</button></div>';
+        window.__cart = { name: name, size: size, price: price };
+      });
     });
   </script>
   <script src="/snkrs-content-script.js"></script>
@@ -151,45 +156,50 @@ async function main() {
   await page.addInitScript(CHROME_STUB);
   await page.goto("https://www.nike.com/sg/launch/t/big-kids-air-jordan-4-shes-a-star-sweet-beet-and-off-noir", { waitUntil: "load" });
 
-  // The flow waits ~2s before acting, then selects + clicks Buy. Poll up to 20s
-  // for BOTH the "Added to bag" drawer AND the bot's own success log (which it
-  // emits a beat after its verification loop confirms the cart state).
   for (let i = 0; i < 80; i++) {
     const done = await page.evaluate(() =>
-      /added to bag/i.test(document.body.innerText || "") &&
-      (window.__botLogs || []).some(l => /added to bag/i.test(l)));
+      !!window.__cart && (window.__botLogs || []).some(l => /added to bag/i.test(l)));
     if (done) break;
     await page.waitForTimeout(250);
   }
 
   const state = await page.evaluate(() => {
     const sel = document.querySelector("ul.size-layout li.size.selected");
-    const soldOutSelected = !!(sel && sel.getAttribute("data-qa") === "size-sold-out");
     const badge = document.querySelector("[data-qa='cart-item-count']");
+    const carts = document.querySelectorAll("#cart-drawer .added-to-bag").length;
     return {
-      addedText: /added to bag/i.test(document.body.innerText || ""),
+      cart: window.__cart || null,
       selectedSize: sel ? sel.querySelector("button").textContent.trim() : null,
-      soldOutSelected,
-      viewBag: /view bag\s*\(\s*1/i.test(document.body.innerText || ""),
+      addedText: /added to bag/i.test(document.body.innerText || ""),
       badge: badge ? badge.textContent.trim() : null,
-      addedSize: window.__addedSize || null,
+      cartCount: carts,
       logs: window.__botLogs || [],
+      products: document.querySelectorAll("section.product").length,
+      sizeGrids: document.querySelectorAll("ul.size-layout").length,
+      buyButtons: document.querySelectorAll("button.buying-tools-cta-button").length,
     };
   });
 
   console.log("");
+  check("page really has 3 products / 3 grids / 3 Buy buttons",
+    state.products === 3 && state.sizeGrids === 3 && state.buyButtons === 3,
+    `products=${state.products} grids=${state.sizeGrids} buys=${state.buyButtons}`);
   check("no uncaught errors in the content script", errors.length === 0, errors.slice(0, 3).join(" | "));
-  check("bot SELECTED a size (li.selected present)", !!state.selectedSize, "none selected");
-  check("selected size is a real available size (US …Y)", /^US\s+[\d.]+Y$/.test(state.selectedSize || ""), state.selectedSize || "");
-  check("bot did NOT pick the sold-out size", !state.soldOutSelected);
-  check("ITEM ADDED TO BAG (drawer appeared)", state.addedText === true);
-  check("cart badge shows 1", state.badge === "1", `badge=${state.badge}`);
-  check("View Bag (1) control present", state.viewBag === true);
-  check("bot logged 'ADDED TO BAG' success", state.logs.some(l => /added to bag/i.test(l)),
-    (state.logs.slice(-3).join(" | ")) || "no logs");
+  check("bot SELECTED a size", !!state.selectedSize, "none selected");
+  check("selected size is a HERO youth size (US …Y, not a toddler …C)",
+    /^US\s+[\d.]+Y$/.test(state.selectedSize || ""), state.selectedSize || "");
+  check("ITEM ADDED TO BAG", state.addedText === true && !!state.cart);
+  check("carted the HERO product (Air Jordan 4 …), not another product",
+    !!state.cart && /Air Jordan 4/.test(state.cart.name), state.cart && state.cart.name);
+  check("carted the S$215 item (right product's Buy button)",
+    !!state.cart && /215/.test(state.cart.price), state.cart && state.cart.price);
+  check("exactly ONE item carted (no cross-product double add)", state.cartCount === 1 && state.badge === "1",
+    `count=${state.cartCount} badge=${state.badge}`);
   check("bot's confirmed size matches the carted size",
-    state.selectedSize && state.addedSize && state.selectedSize === state.addedSize,
-    `sel=${state.selectedSize} bag=${state.addedSize}`);
+    state.cart && state.selectedSize && state.selectedSize === ("US " + state.cart.size.replace(/^US\s+/, "")),
+    `sel=${state.selectedSize} bag=${state.cart && state.cart.size}`);
+  check("bot logged 'ADDED TO BAG' success", state.logs.some(l => /added to bag/i.test(l)),
+    state.logs.slice(-3).join(" | ") || "no logs");
 
   await browser.close();
   console.log(`\n${passed} passed, ${failed} failed`);

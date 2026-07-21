@@ -662,6 +662,25 @@ function addedToBagConfirmed() {
   return false;
 }
 
+// A /launch/t/ page renders the HERO product PLUS "you might also like" products
+// — each with its OWN size grid and Buy button (this drop has 3). With no
+// keyword to scope by, random mode must confine itself to the hero product, or
+// it could pick a size on one product while clicking Buy on another → nothing
+// carts. The hero is the FIRST size grid; walk up to the ancestor that also
+// holds its Buy/Join CTA — that ancestor is the hero product's card.
+function findMainProductScope() {
+  const first = document.querySelector("button.size-grid-button");
+  let grid = document.querySelector("ul.size-layout") || (first && first.closest("ul"));
+  if (!grid) return null;
+  let el = grid.parentElement;
+  for (let i = 0; i < 15 && el; i++, el = el.parentElement) {
+    const hasBuy = Array.from(el.querySelectorAll("button"))
+      .some(b => /^(buy\s+s\$|buy\b|join draw)/i.test((b.innerText || "").trim()));
+    if (hasBuy) return el;
+  }
+  return grid.parentElement || null;
+}
+
 function findPreferredSizeButton() {
   const preferred = settings?.preferredSize;
   if (!preferred && !isRandomSize()) return null;
@@ -687,20 +706,22 @@ function findPreferredSizeButton() {
     }
   }
 
-  const buttons = getAllSizeButtons(scope);
-
   // RANDOM mode: don't match a specific label — pick any size that's actually
-  // available right now. This is what lets us cop sizes the preset picker in
-  // the dashboard never listed. As soon as one clickable size exists, we go.
+  // available. Scope to the HERO product (or the keyword card) so on a
+  // multi-product page we never grab a size from a different product than the
+  // Buy button we click.
   if (isRandomSize()) {
-    const available = buttons.filter(isButtonAvailable);
-    log(`Found ${buttons.length} size buttons (${available.length} available). RANDOM mode — picking any.`);
+    const randScope = scope || findMainProductScope();
+    const randButtons = getAllSizeButtons(randScope);
+    const available = randButtons.filter(isButtonAvailable);
+    log(`Found ${randButtons.length} size buttons (${available.length} available) in ${randScope ? "the target product" : "the page"}. RANDOM mode — picking any.`);
     if (!available.length) return null;
     const pick = available[Math.floor(Math.random() * available.length)];
     log(`🎲 Random size picked: ${(pick.innerText || "").trim() || "(unlabelled)"}`);
     return pick;
   }
 
+  const buttons = getAllSizeButtons(scope);
   log(`Found ${buttons.length} size buttons. Looking for ${isApparelTarget ? preferredNorm : "US " + preferred}`);
 
   return buttons.find(b => {
@@ -765,6 +786,13 @@ function findCTAButton() {
     const scope = findProductScope(keyword);
     if (!scope) return null;
     return findCTAButtonInScope(scope); // may be null if not ready yet
+  }
+  // Random with no keyword: confine the CTA to the HERO product so the Buy we
+  // click is the same product we picked a size on (multi-product pages have
+  // several Buy buttons). Falls back to page-wide (first Buy = hero) if needed.
+  if (isRandomSize()) {
+    const main = findMainProductScope();
+    if (main) { const c = findCTAButtonInScope(main); if (c) return c; }
   }
   // No keyword (single-product page): page-wide search is correct.
   return findCTAButtonInScope(null);
