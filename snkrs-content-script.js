@@ -577,21 +577,6 @@ function findProductScope(keyword) {
 // Collects size buttons. If `scope` is provided, only looks inside it.
 function getAllSizeButtons(scope) {
   const root = scope || document;
-
-  // Precise path first: Nike's launch-page size grid is
-  // <ul class="size-layout"> <li data-qa="size-available"> <button class="size-grid-button">.
-  // Targeting these directly avoids grabbing unrelated page buttons and lines up
-  // with isButtonAvailable's <li data-qa> check. Prefer the size-layout list so
-  // we don't pull size buttons from "you might also like" cards.
-  for (const sel of [
-    "ul.size-layout button.size-grid-button",
-    "button.size-grid-button",
-    "li[data-qa='size-available'] button, li[data-qa='size-dropdown'] button, [data-qa='size-dropdown']",
-  ]) {
-    const found = Array.from(root.querySelectorAll(sel)).filter(b => b && b.tagName === "BUTTON");
-    if (found.length) return [...new Set(found)];
-  }
-
   const all = Array.from(root.querySelectorAll("button"));
 
   // Footwear: "US 9.5" or "US M 9.5 / W 11"
@@ -677,18 +662,6 @@ function addedToBagConfirmed() {
   return false;
 }
 
-// Did a size click actually "take"? True when the button (or its <li>) shows a
-// selected/checked marker — used to confirm the pick before we go for the CTA.
-function sizeSelectionRegistered(btn) {
-  if (!btn) return false;
-  if (btn.getAttribute("aria-checked") === "true") return true;
-  if (btn.getAttribute("aria-pressed") === "true") return true;
-  if (/\bselected\b/.test(btn.className || "")) return true;
-  const li = btn.closest("li");
-  if (li && /\bselected\b/.test(li.className || "")) return true;
-  return false;
-}
-
 function findPreferredSizeButton() {
   const preferred = settings?.preferredSize;
   if (!preferred && !isRandomSize()) return null;
@@ -765,27 +738,18 @@ function findPreferredSizeButton() {
 // so we enter the right product's draw. `scope` is optional.
 function findCTAButtonInScope(scope) {
   const root = scope || document;
+  const buttons = Array.from(root.querySelectorAll("button"));
 
-  const usable = (b) => {
-    if (!b) return false;
+  return buttons.find(b => {
     if (b.disabled) return false;
     if (b.getAttribute("aria-disabled") === "true") return false;
-    return true;
-  };
 
-  // Exact class Nike uses for the launch-page CTA ("Buy S$…" / "Join Draw"):
-  // button.buying-tools-cta-button. Target it directly first — most reliable.
-  const exact = Array.from(root.querySelectorAll("button.buying-tools-cta-button")).find(usable);
-  if (exact) return exact;
-
-  // Fallback: match by label text.
-  const buttons = Array.from(root.querySelectorAll("button"));
-  return buttons.find(b => {
-    if (!usable(b)) return false;
     const t = (b.innerText || "").trim();
+
     if (/^join draw/i.test(t)) return true;
     if (/^buy\s+S\$/i.test(t)) return true;
     if (/^buy\b/i.test(t)) return true;
+
     return false;
   }) || null;
 }
@@ -807,27 +771,22 @@ function findCTAButton() {
 }
 
 // ── Human-like click ─────────────────────────────────────────
-// Fires a full pointer+mouse sequence AND a native .click(). Some Nike size
-// buttons (the "size-grid-dropdown" variant, e.g. <button value="4.5Y">) don't
-// react to synthetic mouse events alone — the native .click() is what actually
-// registers the selection there, so we always call both.
+// This is the exact click sequence from the known-good v1.0 build — synthetic
+// pointer/mouse events, no native .click(). It's what reliably registers size +
+// Buy selections on Nike's launch page; adding a native .click() on top broke it
+// on live drops, so we keep this verbatim.
 function humanClick(el, label) {
   if (!el) { log(`humanClick: null for ${label}`); return; }
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   const rect = el.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
-  const opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window };
-  try { el.focus({ preventScroll: true }); } catch (e) {}
-  try { el.dispatchEvent(new PointerEvent("pointerover", opts)); } catch (e) {}
-  try { el.dispatchEvent(new PointerEvent("pointerenter", opts)); } catch (e) {}
-  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
-    const Ctor = type.startsWith("pointer") && window.PointerEvent ? PointerEvent : MouseEvent;
-    try { el.dispatchEvent(new Ctor(type, opts)); } catch (e) {}
+  for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+    el.dispatchEvent(new MouseEvent(type, {
+      bubbles: true, cancelable: true, composed: true,
+      clientX: x, clientY: y, view: window,
+    }));
   }
-  // Native activation — the reliable path for React/Nike handlers that ignore
-  // synthetic-only clicks.
-  try { el.click(); } catch (e) {}
   log(`Clicked: ${label}`);
 }
 
@@ -952,38 +911,18 @@ async function executeEntry(tag, preferred) {
     return;
   }
 
+  // v1.0 proven flow: ONE size click, wait, ONE CTA click. No retry loops, no
+  // native .click(), no selection gating — that extra machinery broke live
+  // drops. Random size just changes WHICH button findPreferredSizeButton picks.
   logBG(`✅${tag} Clicking size ${sizeLabel(preferred)}…`);
+  humanClick(sizeBtn, `Size ${sizeLabel(preferred)}`);
 
-  // Click the size and confirm it ACTUALLY registered — the <li> gets ".selected"
-  // (or the button gets aria-checked). We gate on this, NOT on the CTA becoming
-  // enabled: Nike's Buy button (.buying-tools-cta-button) is never `disabled`,
-  // so "CTA present" would falsely pass before the size is really picked and the
-  // Buy click would no-op. Re-click only while NOT yet registered (re-clicking a
-  // selected size can toggle it back off).
-  let selectedBtn = sizeBtn;
-  let sizeOk = false;
-  for (let attempt = 1; attempt <= 5 && !sizeOk; attempt++) {
-    const btn = attempt === 1 ? sizeBtn : (findPreferredSizeButton() || selectedBtn);
-    if (btn) selectedBtn = btn;
-    if (!sizeSelectionRegistered(btn)) {
-      humanClick(btn, `Size ${sizeLabel(preferred)}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
-    }
-    // Poll briefly for the selection to take before deciding to re-click.
-    for (let i = 0; i < 8 && !sizeOk; i++) {
-      await wait(150);
-      if (sizeSelectionRegistered(selectedBtn)) sizeOk = true;
-    }
-    if (!sizeOk && attempt < 5) log(`Size ${sizeLabel(preferred)} not registered yet — re-clicking (${attempt}/5).`);
-  }
+  await wait(randInt(500, 900));
 
-  if (sizeOk) log(`Size ${sizeLabel(preferred)} confirmed selected.`);
-  else logBG(`⚠️${tag} Couldn't confirm ${sizeLabel(preferred)} as selected — trying the CTA anyway.`);
-
-  // Now the Buy/Join button should act. It may take a beat to wire up.
-  const ctaBtn = await waitFor(findCTAButton, 6000);
+  const ctaBtn = await waitFor(findCTAButton, 8000);
 
   if (!ctaBtn) {
-    logBG(`❌${tag} No Buy/Join button found after selecting ${sizeLabel(preferred)} — the CTA may use an unrecognised control. Check the page manually.`);
+    logBG(`❌${tag} CTA button (Join Draw / Buy) did not activate after selecting size.`);
     entryAttempted = false;
     return;
   }
@@ -1000,52 +939,21 @@ async function executeEntry(tag, preferred) {
   const productTitle = document.title || location.href;
   sessionStorage.setItem(POLLER_PRODUCT_KEY, productTitle);
 
-  const startUrl = location.href;
-  logBG(`🛒${tag} Size selected — clicking "${ctaText}" now…`);
+  logBG(`🛒${tag} Clicking "${ctaText}" — entering draw…`);
+  humanClick(ctaBtn, ctaText);
 
-  // Click Buy/Join and CONFIRM it actually worked. Success = one of:
-  //   • item added to bag (the "Added to bag" drawer / cart badge) — the real
-  //     signal for a Buy drop, which stays on the same URL;
-  //   • navigation to gs.nike.com checkout / any URL change;
-  //   • a draw status (ENTRY_IN / PENDING / PURCHASED).
-  // We STOP the instant one of these is true so we never add a second pair to
-  // the bag. Re-click only if nothing happened. Native-click path each time.
-  let advanced = false, addedToBag = false;
-  for (let attempt = 1; attempt <= 5 && !advanced; attempt++) {
-    // Already in the bag from a prior attempt? Don't click again.
-    if (addedToBagConfirmed()) { advanced = true; addedToBag = true; break; }
-    const btn = attempt === 1 ? ctaBtn : (findCTAButton() || ctaBtn);
-    if (!btn) { advanced = true; break; } // button vanished → page moved on
-    humanClick(btn, `${ctaText}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
-    // Give Nike a moment to add-to-bag / navigate / register the entry.
-    for (let i = 0; i < 12 && !advanced; i++) {
-      await wait(250);
-      if (addedToBagConfirmed()) { advanced = true; addedToBag = true; break; }
-      const movedToCheckout = location.href !== startUrl || location.hostname.includes("gs.nike.com");
-      const st = detectPageStatus();
-      if (movedToCheckout || st === STATUS.ENTRY_IN || st === STATUS.PENDING || st === STATUS.PURCHASED) {
-        advanced = true;
-      }
-    }
-    if (!advanced && attempt < 5) logBG(`⚠️${tag} "${ctaText}" click didn't add to bag yet — re-clicking (${attempt}/5).`);
-  }
+  await wait(2500);
 
-  if (!advanced) {
-    logBG(`❌${tag} Selected ${sizeLabel(preferred)} but "${ctaText}" didn't add to bag after 5 clicks — the button may need a manual tap. Check the window.`);
-    showBanner(`⚠️ Size in, but "${ctaText}" didn't add to bag — tap it manually.`, "#e8590c");
-    return;
-  }
-
-  // Instant-buy drop confirmed in the bag — the milestone the user watches for.
-  // This is the "it worked" signal; stop here (checkout is its own step/flow).
-  if (addedToBag) {
+  // Non-blocking success check: instant-buy drops confirm by adding to the bag
+  // on the SAME url. If we see it, report it (and the "carted" notification
+  // fires) and skip the retry — never double-click Buy.
+  if (addedToBagConfirmed()) {
     logBG(`🛒✅${tag} ADDED TO BAG — ${sizeLabel(preferred)} is in the cart. Proceed to checkout to complete the purchase.`);
     showBanner(`🛒 ADDED TO BAG — ${sizeLabel(preferred)}! Go to bag to check out.`, "#1db954");
     return;
   }
 
   if (location.hostname.includes("nike.com") && !location.hostname.includes("gs.nike.com")) {
-    await wait(1500);
     const postStatus = detectPageStatus();
     log(`Post-click status: ${postStatus}`);
 
@@ -1053,14 +961,22 @@ async function executeEntry(tag, preferred) {
       logBG(`📋${tag} Entry confirmed! Draw entered for ${sizeLabel(preferred)}. Starting status poller…`);
       showBanner("✓ ENTRY SUBMITTED — monitoring for result", "#111");
       startStatusPoller();
-    } else if (postStatus === STATUS.PENDING) {
-      logBG(`⏳${tag} Entry pending / in line for ${sizeLabel(preferred)}.`);
-      showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE!", "#111");
+    } else if (postStatus === STATUS.ENTER) {
+      logBG(`⚠️${tag} CTA click may not have registered — retrying once…`);
+      await wait(500);
+      const retryBtn = findCTAButton();
+      if (retryBtn) humanClick(retryBtn, "CTA retry");
+      await wait(2000);
+      if (addedToBagConfirmed()) {
+        logBG(`🛒✅${tag} ADDED TO BAG — ${sizeLabel(preferred)} is in the cart.`);
+        showBanner(`🛒 ADDED TO BAG — ${sizeLabel(preferred)}!`, "#1db954");
+      } else if (detectPageStatus() === STATUS.ENTRY_IN) {
+        logBG(`📋${tag} Entry confirmed on retry! Starting poller…`);
+        startStatusPoller();
+      }
     } else {
-      logBG(`ℹ️${tag} "${ctaText}" clicked (status: ${postStatus}). If a checkout/modal opened, the checkout flow takes over.`);
+      logBG(`⚠️${tag} Unexpected post-click status: ${postStatus} — check the page manually.`);
     }
-  } else {
-    logBG(`🧾${tag} Moved to checkout after "${ctaText}" — checkout flow takes over.`);
   }
 }
 
