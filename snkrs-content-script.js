@@ -577,6 +577,21 @@ function findProductScope(keyword) {
 // Collects size buttons. If `scope` is provided, only looks inside it.
 function getAllSizeButtons(scope) {
   const root = scope || document;
+
+  // Precise path first: Nike's launch-page size grid is
+  // <ul class="size-layout"> <li data-qa="size-available"> <button class="size-grid-button">.
+  // Targeting these directly avoids grabbing unrelated page buttons and lines up
+  // with isButtonAvailable's <li data-qa> check. Prefer the size-layout list so
+  // we don't pull size buttons from "you might also like" cards.
+  for (const sel of [
+    "ul.size-layout button.size-grid-button",
+    "button.size-grid-button",
+    "li[data-qa='size-available'] button, li[data-qa='size-dropdown'] button, [data-qa='size-dropdown']",
+  ]) {
+    const found = Array.from(root.querySelectorAll(sel)).filter(b => b && b.tagName === "BUTTON");
+    if (found.length) return [...new Set(found)];
+  }
+
   const all = Array.from(root.querySelectorAll("button"));
 
   // Footwear: "US 9.5" or "US M 9.5 / W 11"
@@ -728,18 +743,27 @@ function findPreferredSizeButton() {
 // so we enter the right product's draw. `scope` is optional.
 function findCTAButtonInScope(scope) {
   const root = scope || document;
-  const buttons = Array.from(root.querySelectorAll("button"));
 
-  return buttons.find(b => {
+  const usable = (b) => {
+    if (!b) return false;
     if (b.disabled) return false;
     if (b.getAttribute("aria-disabled") === "true") return false;
+    return true;
+  };
 
+  // Exact class Nike uses for the launch-page CTA ("Buy S$…" / "Join Draw"):
+  // button.buying-tools-cta-button. Target it directly first — most reliable.
+  const exact = Array.from(root.querySelectorAll("button.buying-tools-cta-button")).find(usable);
+  if (exact) return exact;
+
+  // Fallback: match by label text.
+  const buttons = Array.from(root.querySelectorAll("button"));
+  return buttons.find(b => {
+    if (!usable(b)) return false;
     const t = (b.innerText || "").trim();
-
     if (/^join draw/i.test(t)) return true;
     if (/^buy\s+S\$/i.test(t)) return true;
     if (/^buy\b/i.test(t)) return true;
-
     return false;
   }) || null;
 }
@@ -908,27 +932,36 @@ async function executeEntry(tag, preferred) {
 
   logBG(`✅${tag} Clicking size ${sizeLabel(preferred)}…`);
 
-  // Click the size, then confirm it actually registered (the <li> gets a
-  // "selected"/checked marker, or the CTA becomes clickable). Nike's
-  // size-grid-dropdown buttons sometimes need a second click to take, so retry
-  // a few times — re-finding the button each time in case the DOM re-rendered.
-  let ctaBtn = null;
+  // Click the size and confirm it ACTUALLY registered — the <li> gets ".selected"
+  // (or the button gets aria-checked). We gate on this, NOT on the CTA becoming
+  // enabled: Nike's Buy button (.buying-tools-cta-button) is never `disabled`,
+  // so "CTA present" would falsely pass before the size is really picked and the
+  // Buy click would no-op. Re-click only while NOT yet registered (re-clicking a
+  // selected size can toggle it back off).
   let selectedBtn = sizeBtn;
-  for (let attempt = 1; attempt <= 4 && !ctaBtn; attempt++) {
+  let sizeOk = false;
+  for (let attempt = 1; attempt <= 5 && !sizeOk; attempt++) {
     const btn = attempt === 1 ? sizeBtn : (findPreferredSizeButton() || selectedBtn);
-    // Only (re)click if the size isn't already registered as selected —
-    // re-clicking an already-selected size can toggle it back OFF.
-    if (attempt === 1 || !sizeSelectionRegistered(btn)) {
+    if (btn) selectedBtn = btn;
+    if (!sizeSelectionRegistered(btn)) {
       humanClick(btn, `Size ${sizeLabel(preferred)}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
-      await wait(randInt(350, 700));
     }
-    if (sizeSelectionRegistered(btn)) { selectedBtn = btn; log(`Size selection registered (attempt ${attempt}).`); }
-    ctaBtn = await waitFor(findCTAButton, attempt === 1 ? 3500 : 2000);
-    if (!ctaBtn && attempt < 4) log(`CTA not active yet after size click — retrying (${attempt}/4).`);
+    // Poll briefly for the selection to take before deciding to re-click.
+    for (let i = 0; i < 8 && !sizeOk; i++) {
+      await wait(150);
+      if (sizeSelectionRegistered(selectedBtn)) sizeOk = true;
+    }
+    if (!sizeOk && attempt < 5) log(`Size ${sizeLabel(preferred)} not registered yet — re-clicking (${attempt}/5).`);
   }
 
+  if (sizeOk) log(`Size ${sizeLabel(preferred)} confirmed selected.`);
+  else logBG(`⚠️${tag} Couldn't confirm ${sizeLabel(preferred)} as selected — trying the CTA anyway.`);
+
+  // Now the Buy/Join button should act. It may take a beat to wire up.
+  const ctaBtn = await waitFor(findCTAButton, 6000);
+
   if (!ctaBtn) {
-    logBG(`❌${tag} Size ${sizeLabel(preferred)} click didn't enable the Buy/Join button after 4 tries — the size button may use an unrecognised control. Check the page manually.`);
+    logBG(`❌${tag} No Buy/Join button found after selecting ${sizeLabel(preferred)} — the CTA may use an unrecognised control. Check the page manually.`);
     entryAttempted = false;
     return;
   }
