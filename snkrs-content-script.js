@@ -913,11 +913,16 @@ async function executeEntry(tag, preferred) {
   // size-grid-dropdown buttons sometimes need a second click to take, so retry
   // a few times — re-finding the button each time in case the DOM re-rendered.
   let ctaBtn = null;
+  let selectedBtn = sizeBtn;
   for (let attempt = 1; attempt <= 4 && !ctaBtn; attempt++) {
-    const btn = attempt === 1 ? sizeBtn : (findPreferredSizeButton() || sizeBtn);
-    humanClick(btn, `Size ${sizeLabel(preferred)}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
-    await wait(randInt(350, 700));
-    if (sizeSelectionRegistered(btn)) log(`Size selection registered (attempt ${attempt}).`);
+    const btn = attempt === 1 ? sizeBtn : (findPreferredSizeButton() || selectedBtn);
+    // Only (re)click if the size isn't already registered as selected —
+    // re-clicking an already-selected size can toggle it back OFF.
+    if (attempt === 1 || !sizeSelectionRegistered(btn)) {
+      humanClick(btn, `Size ${sizeLabel(preferred)}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
+      await wait(randInt(350, 700));
+    }
+    if (sizeSelectionRegistered(btn)) { selectedBtn = btn; log(`Size selection registered (attempt ${attempt}).`); }
     ctaBtn = await waitFor(findCTAButton, attempt === 1 ? 3500 : 2000);
     if (!ctaBtn && attempt < 4) log(`CTA not active yet after size click — retrying (${attempt}/4).`);
   }
@@ -940,12 +945,39 @@ async function executeEntry(tag, preferred) {
   const productTitle = document.title || location.href;
   sessionStorage.setItem(POLLER_PRODUCT_KEY, productTitle);
 
-  logBG(`🛒${tag} Clicking "${ctaText}" — entering draw…`);
-  humanClick(ctaBtn, ctaText);
+  const startUrl = location.href;
+  logBG(`🛒${tag} Size selected — clicking "${ctaText}" now…`);
 
-  await wait(2500);
+  // Click Buy/Join and confirm the page actually advanced. On the SNKRS launch
+  // page the button is easy to click but the app can swallow the first tap while
+  // it finishes wiring up the selected size — so click, check, and re-click up
+  // to 5x until we navigate to checkout (gs.nike.com), the status flips to
+  // ENTRY_IN, or the button is gone. Each attempt uses the native-click path.
+  let advanced = false;
+  for (let attempt = 1; attempt <= 5 && !advanced; attempt++) {
+    const btn = attempt === 1 ? ctaBtn : (findCTAButton() || ctaBtn);
+    if (!btn) { advanced = true; break; } // button vanished → page moved on
+    humanClick(btn, `${ctaText}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
+    // Give Nike a moment to navigate / open checkout / register the entry.
+    for (let i = 0; i < 12 && !advanced; i++) {
+      await wait(250);
+      const movedToCheckout = location.href !== startUrl || location.hostname.includes("gs.nike.com");
+      const st = detectPageStatus();
+      if (movedToCheckout || st === STATUS.ENTRY_IN || st === STATUS.PENDING || st === STATUS.PURCHASED) {
+        advanced = true;
+      }
+    }
+    if (!advanced && attempt < 5) logBG(`⚠️${tag} "${ctaText}" click didn't advance yet — re-clicking (${attempt}/5).`);
+  }
+
+  if (!advanced) {
+    logBG(`❌${tag} Selected ${sizeLabel(preferred)} but "${ctaText}" didn't advance after 5 clicks — the button may need a manual tap. Check the window.`);
+    showBanner(`⚠️ Size in, but "${ctaText}" didn't fire — tap it manually.`, "#e8590c");
+    return;
+  }
 
   if (location.hostname.includes("nike.com") && !location.hostname.includes("gs.nike.com")) {
+    await wait(1500);
     const postStatus = detectPageStatus();
     log(`Post-click status: ${postStatus}`);
 
@@ -953,19 +985,14 @@ async function executeEntry(tag, preferred) {
       logBG(`📋${tag} Entry confirmed! Draw entered for ${sizeLabel(preferred)}. Starting status poller…`);
       showBanner("✓ ENTRY SUBMITTED — monitoring for result", "#111");
       startStatusPoller();
-    } else if (postStatus === STATUS.ENTER) {
-      logBG(`⚠️${tag} CTA click may not have registered — retrying once…`);
-      await wait(500);
-      const retryBtn = findCTAButton();
-      if (retryBtn) humanClick(retryBtn, "CTA retry");
-      await wait(2000);
-      if (detectPageStatus() === STATUS.ENTRY_IN) {
-        logBG(`📋${tag} Entry confirmed on retry! Starting poller…`);
-        startStatusPoller();
-      }
+    } else if (postStatus === STATUS.PENDING) {
+      logBG(`⏳${tag} Entry pending / in line for ${sizeLabel(preferred)}.`);
+      showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE!", "#111");
     } else {
-      logBG(`⚠️${tag} Unexpected post-click status: ${postStatus} — check the page manually.`);
+      logBG(`ℹ️${tag} "${ctaText}" clicked (status: ${postStatus}). If a checkout/modal opened, the checkout flow takes over.`);
     }
+  } else {
+    logBG(`🧾${tag} Moved to checkout after "${ctaText}" — checkout flow takes over.`);
   }
 }
 
