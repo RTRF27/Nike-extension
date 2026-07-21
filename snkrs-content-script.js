@@ -944,10 +944,14 @@ async function runSNKRSFlow() {
     return;
   }
 
-  if (!preferred) {
+  if (!preferred && !isRandomSize()) {
     log("No size configured. Open the SNKRS Bot popup.");
     return;
   }
+
+  // Announce exactly what this profile is targeting, so a launched window that's
+  // on stale code (no random support) or the wrong size is obvious in the log.
+  logBG(`🎯${tag} Targeting ${isRandomSize() ? "🎲 RANDOM (any available size)" : sizeLabel(preferred)} · ext v${(chrome.runtime.getManifest && chrome.runtime.getManifest().version) || "?"}`);
 
   // Let the page render fully
   await wait(2000);

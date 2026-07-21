@@ -4230,7 +4230,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("singleRandomSize")) $("singleRandomSize").addEventListener("change", () => {
     singleRandomSize = $("singleRandomSize").checked;
     applyRandomSizeUI();
+    // Apply immediately so the toggle alone is enough — no need to also click
+    // "Randomly assign". Turning it ON sets every account to RANDOM; turning it
+    // OFF clears those RANDOM sizes so stale "RANDOM" rows don't linger.
+    if (accounts.length) {
+      accounts.forEach(acct => {
+        if (singleRandomSize) { acct.url = ""; acct.keyword = ""; acct.targets = []; acct.size = "RANDOM"; acct.sizeType = "random"; }
+        else if (isRandomVal(acct.size)) { acct.size = ""; acct.sizeType = "footwear"; }
+      });
+      renderAccounts();
+    }
     saveAll(true);
+    const m = $("assignMsg");
+    if (m) flashTemp(m, singleRandomSize
+      ? `🎲 Random ON — all ${accounts.length} account(s) will cop any size at the drop. Reload the extension in each launched profile, then relaunch.`
+      : "Random size off — set sizes below or re-enable random.", singleRandomSize ? "#1db954" : "#888", 7000);
   });
   $("addProductBtn").addEventListener("click", () => {
     products.push(newProduct());
