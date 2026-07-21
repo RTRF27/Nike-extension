@@ -630,7 +630,26 @@ function isButtonAvailable(btn) {
   const style = window.getComputedStyle(btn);
   if (parseFloat(style.opacity) < 0.4) return false;
   if (btn.className.includes("disabled") || btn.className.includes("soldOut")) return false;
+  // Nike's size-grid-dropdown variant marks the <li> with data-qa: only
+  // "size-available" is copable ("size-sold-out"/"size-unavailable" aren't).
+  const li = btn.closest("li[data-qa]");
+  if (li) {
+    const qa = li.getAttribute("data-qa") || "";
+    if (/sold-?out|unavailable|disabled/i.test(qa)) return false;
+  }
   return true;
+}
+
+// Did a size click actually "take"? True when the button (or its <li>) shows a
+// selected/checked marker — used to confirm the pick before we go for the CTA.
+function sizeSelectionRegistered(btn) {
+  if (!btn) return false;
+  if (btn.getAttribute("aria-checked") === "true") return true;
+  if (btn.getAttribute("aria-pressed") === "true") return true;
+  if (/\bselected\b/.test(btn.className || "")) return true;
+  const li = btn.closest("li");
+  if (li && /\bselected\b/.test(li.className || "")) return true;
+  return false;
 }
 
 function findPreferredSizeButton() {
@@ -742,18 +761,27 @@ function findCTAButton() {
 }
 
 // ── Human-like click ─────────────────────────────────────────
+// Fires a full pointer+mouse sequence AND a native .click(). Some Nike size
+// buttons (the "size-grid-dropdown" variant, e.g. <button value="4.5Y">) don't
+// react to synthetic mouse events alone — the native .click() is what actually
+// registers the selection there, so we always call both.
 function humanClick(el, label) {
   if (!el) { log(`humanClick: null for ${label}`); return; }
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   const rect = el.getBoundingClientRect();
   const x = rect.left + rect.width / 2;
   const y = rect.top + rect.height / 2;
-  for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
-    el.dispatchEvent(new MouseEvent(type, {
-      bubbles: true, cancelable: true, composed: true,
-      clientX: x, clientY: y, view: window,
-    }));
+  const opts = { bubbles: true, cancelable: true, composed: true, clientX: x, clientY: y, view: window };
+  try { el.focus({ preventScroll: true }); } catch (e) {}
+  try { el.dispatchEvent(new PointerEvent("pointerover", opts)); } catch (e) {}
+  try { el.dispatchEvent(new PointerEvent("pointerenter", opts)); } catch (e) {}
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    const Ctor = type.startsWith("pointer") && window.PointerEvent ? PointerEvent : MouseEvent;
+    try { el.dispatchEvent(new Ctor(type, opts)); } catch (e) {}
   }
+  // Native activation — the reliable path for React/Nike handlers that ignore
+  // synthetic-only clicks.
+  try { el.click(); } catch (e) {}
   log(`Clicked: ${label}`);
 }
 
@@ -879,14 +907,23 @@ async function executeEntry(tag, preferred) {
   }
 
   logBG(`✅${tag} Clicking size ${sizeLabel(preferred)}…`);
-  humanClick(sizeBtn, `Size ${sizeLabel(preferred)}`);
 
-  await wait(randInt(500, 900));
-
-  const ctaBtn = await waitFor(findCTAButton, 8000);
+  // Click the size, then confirm it actually registered (the <li> gets a
+  // "selected"/checked marker, or the CTA becomes clickable). Nike's
+  // size-grid-dropdown buttons sometimes need a second click to take, so retry
+  // a few times — re-finding the button each time in case the DOM re-rendered.
+  let ctaBtn = null;
+  for (let attempt = 1; attempt <= 4 && !ctaBtn; attempt++) {
+    const btn = attempt === 1 ? sizeBtn : (findPreferredSizeButton() || sizeBtn);
+    humanClick(btn, `Size ${sizeLabel(preferred)}${attempt > 1 ? ` (retry ${attempt})` : ""}`);
+    await wait(randInt(350, 700));
+    if (sizeSelectionRegistered(btn)) log(`Size selection registered (attempt ${attempt}).`);
+    ctaBtn = await waitFor(findCTAButton, attempt === 1 ? 3500 : 2000);
+    if (!ctaBtn && attempt < 4) log(`CTA not active yet after size click — retrying (${attempt}/4).`);
+  }
 
   if (!ctaBtn) {
-    logBG(`❌${tag} CTA button (Join Draw / Buy) did not activate after selecting size.`);
+    logBG(`❌${tag} Size ${sizeLabel(preferred)} click didn't enable the Buy/Join button after 4 tries — the size button may use an unrecognised control. Check the page manually.`);
     entryAttempted = false;
     return;
   }
