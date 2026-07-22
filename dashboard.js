@@ -43,11 +43,109 @@ function runSectionHooks(section) {
   else if (section === "drop") { renderSelfLearningForDrop(); }
 }
 
+// Setup is one long checklist — a 20-row account table shouldn't stand between
+// you and LAUNCH. So it gets a sticky jump bar plus fold-away steps.
+const SETUP_STEPS = [
+  { sec: "drop",      n: 1, label: "PRODUCT" },
+  { sec: "profiles",  n: 2, label: "ACCOUNTS" },
+  { sec: "cards",     n: 3, label: "CARDS" },
+  { sec: "timing",    n: 4, label: "TIMING" },
+  { sec: "preflight", n: 5, label: "PREFLIGHT" },
+  { sec: "launch",    n: 6, label: "LAUNCH" },
+];
+const COLLAPSE_KEY = "snkrsCollapsedSteps";
+let _collapsed = {};
+
+function applyCollapsed() {
+  SETUP_STEPS.forEach(s => {
+    const el = document.getElementById("page-" + s.sec);
+    if (el) el.classList.toggle("collapsed", !!_collapsed[s.sec]);
+  });
+  document.querySelectorAll("#subNav .step-chip").forEach(b => {
+    b.classList.toggle("folded", !!_collapsed[b.dataset.step]);
+  });
+  const btn = document.getElementById("stepFoldAll");
+  if (btn) {
+    const anyOpen = SETUP_STEPS.some(s => !_collapsed[s.sec]);
+    btn.textContent = anyOpen ? "⊟ Fold all" : "⊞ Unfold all";
+  }
+}
+function saveCollapsed() {
+  try { chrome.storage.local.set({ [COLLAPSE_KEY]: _collapsed }); } catch (e) {}
+}
+function toggleStep(sec, force) {
+  _collapsed[sec] = (force === undefined) ? !_collapsed[sec] : !!force;
+  applyCollapsed();
+  saveCollapsed();
+}
+// Jump to a step, unfolding it first so the click always reveals something.
+function jumpToStep(sec) {
+  if (_collapsed[sec]) { _collapsed[sec] = false; applyCollapsed(); saveCollapsed(); }
+  const el = document.getElementById("page-" + sec);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+async function loadCollapsed() {
+  try {
+    const d = await chrome.storage.local.get(COLLAPSE_KEY);
+    _collapsed = d[COLLAPSE_KEY] || {};
+  } catch (e) { _collapsed = {}; }
+  applyCollapsed();
+}
+// Clicking a step header folds it. Buttons inside the header still work.
+function wireStepHeaders() {
+  SETUP_STEPS.forEach(s => {
+    const sec = document.getElementById("page-" + s.sec);
+    if (!sec) return;
+    const head = sec.querySelector(".step-header");
+    if (!head || head.dataset.foldWired) return;
+    head.dataset.foldWired = "1";
+    head.classList.add("foldable");
+    const chev = document.createElement("span");
+    chev.className = "step-chev";
+    chev.title = "Fold / unfold this step";
+    head.appendChild(chev);
+    head.addEventListener("click", (e) => {
+      if (e.target.closest("button, input, select, a, textarea")) return;
+      toggleStep(s.sec);
+    });
+  });
+}
+
 function buildSubnav(group, active) {
   const nav = document.getElementById("subNav");
   if (!nav) return;
   const g = NAV_GROUPS[group];
   nav.innerHTML = "";
+  nav.classList.toggle("stepnav", group === "setup");
+
+  // Setup: sticky step-jump bar instead of an empty tab row.
+  if (group === "setup") {
+    nav.style.display = "flex";
+    SETUP_STEPS.forEach(s => {
+      const b = document.createElement("button");
+      b.className = "subtab step-chip";
+      b.dataset.step = s.sec;
+      b.title = `Jump to ${s.label}`;
+      b.innerHTML = `<span class="chip-n">${s.n}</span>${s.label}`;
+      b.addEventListener("click", () => jumpToStep(s.sec));
+      nav.appendChild(b);
+    });
+    const all = document.createElement("button");
+    all.id = "stepFoldAll";
+    all.className = "subtab step-foldall";
+    all.addEventListener("click", () => {
+      const anyOpen = SETUP_STEPS.some(s => !_collapsed[s.sec]);
+      SETUP_STEPS.forEach(s => { _collapsed[s.sec] = anyOpen; });
+      if (anyOpen) _collapsed.launch = false;   // keep the destination visible
+      applyCollapsed();
+      saveCollapsed();
+    });
+    nav.appendChild(all);
+    wireStepHeaders();
+    applyCollapsed();
+    return;
+  }
+
   if (!g || g.stack || g.sections.length <= 1) { nav.style.display = "none"; return; }
   nav.style.display = "flex";
   g.sections.forEach((sec, i) => {
@@ -4058,6 +4156,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   attachCardFormatters($("cpNumber"), $("cpExpiry"), $("cpCvv"));
 
   // 1) Load live status snapshots, history, and card profiles.
+  await loadCollapsed();          // remember which checklist steps were folded
   await loadHistory();
   await loadCardProfiles();
   const storedStatus = await chrome.storage.local.get(STATUS_KEY);

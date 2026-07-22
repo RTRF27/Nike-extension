@@ -143,11 +143,42 @@ async function main() {
     };
   });
   check("setup stacks all 6 steps (no sub-tabs)", setup.activeCount === 6, `active=${setup.activeCount}`);
-  check("setup sub-tab bar is hidden", setup.subtabsHidden, `display=${setup.subtabsHidden}`);
   check("steps are in drop-day order",
     setup.domOrder === "drop,profiles,cards,timing,preflight,launch", setup.domOrder);
   check("steps are numbered 1..6", setup.steps === "1,2,3,4,5,6", setup.steps);
   check("History page removed", setup.historyGone);
+
+  // 3b) Long-page ergonomics: a sticky jump bar + foldable steps, so a big
+  //     account table never buries the LAUNCH step.
+  const nav2 = await page.evaluate(() => {
+    const chips = Array.from(document.querySelectorAll("#subNav .step-chip"));
+    const before = document.getElementById("page-profiles").classList.contains("collapsed");
+    // Fold ACCOUNTS via its header, the way a user would.
+    document.querySelector("#page-profiles .step-header").click();
+    const folded = document.getElementById("page-profiles").classList.contains("collapsed");
+    // Jumping to a folded step must unfold it.
+    if (typeof jumpToStep === "function") jumpToStep("profiles");
+    const unfoldedByJump = !document.getElementById("page-profiles").classList.contains("collapsed");
+    // Fold-all must keep LAUNCH open — it's the destination.
+    document.getElementById("stepFoldAll").click();
+    const launchStillOpen = !document.getElementById("page-launch").classList.contains("collapsed");
+    const othersFolded = document.getElementById("page-profiles").classList.contains("collapsed");
+    document.getElementById("stepFoldAll").click();   // restore
+    return {
+      chips: chips.map(c => c.dataset.step).join(","),
+      hasFoldAll: !!document.getElementById("stepFoldAll"),
+      before, folded, unfoldedByJump, launchStillOpen, othersFolded,
+      chevrons: document.querySelectorAll("#page-profiles .step-chev").length,
+    };
+  });
+  check("setup shows a step jump bar for all 6 steps",
+    nav2.chips === "drop,profiles,cards,timing,preflight,launch", nav2.chips);
+  check("jump bar has a fold-all control", nav2.hasFoldAll);
+  check("clicking a step header folds it", nav2.before === false && nav2.folded === true);
+  check("jumping to a folded step unfolds it", nav2.unfoldedByJump);
+  check("fold-all folds the rest but KEEPS Launch open",
+    nav2.othersFolded && nav2.launchStillOpen);
+  check("step headers get a fold chevron", nav2.chevrons === 1, "chevrons=" + nav2.chevrons);
 
   // 4) Orders is reachable on its own sidebar item.
   await page.click('.side-item[data-nav="orders"]');

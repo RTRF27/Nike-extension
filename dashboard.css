@@ -1419,3 +1419,54 @@ select.inp { cursor: pointer; }
   position: absolute; top: 2px; left: 4px; font-size: 8px; letter-spacing: .5px;
   color: var(--muted); font-weight: 700; white-space: nowrap; pointer-events: none;
 }
+
+/* ── Setup checklist: sticky step-jump bar + foldable steps ──────── */
+.subnav.stepnav {
+  position: sticky; top: 0; z-index: 60;
+  background: linear-gradient(var(--bg) 78%, rgba(18,16,15,0));
+  padding: 14px 30px 12px; margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+.subtab.step-chip { display: inline-flex; align-items: center; gap: 7px; padding: 7px 13px; }
+.subtab.step-chip .chip-n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%; font-size: 11px; font-weight: 900;
+  background: linear-gradient(135deg, var(--orange), var(--purple)); color: #fff;
+}
+/* A folded step is dimmed in the bar so you can see the page shape at a glance */
+.subtab.step-chip.folded { opacity: .5; }
+.subtab.step-chip.folded .chip-n { background: var(--panel3); color: var(--muted); }
+.subtab.step-foldall { margin-left: auto; font-size: 12px; }
+
+/* Folding hides everything except the step header. !important because several
+   of these panels are shown/hidden by JS via inline style, which would
+   otherwise win over this rule and leak content out of a folded step. */
+.page-section.collapsed > *:not(.section-header) { display: none !important; }
+.page-section.collapsed { padding-bottom: 4px; }
+.step-header.foldable { cursor: pointer; user-select: none; }
+.step-header.foldable:hover .section-title { color: var(--purple2); }
+.step-chev {
+  margin-left: auto; flex: 0 0 auto; width: 20px; height: 20px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 13px; transition: transform .15s, color .15s;
+}
+.step-chev::before { content: "▾"; }
+.page-section.collapsed .step-chev { transform: rotate(-90deg); color: var(--purple2); }
+.step-header.foldable:hover .step-chev { color: var(--purple2); }
+
+/* A folded step must be a COMPACT ROW — the whole point is to get 6 steps on
+   one screen so LAUNCH is always one click away. */
+.page-section.collapsed { padding-top: 8px; margin-top: 6px; padding-bottom: 0; }
+.page-section.collapsed .section-header { margin-bottom: 0; padding: 4px 0; }
+.page-section.collapsed .section-title { font-size: 19px; }
+.page-section.collapsed .section-sub { display: none; }
+.page-section.collapsed .step-num { width: 24px; height: 24px; font-size: 14px; }
+.page-section.collapsed .step-header { gap: 10px; }
+/* Header action buttons (RUN PREFLIGHT etc.) belong to the open state only. */
+.page-section.collapsed .step-header button { display: none; }
+/* Make the fold affordance obvious rather than a faint arrow at the edge. */
+.step-chev {
+  width: 24px; height: 24px; border-radius: 6px;
+  background: var(--panel2); border: 1px solid var(--line); color: var(--grey);
+}
+.step-header.foldable:hover .step-chev { background: var(--panel3); color: #fff; border-color: var(--purple-dim); }
