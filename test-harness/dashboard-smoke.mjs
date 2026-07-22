@@ -119,39 +119,42 @@ async function main() {
     dashVisible: document.getElementById("page-home").classList.contains("active"),
     liveStacked: document.getElementById("page-live").classList.contains("active"),
   }));
-  check("sidebar has 4 groups", nav.items.join(",") === "dashboard,setup,history,settings", nav.items.join(","));
+  check("sidebar has 4 groups (History removed, Orders promoted)",
+    nav.items.join(",") === "dashboard,setup,orders,settings", nav.items.join(","));
   check("dashboard active on load", nav.active === "dashboard");
   check("dashboard stacks home + live", nav.dashVisible && nav.liveStacked);
 
-  // 3) Navigate to Setup → sub-tabs appear, preflight reachable.
+  // 3) Setup is ONE linear drop-day checklist: every step stacked, no sub-tabs.
   await page.click('.side-item[data-nav="setup"]');
-  await page.waitForTimeout(150);
-  const setup = await page.evaluate(() => ({
-    subtabs: Array.from(document.querySelectorAll("#subNav .subtab")).map(b => b.textContent),
-    dropVisible: document.getElementById("page-drop").classList.contains("active"),
-  }));
-  check("setup shows sub-tabs", setup.subtabs.length === 4, setup.subtabs.join(","));
-  check("setup opens Drop first", setup.dropVisible);
-
-  await page.click('#subNav .subtab:nth-child(4)'); // Preflight
-  await page.waitForTimeout(150);
-  const pf = await page.evaluate(() => document.getElementById("page-preflight").classList.contains("active"));
-  check("setup → Preflight sub-tab works", pf);
-
-  // 4) History → Insights render from seeded history.
-  await page.click('.side-item[data-nav="history"]');
-  await page.waitForTimeout(300);
-  const ins = await page.evaluate(() => {
-    const body = document.getElementById("insightsBody");
+  await page.waitForTimeout(200);
+  const setup = await page.evaluate(() => {
+    const ids = ["drop", "profiles", "cards", "timing", "preflight", "launch"];
+    const active = ids.filter(i => document.getElementById("page-" + i)?.classList.contains("active"));
+    // DOM order must match the checklist order, top to bottom.
+    const domOrder = Array.from(document.querySelectorAll(".page-section"))
+      .map(s => s.id.replace("page-", "")).filter(i => ids.includes(i));
+    const steps = Array.from(document.querySelectorAll(".page-section.active .step-num")).map(s => s.textContent);
     return {
-      hasTiles: !!body.querySelector(".insight-tile"),
-      text: (document.getElementById("insightsMsg")||{}).textContent || "",
-      sizes: body.querySelectorAll(".size-stat").length,
+      activeCount: active.length,
+      subtabsHidden: (document.getElementById("subNav")?.style.display || "") === "none",
+      domOrder: domOrder.join(","),
+      steps: steps.join(","),
+      historyGone: !document.getElementById("page-history"),
     };
   });
-  check("insights render tiles from history", ins.hasTiles);
-  check("insights mention learned drops", /Learned from 2 drops/.test(ins.text), ins.text);
-  check("insights show per-size hit rates", ins.sizes >= 1, "rows=" + ins.sizes);
+  check("setup stacks all 6 steps (no sub-tabs)", setup.activeCount === 6, `active=${setup.activeCount}`);
+  check("setup sub-tab bar is hidden", setup.subtabsHidden, `display=${setup.subtabsHidden}`);
+  check("steps are in drop-day order",
+    setup.domOrder === "drop,profiles,cards,timing,preflight,launch", setup.domOrder);
+  check("steps are numbered 1..6", setup.steps === "1,2,3,4,5,6", setup.steps);
+  check("History page removed", setup.historyGone);
+
+  // 4) Orders is reachable on its own sidebar item.
+  await page.click('.side-item[data-nav="orders"]');
+  await page.waitForTimeout(200);
+  const ordersOk = await page.evaluate(() =>
+    document.getElementById("page-orders").classList.contains("active"));
+  check("Orders reachable from sidebar", ordersOk);
 
   // 5) Settings reachable, no errors accumulated across navigation.
   await page.click('.side-item[data-nav="settings"]');
@@ -223,11 +226,20 @@ async function main() {
     document.getElementById("notifyEnabled").checked = true;
     document.getElementById("notifyWebhook").value = "https://discord.com/api/webhooks/x/y";
     // Ensure the editable event list is rendered, then tick per-event toggles.
-    if (typeof renderNotifyEvents === "function") renderNotifyEvents({});
+    if (typeof renderNotifyEvents === "function") renderNotifyEvents({}, {});
     if (document.getElementById("notifyEvt_win")) document.getElementById("notifyEvt_win").checked = true;
     if (document.getElementById("notifyEvt_submitting")) document.getElementById("notifyEvt_submitting").checked = false;
+    // Ping control: win pings, error is sent but silent.
+    const pWin = document.getElementById("notifyPing_win");
+    const pErr = document.getElementById("notifyPing_error");
+    if (pWin) { pWin.disabled = false; pWin.checked = true; }
+    if (pErr) { pErr.disabled = false; pErr.checked = false; }
+    // A muted event must not be able to ping.
+    const pSub = document.getElementById("notifyPing_submitting");
+    const subDisabled = pSub ? pSub.disabled : null;
     const cfg = buildNotifyConfig();
-    return { present: true, cfg, hasGrid: !!document.getElementById("notifyEventsGrid") };
+    return { present: true, cfg, hasGrid: !!document.getElementById("notifyEventsGrid"),
+             hasPingCol: !!pWin, subDisabled };
   });
   check("notifications card present", notify.present);
   check("editable per-event notification grid renders", notify.hasGrid);
@@ -235,13 +247,16 @@ async function main() {
     notify.cfg && notify.cfg.enabled && notify.cfg.webhook.includes("discord") &&
     notify.cfg.events.win === true &&
     notify.cfg.events.submitting === false);
+  check("per-event @here ping column renders", notify.hasPingCol);
+  check("ping config: win pings, error sends silently",
+    notify.cfg && notify.cfg.pings && notify.cfg.pings.win === true && notify.cfg.pings.error === false,
+    JSON.stringify(notify.cfg && notify.cfg.pings));
+  check("a muted event can never ping", notify.cfg.pings.submitting === false);
 
   // 8) Region tagging: preflight has region row + arm-by-region bar; the
   //    manual override wins over any detected region.
-  await page.click('.side-item[data-nav="setup"]');
-  await page.waitForTimeout(120);
-  await page.click('#subNav .subtab:nth-child(4)'); // Preflight
-  await page.waitForTimeout(150);
+  await page.click('.side-item[data-nav="setup"]');   // preflight is step 5, already stacked
+  await page.waitForTimeout(200);
   const region = await page.evaluate(() => {
     const hasBar = !!document.getElementById("preflightRegionBar");
     const hasOpenBtns = !!document.getElementById("openSGBtn") && !!document.getElementById("openMYBtn");

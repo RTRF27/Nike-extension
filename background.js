@@ -236,12 +236,27 @@ function notifyEnabledFor(code) {
   return (code in events) ? !!events[code] : !!NOTIFY_DEFAULT_ON[code];
 }
 
-async function postNotify(text) {
+// Should this event actually PING (@here) in Discord, or land silently?
+// Independent of whether the event notifies at all — you can be notified about
+// everything but only pinged for the few that need you to look up.
+const NOTIFY_PING_DEFAULT_ON = { win: true, carted: true, error: false, success: false, entered: false,
+  pending: false, closed: false, limit: false, submitting: false, payment: false, delivery: false,
+  checkout: false, polling: false, waiting: false, loss: false };
+
+function pingEnabledFor(code) {
+  if (!_notifyCfg) return false;
+  const pings = _notifyCfg.pings || {};
+  return (code in pings) ? !!pings[code] : !!NOTIFY_PING_DEFAULT_ON[code];
+}
+
+// `ping` prefixes @here for DISCORD ONLY — Telegram has no such mention and
+// would just render the literal text, so it always gets the clean message.
+async function postNotify(text, ping) {
   const jobs = [];
   if (_notifyCfg && _notifyCfg.webhook) {
     jobs.push(fetch(_notifyCfg.webhook, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: text }),
+      body: JSON.stringify({ content: (ping ? "@here " : "") + text }),
     }).catch(() => {}));
   }
   if (_notifyCfg && _notifyCfg.telegramToken && _notifyCfg.telegramChatId) {
@@ -294,7 +309,7 @@ function maybeNotifyOutcome(profileDir, tabId, code, message) {
   // Plain text (no markdown) so it reads cleanly in BOTH Discord and Telegram —
   // Telegram sends without parse_mode, and literal ** would show through.
   const text = `${meta.emoji} ${meta.label} — ${who}\n${detail}`;
-  postNotify(text);
+  postNotify(text, pingEnabledFor(code));
 }
 
 // ── Upcoming SNKRS drops (preview + new-release alerts) ───────

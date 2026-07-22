@@ -19,10 +19,13 @@
 // Four primary groups in the sidebar. Each maps to one or more of the existing
 // page-sections (so all their element IDs + wiring stay intact). Multi-section
 // groups get a secondary tab row; "stack" groups show their sections together.
+// SETUP is a single scrolling DROP-DAY CHECKLIST — sections render stacked in
+// the exact order you work through them on drop day, so there is nothing to
+// hunt for under a tab when the clock is running.
 const NAV_GROUPS = {
   dashboard: { sections: ["home", "live"], stack: true },
-  setup:     { sections: ["drop", "profiles", "cards", "preflight"], tabs: ["Drop", "Profiles", "Cards", "Preflight"] },
-  history:   { sections: ["history", "orders"], tabs: ["Insights & Replay", "Orders"] },
+  setup:     { sections: ["drop", "profiles", "cards", "timing", "preflight", "launch"], stack: true },
+  orders:    { sections: ["orders"], stack: true },
   settings:  { sections: ["settings"], stack: true },
 };
 const SECTION_TO_GROUP = {};
@@ -37,7 +40,6 @@ function runSectionHooks(section) {
   if (section === "home") { renderHomeStats(); if (!_upcomingLoaded) loadUpcoming(false); }
   else if (section === "live") { renderLivePage(); refreshPanicBanner(); }
   else if (section === "preflight") { renderPreflight(); refreshVersionBanner(); }
-  else if (section === "history") { renderDropReplay(); renderInsights(); }
   else if (section === "drop") { renderSelfLearningForDrop(); }
 }
 
@@ -1318,14 +1320,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
   if (changes[HISTORY_KEY]) {
     renderHistory(changes[HISTORY_KEY].newValue || []);
-    if (isVisible("history")) renderInsights();
     if (isVisible("drop")) renderSelfLearningForDrop();
   }
   if (changes[TIMELINE_KEY]) {
     // Merge the local mirror (this profile's own tabs) with polled cross-profile
     // entries so neither source clobbers the other.
     timelines = { ...timelines, ...(changes[TIMELINE_KEY].newValue || {}) };
-    if (isVisible("history")) renderDropReplay();
   }
   if (changes[CARDS_KEY]) {
     cardProfiles = changes[CARDS_KEY].newValue || [];
@@ -2158,95 +2158,6 @@ function fmtDelta(ms) {
   if (ms < 1000) return ms + "ms";
   return (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + "s";
 }
-function labelForKey(entry) {
-  const acct = accounts.find(a => a.profileDir === entry.profileDir);
-  return (acct && (acct.label || acct.profileDir)) || entry.profileDir || entry.label || entry.key;
-}
-
-// Outcome for a timeline: prefer resolved draw result, else terminal event.
-function replayOutcome(entry) {
-  const s = bestStatusFor(entry.profileDir);
-  if (s && ["win", "loss", "entered", "limit", "success"].includes(s.code)) {
-    const map = { win: ["🏆 WON", "var(--green)"], loss: ["😔 LOST", "var(--red)"],
-      entered: ["✓ ENTERED", "#4a90e2"], success: ["✓ ENTERED", "#4a90e2"], limit: ["⚠ LIMIT", "var(--orange)"] };
-    return map[s.code];
-  }
-  const events = entry.events || [];
-  const err = events.find(e => e.code === "error");
-  if (err) return [`✕ ${(err.extra && err.extra.reason) || "error"}`.replace(/_/g, " "), "var(--red)"];
-  if (eventTime(events, "submitted")) return ["🚀 SUBMITTED", "var(--purple2)"];
-  if (eventTime(events, "ready")) return ["● PRIMED", "var(--orange)"];
-  return ["… running", "var(--grey)"];
-}
-
-function renderDropReplay() {
-  const list = $("replayList");
-  if (!list) return;
-  list.innerHTML = "";
-  const entries = Object.values(timelines).filter(e => e && (e.events || []).length);
-  if (!entries.length) {
-    list.appendChild(el("p", { className: "hint" },
-      "No timeline yet. Launch a drop — each account's loaded→filled→submitted timing appears here."));
-    return;
-  }
-  // Most-recent drop first; within it, most-recently-updated account first.
-  entries.sort((a, b) => (b.updated || 0) - (a.updated || 0));
-
-  for (const entry of entries) {
-    const events = entry.events || [];
-    const t0 = eventTime(events, "started") || (events[0] && events[0].t);
-    const submittedT = eventTime(events, "submitted");
-    const submittedEv = events.find(e => e.code === "submitted");
-
-    const card = el("div", { className: "replay-card" });
-
-    const head = el("div", { className: "replay-head" });
-    head.appendChild(el("span", { className: "replay-name" }, labelForKey(entry)));
-    const [outText, outColor] = replayOutcome(entry);
-    const outEl = el("span", { className: "replay-outcome" }, outText);
-    outEl.style.color = outColor;
-    head.appendChild(outEl);
-    card.appendChild(head);
-
-    // Timeline dots for each reached stage, with elapsed-since-start under each.
-    const track = el("div", { className: "replay-track" });
-    for (const st of REPLAY_STAGES) {
-      const t = eventTime(events, st.code);
-      const dot = el("div", { className: "replay-step" + (t ? " on" : "") });
-      dot.appendChild(el("span", { className: "replay-dot" }));
-      dot.appendChild(el("span", { className: "replay-step-label" }, st.label));
-      dot.appendChild(el("span", { className: "replay-step-time" },
-        t && t0 ? "+" + fmtDelta(t - t0) : "—"));
-      track.appendChild(dot);
-    }
-    card.appendChild(track);
-
-    // Key metrics row: total prep, and go-live offset for the submit.
-    const metrics = el("div", { className: "replay-metrics" });
-    const loadedT = eventTime(events, "loaded");
-    const filledT = eventTime(events, "filled");
-    if (loadedT && filledT) metrics.appendChild(el("span", { className: "replay-metric" }, `fill ${fmtDelta(filledT - loadedT)}`));
-    if (filledT && submittedT) metrics.appendChild(el("span", { className: "replay-metric" }, `→submit ${fmtDelta(submittedT - filledT)}`));
-
-    // ms before/after go-live — the headline number.
-    let offsetMs = null;
-    if (submittedEv && submittedEv.extra && submittedEv.extra.offsetMs != null) offsetMs = submittedEv.extra.offsetMs;
-    else if (submittedT && entry.dropAt) offsetMs = submittedT - entry.dropAt;
-    if (offsetMs != null) {
-      const after = offsetMs >= 0;
-      const badge = el("span", { className: "replay-offset " + (after ? "after" : "before") },
-        `${after ? "+" : ""}${fmtDelta(Math.abs(offsetMs)).replace(/^/, offsetMs < 0 ? "-" : "")} vs go-live`);
-      // simpler text:
-      badge.textContent = `${after ? "+" : "−"}${fmtDelta(Math.abs(offsetMs))} vs go-live`;
-      metrics.appendChild(badge);
-    } else if (entry.dropAt && !submittedT) {
-      metrics.appendChild(el("span", { className: "replay-metric" }, "holding for drop…"));
-    }
-    card.appendChild(metrics);
-    list.appendChild(card);
-  }
-}
-
 // ══════════════════ LIVE STATUS DIAGNOSTIC ══════════════════
 // Answers "why don't I see the other profiles?" by walking the exact chain:
 // this profile → native host → shared status folder → per-profile version
@@ -2505,58 +2416,6 @@ async function loadInsights() {
   return _insights;
 }
 
-async function renderInsights() {
-  const body = $("insightsBody");
-  const msg = $("insightsMsg");
-  if (!body) return;
-  const ins = await loadInsights();
-  if (!ins.runs) {
-    body.innerHTML = "";
-    if (msg) msg.textContent = "The bot studies every drop it runs. Run a few and it learns your fill speed, timing margin, and which sizes hit.";
-    return;
-  }
-  if (msg) msg.textContent = `Learned from ${ins.runs} drop${ins.runs > 1 ? "s" : ""} · ${ins.entries} entr${ins.entries === 1 ? "y" : "ies"}.`;
-
-  const fmtMs = (ms) => ms == null ? "—" : ms < 1000 ? Math.round(ms) + "ms" : (ms / 1000).toFixed(1) + "s";
-  const tile = (val, label, cls) => `<div class="insight-tile ${cls || ""}"><div class="it-val">${val}</div><div class="it-label">${label}</div></div>`;
-
-  const offTxt = ins.avgOffset == null ? "—"
-    : (ins.avgOffset >= 0 ? "+" : "−") + fmtMs(Math.abs(ins.avgOffset));
-  const winPct = ins.winRate == null ? "—" : Math.round(ins.winRate * 100) + "%";
-
-  let html = `<div class="insight-tiles">` +
-    tile(winPct, "hit rate", ins.winRate >= 0.5 ? "good" : "") +
-    tile(fmtMs(ins.avgFill), "avg fill time") +
-    tile(offTxt, "avg submit vs go-live", ins.avgOffset != null && ins.avgOffset < 0 ? "warn" : "good") +
-    tile(ins.wins, "wins", ins.wins ? "good" : "") +
-    `</div>`;
-
-  // Recommendation line.
-  const recs = [];
-  if (ins.recommendedLeadSec != null) {
-    const curLead = _prepLeadSec || 30;
-    if (ins.recommendedLeadSec > curLead + 3)
-      recs.push(`⏱ Your slowest checkout filled in ${fmtMs(ins.maxFill)} — open accounts <strong>${ins.recommendedLeadSec}s</strong> early (currently ${curLead}s) so nothing's still filling at go-live.`);
-    else
-      recs.push(`✅ Fills complete well within your ${curLead}s open-lead — timing margin looks safe.`);
-  }
-  if (ins.avgOffset != null && ins.avgOffset < -150)
-    recs.push(`⚠ On average you submit <strong>${fmtMs(Math.abs(ins.avgOffset))} early</strong> — that risks LAUNCH_NOT_ACTIVE. The drop-time gate should hold to exactly go-live.`);
-  if (ins.topFailure && ins.topFailure[1] >= 2)
-    recs.push(`🔎 Most common issue: <strong>${escapeHtml(ins.topFailure[0])}</strong> (${ins.topFailure[1]}×).`);
-  if (recs.length) html += `<div class="insight-recs">` + recs.map(r => `<div class="insight-rec">${r}</div>`).join("") + `</div>`;
-
-  // Top sizes by hit rate.
-  if (ins.topSizes.length) {
-    const rows = ins.topSizes.slice(0, 6).map(s =>
-      `<div class="size-stat"><span class="ss-size">${escapeHtml(s.size)}</span>` +
-      `<span class="ss-bar"><span class="ss-fill" style="width:${Math.round(s.rate * 100)}%"></span></span>` +
-      `<span class="ss-rate">${Math.round(s.rate * 100)}% <span class="muted">(${s.win + s.entered}/${s.total})</span></span></div>`).join("");
-    html += `<div class="insight-sizes"><div class="insight-sub">HIT RATE BY SIZE</div>${rows}</div>`;
-  }
-  body.innerHTML = html;
-}
-
 // Drop-page self-learning: recommended open-lead (auto-tune) + size hints.
 async function renderSelfLearningForDrop() {
   const ins = await loadInsights();
@@ -2615,7 +2474,6 @@ function startTimelinePolling() {
     }
     if (changed) {
       persistTimelineToHistory();
-      if (isVisible("history")) renderDropReplay();
     }
   };
   tick();
@@ -3050,35 +2908,68 @@ const NOTIFY_EVENTS = [
   { code: "loss",       emoji: "💔", label: "Not selected",           def: false, ex: "Draw result: not selected" },
 ];
 
-// Build the editable checklist. Each row is one notification the bot can send.
-function renderNotifyEvents(events) {
+// Which events @here-PING in Discord by default. Separate from whether they
+// notify at all: you can log everything but only be pinged for what matters.
+// Must mirror NOTIFY_PING_DEFAULT_ON in background.js.
+const NOTIFY_PING_DEFAULTS = { win: true, carted: true };
+
+// Build the editable alert table: one row per event, with a SEND toggle (does it
+// reach Discord/Telegram at all) and a PING toggle (does it @here you).
+function renderNotifyEvents(events, pings) {
   const grid = $("notifyEventsGrid");
   if (!grid) return;
-  const ev = events || {};
+  const ev = events || {}, pg = pings || {};
   grid.innerHTML = "";
+
+  const head = el("div", { className: "alert-row alert-head" });
+  head.appendChild(el("span", { className: "ar-label" }, "EVENT"));
+  head.appendChild(el("span", { className: "ar-col" }, "SEND"));
+  head.appendChild(el("span", { className: "ar-col" }, "@here"));
+  grid.appendChild(head);
+
   NOTIFY_EVENTS.forEach(e => {
     const on = (e.code in ev) ? !!ev[e.code] : e.def;
-    const label = el("label", { className: "chk", title: e.ex });
-    const box = el("input", { type: "checkbox", id: "notifyEvt_" + e.code });
-    box.checked = on;
-    label.appendChild(box);
-    label.appendChild(document.createTextNode(` ${e.emoji} ${e.label}`));
-    grid.appendChild(label);
+    const ping = (e.code in pg) ? !!pg[e.code] : !!NOTIFY_PING_DEFAULTS[e.code];
+    const row = el("div", { className: "alert-row", title: e.ex });
+    row.appendChild(el("span", { className: "ar-label" }, `${e.emoji} ${e.label}`));
+
+    const sendWrap = el("span", { className: "ar-col" });
+    const sendBox = el("input", { type: "checkbox", id: "notifyEvt_" + e.code });
+    sendBox.checked = on;
+    sendWrap.appendChild(sendBox);
+    row.appendChild(sendWrap);
+
+    const pingWrap = el("span", { className: "ar-col" });
+    const pingBox = el("input", { type: "checkbox", id: "notifyPing_" + e.code });
+    pingBox.checked = ping;
+    pingBox.title = "Ping @here in Discord for this event";
+    // A ping only makes sense if the event is sent at all.
+    pingBox.disabled = !sendBox.checked;
+    sendBox.addEventListener("change", () => {
+      pingBox.disabled = !sendBox.checked;
+      if (!sendBox.checked) pingBox.checked = false;
+    });
+    pingWrap.appendChild(pingBox);
+    row.appendChild(pingWrap);
+
+    grid.appendChild(row);
   });
 }
 
 function buildNotifyConfig() {
-  const events = {};
+  const events = {}, pings = {};
   NOTIFY_EVENTS.forEach(e => {
     const box = $("notifyEvt_" + e.code);
+    const pbox = $("notifyPing_" + e.code);
     events[e.code] = box ? !!box.checked : e.def;
+    pings[e.code] = pbox ? (!!pbox.checked && events[e.code]) : !!NOTIFY_PING_DEFAULTS[e.code];
   });
   return {
     enabled: !!($("notifyEnabled") && $("notifyEnabled").checked),
     webhook: (($("notifyWebhook") && $("notifyWebhook").value) || "").trim(),
     telegramToken: (($("notifyTgToken") && $("notifyTgToken").value) || "").trim(),
     telegramChatId: (($("notifyTgChat") && $("notifyTgChat").value) || "").trim(),
-    events,
+    events, pings,
   };
 }
 
@@ -3920,7 +3811,7 @@ function applyConfigToUI(cfg) {
   if ($("notifyTgChat")) $("notifyTgChat").value = nt.telegramChatId || "";
   // Render the full editable list, each row reflecting the saved choice (or its
   // default when this is a fresh config with no notify block yet).
-  renderNotifyEvents(nEvt);
+  renderNotifyEvents(nEvt, nt.pings);
 
   singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
   singleRandomSize = !!drop.randomSize;
@@ -4191,13 +4082,6 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (localTl[TIMELINE_KEY]) timelines = localTl[TIMELINE_KEY];
   }
   startTimelinePolling();
-  if ($("clearReplayBtn")) $("clearReplayBtn").addEventListener("click", async () => {
-    timelines = {};
-    await chrome.storage.local.set({ [TIMELINE_KEY]: {} });
-    await hostSend({ cmd: "clearTimeline" });
-    renderDropReplay();
-    flashTemp($("replayMsg"), "Replay cleared.", "#888");
-  });
   // Carry the single-panel entry into PRODUCT 1 (so a typed/loaded URL is never
   // lost when switching to multi). Returns product[0] after seeding.
   function carrySingleIntoProducts() {
@@ -4418,11 +4302,25 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // ── Outcome notifications ──
   // Make sure the event checklist exists even before a config loads.
-  if ($("notifyEventsGrid") && !$("notifyEventsGrid").children.length) renderNotifyEvents({});
-  const setAllNotify = (on) => NOTIFY_EVENTS.forEach(e => { const b = $("notifyEvt_" + e.code); if (b) b.checked = on; });
+  if ($("notifyEventsGrid") && !$("notifyEventsGrid").children.length) renderNotifyEvents({}, {});
+  // Bulk controls act on the SEND column; pings follow (a muted event can't ping).
+  const setAllNotify = (on) => NOTIFY_EVENTS.forEach(e => {
+    const b = $("notifyEvt_" + e.code), p = $("notifyPing_" + e.code);
+    if (b) b.checked = on;
+    if (p) { p.disabled = !on; if (!on) p.checked = false; }
+  });
   if ($("notifyAllBtn"))  $("notifyAllBtn").addEventListener("click",  () => setAllNotify(true));
   if ($("notifyNoneBtn")) $("notifyNoneBtn").addEventListener("click", () => setAllNotify(false));
-  if ($("notifyResetBtn")) $("notifyResetBtn").addEventListener("click", () => NOTIFY_EVENTS.forEach(e => { const b = $("notifyEvt_" + e.code); if (b) b.checked = e.def; }));
+  if ($("notifyResetBtn")) $("notifyResetBtn").addEventListener("click", () => NOTIFY_EVENTS.forEach(e => {
+    const b = $("notifyEvt_" + e.code), p = $("notifyPing_" + e.code);
+    if (b) b.checked = e.def;
+    if (p) { p.checked = !!NOTIFY_PING_DEFAULTS[e.code] && e.def; p.disabled = !e.def; }
+  }));
+  // "Ping only on wins" — the common setup: log everything, ping for the win.
+  if ($("notifyPingWinsBtn")) $("notifyPingWinsBtn").addEventListener("click", () => NOTIFY_EVENTS.forEach(e => {
+    const p = $("notifyPing_" + e.code);
+    if (p && !p.disabled) p.checked = (e.code === "win" || e.code === "carted");
+  }));
   if ($("saveNotifyBtn")) {
     $("saveNotifyBtn").addEventListener("click", async () => {
       const msgEl = $("notifyTestMsg");
@@ -4468,10 +4366,4 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (msgEl) flashTemp(msgEl, hostOk ? `Reloaded ${discoveredProfiles.length} profile(s).` : "Launcher offline.", hostOk ? "var(--green)" : "var(--orange)");
     });
   }
-  $("clearHistoryBtn").addEventListener("click", async () => {
-    currentRunId = null;
-    await chrome.storage.local.remove(HISTORY_KEY);
-    renderHistory([]);
-    flashTemp($("statusMsg"), "History cleared.", "#888");
-  });
 });

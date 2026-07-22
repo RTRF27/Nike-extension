@@ -757,7 +757,7 @@
       // ── SUBMITTING: click + verify, bounded retries ───────────
       this._to(STATES.SUBMITTING);
       this._emit("submitting");
-      this._log(`@here 🚀${tag} Clicking SUBMIT ORDER…`);
+      this._log(`🚀${tag} Clicking SUBMIT ORDER…`);
       const loc = (doc.defaultView && doc.defaultView.location) || location;
       const startUrl = loc.href;
       const advanced = () => {

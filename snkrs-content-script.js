@@ -342,7 +342,7 @@ function checkStatusAfterReload() {
     case STATUS.PURCHASED:
       sessionStorage.removeItem(POLLER_ACTIVE_KEY);
       sessionStorage.removeItem(POLLER_COUNT_KEY);
-      logBG(`@here 🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
+      logBG(`🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
       showBanner("🎉🔥 GOT 'EM — YOU WON!!! CHECK YOUR EMAIL! 🔥🎉", "#1db954");
       launchConfetti();
       return true;
@@ -391,21 +391,6 @@ const APPAREL_SIZES = ["XXXL", "XXL", "XL", "L", "M", "S", "XS", "XXS"];
 function isApparelSizeText(text) {
   const t = (text || "").trim().toUpperCase();
   return APPAREL_SIZES.includes(t);
-}
-
-// Detects whether the current product is apparel (letter sizes) vs footwear
-// (numeric US sizes). Used so the bot knows which matcher to apply.
-function detectSizeType() {
-  const buttons = Array.from(document.querySelectorAll("button"));
-  let numeric = 0, apparel = 0;
-  for (const b of buttons) {
-    const t = (b.innerText || "").trim();
-    if (/^US\s+(M\s+)?[\d]/.test(t)) numeric++;
-    else if (isApparelSizeText(t)) apparel++;
-  }
-  if (apparel > 0 && apparel >= numeric) return "apparel";
-  if (numeric > 0) return "footwear";
-  return "unknown";
 }
 
 // Tells whether a button anywhere under `el` is a size button.
@@ -1045,7 +1030,7 @@ async function runSNKRSFlow() {
     return;
   }
   if (currentStatus === STATUS.PURCHASED) {
-    logBG(`@here 🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
+    logBG(`🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
     showBanner("🎉🔥 GOT 'EM — YOU WON!!! CHECK YOUR EMAIL! 🔥🎉", "#1db954");
     launchConfetti();
     return;
@@ -1081,7 +1066,7 @@ async function runSNKRSFlow() {
       // This is the dangerous case that previously caused a wrong-product buy.
       // Alert loudly and DO NOT enter anything.
       if (hasKeyword && !scope) {
-        logBG(`@here ❌${tag} Product "${kw}" was NOT found on this page — bot did NOT buy anything (correct). Check the SKU/keyword or the URL.`);
+        logBG(`❌${tag} Product "${kw}" was NOT found on this page — bot did NOT buy anything (correct). Check the SKU/keyword or the URL.`);
         showBanner(`❌ PRODUCT "${kw}" NOT FOUND — nothing bought. Check SKU/URL.`, "#e03131");
         // Keep watching in case the product card is still lazy-loading, but the
         // scope guard means we still won't buy a different product.
