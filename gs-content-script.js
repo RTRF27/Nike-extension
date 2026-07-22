@@ -167,15 +167,25 @@ startControlPoller();
 // The exact drop time this tab must hold SUBMIT until. Per-TAB value
 // (multi-product) from sessionStorage, else the shared per-profile setting.
 async function resolveDropAt() {
+  // Per-TAB value (multi-product), set by the bootstrap when it opens a
+  // PRE-BUILT direct checkout URL before the drop. That tab genuinely must hold.
   let dropAt = 0;
   try { dropAt = Number(sessionStorage.getItem("snkrsDropAt")) || 0; } catch (e) {}
-  if (!dropAt) {
-    try {
-      const sres = await chrome.storage.sync.get(SETTINGS_KEY);
-      dropAt = Number((sres[SETTINGS_KEY] || {}).dropAtMs) || 0;
-    } catch (e) {}
+  if (dropAt) return dropAt;
+
+  let s = {};
+  try { s = (await chrome.storage.sync.get(SETTINGS_KEY))[SETTINGS_KEY] || {}; } catch (e) {}
+
+  // ORGANIC path (no pre-built direct checkout URL — always the case for random
+  // size): the only way this tab reached gs.nike.com is by clicking Buy on the
+  // LIVE launch page, so the drop is already open. A hold here could only cost
+  // us the race — e.g. if the local clock lags the configured drop time. No gate.
+  if (!((s.checkoutUrl || "").trim())) {
+    log("Organic checkout (no pre-built URL) — drop is already open, SUBMIT gate disabled.");
+    return 0;
   }
-  return dropAt;
+
+  return Number(s.dropAtMs) || 0;
 }
 
 // ── Confirmation watcher ──────────────────────────────────────
