@@ -278,6 +278,77 @@ async function main() {
     await page.close();
   }
 
+  // ── 4d. LAUNCH DAY: random size means checkout is only reached AFTER the
+  //        drop opens, so LEO must add NO submit timer at all; and DAN must
+  //        spread profiles apart so they never submit in unison. ─────────────
+  console.log("[machine] launch day: LEO no-hold after open + DAN stagger");
+  {
+    // Runs the machine with the drop ALREADY OPEN (the organic/random-size case)
+    // and reports whether it ever entered the HOLDING state.
+    const runOpenDrop = (page, leo, jitterMs) => page.evaluate(async ({ leo, jitterMs }) => {
+      const C = window.CheckoutCore;
+      const dropAt = Date.now() - 30000; // drop opened 30s ago
+      const seen = []; let submittedAt = 0;
+      const t0 = Date.now();
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {},
+        emit: (e) => { seen.push(e.code); if (e.code === "submitted" && !submittedAt) submittedAt = Date.now(); },
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false,
+        isLeoMode: () => leo, getSubmitJitterMs: () => jitterMs, getDropAt: () => dropAt,
+      });
+      const r = await machine.run();
+      return { submitted: r.submitted, held: seen.includes("holding"), totalMs: (submittedAt || Date.now()) - t0 };
+    }, { leo, jitterMs });
+
+    // LEO, drop already open, jitter configured → must NOT hold and must NOT
+    // apply any human delay (LEO ignores jitter entirely).
+    const pLeo = await openFixture(context, fixture("saved-card.html"));
+    const leoOpen = await runOpenDrop(pLeo, true, 6000);
+    await pLeo.close();
+    eq("LAUNCH/LEO: submitted", leoOpen.submitted, true);
+    check("LAUNCH/LEO: NO submit timer — never entered HOLDING", leoOpen.held === false);
+    check("LAUNCH/LEO: ignores DAN human delay (no 6s jitter applied)",
+      leoOpen.totalMs < 5000, `${leoOpen.totalMs}ms`);
+
+    // DAN, drop already open → no hold either, but a human delay IS applied.
+    const pDan = await openFixture(context, fixture("saved-card.html"));
+    const danOpen = await runOpenDrop(pDan, false, 4000);
+    await pDan.close();
+    eq("LAUNCH/DAN: submitted", danOpen.submitted, true);
+    check("LAUNCH/DAN: no drop-hold once the drop is open", danOpen.held === false);
+
+    // DAN stagger: several profiles must NOT all submit at the same moment.
+    const delays = [];
+    for (let i = 0; i < 5; i++) {
+      const p = await openFixture(context, fixture("saved-card.html"));
+      const out = await p.evaluate(async () => {
+        const C = window.CheckoutCore;
+        const dropAt = Date.now() - 30000;
+        let firstSubmit = 0; const t0 = Date.now();
+        const machine = new C.CheckoutMachine({
+          doc: document, log: () => {}, dbg: () => {},
+          emit: (e) => { if (e.code === "submitted" && !firstSubmit) firstSubmit = Date.now(); },
+          tag: () => "", getCardFill: () => Promise.resolve(false),
+          cancelCardFill: () => {}, isTestMode: () => false,
+          isLeoMode: () => false, getSubmitJitterMs: () => 8000, getDropAt: () => dropAt,
+        });
+        await machine.run();
+        return firstSubmit - t0;
+      });
+      await p.close();
+      delays.push(out);
+    }
+    const spread = Math.max(...delays) - Math.min(...delays);
+    const distinct = new Set(delays.map(d => Math.round(d / 250))).size;
+    check("LAUNCH/DAN: profiles are staggered, not simultaneous (spread > 500ms)",
+      spread > 500, `delays ${delays.join(",")}ms spread=${spread}ms`);
+    check("LAUNCH/DAN: delays are randomly distributed (>=3 distinct buckets)",
+      distinct >= 3, `distinct=${distinct} of ${delays.length}`);
+    check("LAUNCH/DAN: every delay stays inside the configured window",
+      delays.every(d => d >= 0 && d < 8000 + 6000), `delays ${delays.join(",")}ms`);
+  }
+
   // ── 5. PANIC: abort raised while holding must cancel SUBMIT ──
   console.log("[machine] panic abort during HOLDING cancels SUBMIT");
   {
