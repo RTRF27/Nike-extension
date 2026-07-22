@@ -1406,3 +1406,6 @@ select.inp { cursor: pointer; }
 .adv-block > summary::before { content: "▸ "; color: var(--purple); }
 .adv-block[open] > summary::before { content: "▾ "; }
 .adv-block[open] { padding-bottom: 14px; }
+
+/* Tiler: overflow warning in the layout preview caption */
+.tile-warn { color: var(--orange); font-weight: 700; }

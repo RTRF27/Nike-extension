@@ -514,6 +514,13 @@
               </div>
               <label class="switch"><input type="checkbox" id="tileWindowsToggle" checked><span class="track"></span></label>
             </div>
+            <div class="toggle" style="margin-bottom:10px;">
+              <div>
+                <div class="t-label">📐 Auto-fit to screen (no overlap)</div>
+                <div class="t-hint">Sizes every window so they all fit side by side with nothing hidden behind anything. Turn OFF to set the size yourself.</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="tileAutoFit" checked><span class="track"></span></label>
+            </div>
             <div id="tileSizeRow" style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
               <label class="lbl" style="margin:0;">Window size</label>
               <input type="number" id="tileW" class="inp" value="500" min="200" max="2000" step="10" style="width:80px;">
@@ -526,7 +533,7 @@
               <span class="muted">See how the windows will tile on your screen.</span>
             </div>
             <div id="tilePreview" class="tile-preview" style="display:none;"></div>
-            <p class="hint" style="margin:0 0 12px;">Chrome won't render a window narrower than ~500px — smaller widths get clamped, but positions still tile.</p>
+            <p class="hint" style="margin:0 0 12px;">Chrome won't render a window narrower than <strong>500px</strong>, so that's the hard limit on columns. Windows that can't fit are left at Chrome's default size rather than stacked invisibly on top of each other.</p>
 
             <div class="toggle" style="margin-bottom:6px;">
               <div>

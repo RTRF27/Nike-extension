@@ -3069,6 +3069,7 @@ function buildConfig() {
       flipLeadMin: $("flipLeadMin") ? (parseFloat($("flipLeadMin").value) || 7) : 7,
       // Small tiled launch windows instead of full-size.
       tileWindows: !!($("tileWindowsToggle") && $("tileWindowsToggle").checked),
+      tileAutoFit: tileAutoFit(),
       tileW: $("tileW") ? (parseInt($("tileW").value, 10) || 500) : 500,
       tileH: $("tileH") ? (parseInt($("tileH").value, 10) || 680) : 680,
       // Load the unpacked extension at launch (for profiles that keep losing it).
@@ -3390,54 +3391,132 @@ function renderTilePreview() {
     return;
   }
   box.style.display = "block";
-  const availW = (window.screen && screen.availWidth)  || 1920;
-  const availH = (window.screen && screen.availHeight) || 1040;
-  // Chrome clamps window width to ~500px, so preview at the size it'll REALLY be.
-  const reqW = tileWH().w, reqH = tileWH().h;
-  const effW = Math.max(500, reqW);
+  const { availW, availH } = tileScreen();
   const scale = 320 / availW;
-  const n = Math.max(1, accounts.filter(a => a.profileDir).length || 6);
+  const n = launchableCount();
+  const fit = tileFitFor(n);
+  const per = fit.cols * fit.rows;
   box.style.width  = Math.round(availW * scale) + "px";
   box.style.height = Math.round(availH * scale) + "px";
-  const cols = Math.max(1, Math.floor(availW / effW));
-  const rows = Math.max(1, Math.floor(availH / reqH));
-  const per = cols * rows;
+
   let html = "";
-  for (let i = 0; i < n; i++) {
-    const idx = ((i % per) + per) % per;
-    const x = (idx % cols) * effW;
-    const y = Math.floor(idx / cols) * reqH;
-    const overlap = i >= per;   // grid full → this one stacks on an earlier tile
-    html += `<div class="tile-cell${overlap ? " overlap" : ""}" style="left:${x * scale}px; top:${y * scale}px; width:${effW * scale}px; height:${reqH * scale}px;">${i + 1}</div>`;
+  const shown = Math.min(n, per);
+  for (let i = 0; i < shown; i++) {
+    const x = (i % fit.cols) * fit.w;
+    const y = Math.floor(i / fit.cols) * fit.h;
+    html += `<div class="tile-cell" style="left:${x * scale}px; top:${y * scale}px; ` +
+            `width:${fit.w * scale}px; height:${fit.h * scale}px;">${i + 1}</div>`;
   }
-  const clampNote = reqW < 500 ? ` · width clamped 500` : "";
-  box.innerHTML = html +
-    `<div class="tile-cap">${n} window(s) · ${effW}×${reqH}px · ${cols}×${rows} grid${clampNote}</div>`;
+
+  const grid = `${fit.cols}×${fit.rows}`;
+  let cap;
+  if (n > per) {
+    cap = `<span class="tile-warn">⚠ ${n} profiles — only ${per} fit without overlapping.</span> ` +
+          `The other ${n - per} open at Chrome's default size (not tiled). ` +
+          `Screen fits <strong>${fit.capacity}</strong> max at ${CHROME_MIN_W}×${TILE_MIN_H}px.`;
+  } else {
+    cap = `✓ ${n} window(s), no overlap · ${fit.w}×${fit.h}px · ${grid} grid` +
+          `${fit.auto ? " (auto-fit)" : ""} · screen fits <strong>${fit.capacity}</strong> max`;
+  }
+  box.innerHTML = html + `<div class="tile-cap">${cap}</div>`;
 }
+// Chrome REFUSES to render a window narrower than ~500px. Tiling must space
+// columns by this floor — spacing them by a smaller requested width makes the
+// windows overlap even though the coordinates look correct.
+const CHROME_MIN_W = 500;
+// Below this a Nike launch page shows essentially nothing useful.
+const TILE_MIN_H = 260;
+
+function tileScreen() {
+  return {
+    availW: (window.screen && screen.availWidth)  || 1920,
+    availH: (window.screen && screen.availHeight) || 1040,
+  };
+}
+function tileAutoFit() {
+  const el = $("tileAutoFit");
+  return el ? !!el.checked : true;   // default: fit everything on screen
+}
+// Auto-fit computes the size itself, so the manual W/H inputs go read-only
+// (still visible, so you can see what it chose).
+function syncTileModeUI() {
+  const on = tileWindowsEnabled();
+  const auto = tileAutoFit();
+  const row = $("tileSizeRow");
+  if (row) row.style.opacity = (on && !auto) ? "" : "0.45";
+  ["tileW", "tileH"].forEach(id => { const e = $(id); if (e) e.disabled = !on || auto; });
+  const af = $("tileAutoFit");
+  if (af) af.disabled = !on;
+}
+function launchableCount() {
+  return Math.max(1, (accounts || []).filter(a => a && a.profileDir).length);
+}
+
 function tileWH() {
   const w = $("tileW") ? parseInt($("tileW").value, 10) : NaN;
   const h = $("tileH") ? parseInt($("tileH").value, 10) : NaN;
-  // Chrome won't render a window narrower than ~500px, but we allow smaller
-  // requests (it clamps) so the position tiling still works for tight grids.
   return {
     w: isNaN(w) ? 500 : Math.max(200, Math.min(2000, w)),
     h: isNaN(h) ? 680 : Math.max(200, Math.min(2000, h)),
   };
 }
-// The tile geometry {w,h,x,y} for the index-th launched profile, or null when
-// tiling is off. Shared by the launcher hint AND the in-page resize (below).
-function tileGeomFor(index) {
-  if (!tileWindowsEnabled()) return null;
-  const { w, h } = tileWH();
-  const availW = (window.screen && screen.availWidth)  || 1920;
-  const availH = (window.screen && screen.availHeight) || 1040;
+
+// Work out a grid that shows `n` windows with NO OVERLAP.
+// Returns { cols, rows, w, h, capacity, fits, auto }.
+//   capacity = the most windows this screen can ever show without overlapping
+//   fits     = whether all `n` actually fit
+function tileFitFor(n) {
+  const { availW, availH } = tileScreen();
+  const maxCols = Math.max(1, Math.floor(availW / CHROME_MIN_W));
+  const maxRows = Math.max(1, Math.floor(availH / TILE_MIN_H));
+  const capacity = maxCols * maxRows;
+  const want = Math.max(1, n || 1);
+
+  if (tileAutoFit()) {
+    // Spread across COLUMNS first, so windows stay as TALL as possible. A Nike
+    // launch page is vertical — you need height to see the size grid and the
+    // Buy button. 3 windows → 512×816 (tall), never 1536×272 (same area, but
+    // the buying tools would be off-screen).
+    const cols = Math.max(1, Math.min(maxCols, want));
+    const rows = Math.ceil(want / cols);
+    if (rows <= maxRows) {
+      const w = Math.floor(availW / cols);
+      const h = Math.floor(availH / rows);
+      if (w >= CHROME_MIN_W && h >= TILE_MIN_H) {
+        return { cols, rows, w, h, capacity, fits: true, auto: true };
+      }
+    }
+    // More windows than the screen can hold — use the densest legal grid and
+    // report fits:false so the UI can say how many actually make it.
+    return {
+      cols: maxCols, rows: maxRows,
+      w: Math.floor(availW / maxCols), h: Math.floor(availH / maxRows),
+      capacity, fits: false, auto: true,
+    };
+  }
+
+  // Manual size: honour it, but clamp the width to Chrome's floor so the
+  // spacing matches what really renders (otherwise: guaranteed overlap).
+  const req = tileWH();
+  const w = Math.max(CHROME_MIN_W, req.w);
+  const h = Math.max(120, req.h);
   const cols = Math.max(1, Math.floor(availW / w));
   const rows = Math.max(1, Math.floor(availH / h));
-  const per  = cols * rows;
-  const idx  = ((index % per) + per) % per;   // wrap; overlaps once the grid fills
-  const x = (idx % cols) * w;
-  const y = Math.floor(idx / cols) * h;
-  return { w, h, x, y };
+  return { cols, rows, w, h, capacity: cols * rows, fits: want <= cols * rows, auto: false };
+}
+
+// The tile geometry {w,h,x,y} for the index-th launched window, or null when
+// tiling is off / this window doesn't fit. Shared by the launcher hint AND the
+// in-page resize. Returning null for overflow is deliberate: a Chrome-default
+// window is recoverable, an exactly-stacked one is invisible.
+function tileGeomFor(index, total) {
+  if (!tileWindowsEnabled()) return null;
+  const fit = tileFitFor(total || launchableCount());
+  const per = fit.cols * fit.rows;
+  if (index >= per) return null;             // never wrap into an overlap
+  const x = (index % fit.cols) * fit.w;
+  const y = Math.floor(index / fit.cols) * fit.h;
+  return { w: fit.w, h: fit.h, x, y };
 }
 // Return { size, position } for the native-host launch hint (best-effort — only
 // honoured when Chrome cold-starts the profile's process).
@@ -3772,6 +3851,8 @@ function applyConfigToUI(cfg) {
   if ($("warmFlipToggle")) $("warmFlipToggle").checked = opts.warmFlipEnabled ?? true;
   if ($("flipLeadMin")) $("flipLeadMin").value = opts.flipLeadMin ?? 7;
   if ($("tileWindowsToggle")) $("tileWindowsToggle").checked = opts.tileWindows ?? true;
+  if ($("tileAutoFit")) $("tileAutoFit").checked = opts.tileAutoFit ?? true;
+  syncTileModeUI();
   if ($("loadExtToggle")) $("loadExtToggle").checked = !!opts.loadExtOnLaunch;
   // Checkout method (default organic — the safe/"entry valid" path).
   const direct = opts.checkoutMode === "direct";
@@ -4035,7 +4116,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     else { if ($("tileWindowsToggle") && !$("tileWindowsToggle").checked) $("tileWindowsToggle").checked = true; renderTilePreview(); }
   });
   ["tileW", "tileH"].forEach(id => { const el = $(id); if (el) el.addEventListener("input", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); }); });
-  if ($("tileWindowsToggle")) $("tileWindowsToggle").addEventListener("change", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); });
+  if ($("tileWindowsToggle")) $("tileWindowsToggle").addEventListener("change", () => { syncTileModeUI(); if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); });
+  if ($("tileAutoFit")) $("tileAutoFit").addEventListener("change", () => {
+    syncTileModeUI();
+    // Auto-fit owns the size — show what it picked so the numbers aren't stale.
+    if (tileAutoFit()) {
+      const fit = tileFitFor(launchableCount());
+      if ($("tileW")) $("tileW").value = fit.w;
+      if ($("tileH")) $("tileH").value = fit.h;
+    }
+    renderTilePreview();
+  });
   $("scheduleEnabled").addEventListener("change", () => {
     // Toggle only controls AUTO-OPEN; the drop time + countdown stay either way.
     startCountdown();

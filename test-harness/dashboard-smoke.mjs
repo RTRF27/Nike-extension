@@ -311,6 +311,54 @@ async function main() {
   });
   check("tile preview renders a cell per profile", preview.ok && preview.cells === 4 && preview.shown, "cells=" + preview.cells);
 
+  // 9b) Tiler invariant: for ANY profile count, tiled windows must never overlap
+  //     and must never exceed the screen. Windows past capacity get no geometry
+  //     (Chrome default) rather than being stacked invisibly on top of others.
+  const tiling = await page.evaluate(() => {
+    if (typeof tileFitFor !== "function") return { ok: false };
+    if (document.getElementById("tileWindowsToggle")) document.getElementById("tileWindowsToggle").checked = true;
+    if (document.getElementById("tileAutoFit")) document.getElementById("tileAutoFit").checked = true;
+    const scr = tileScreen();
+    const bad = [];
+    let capacity = 0, tallestAt3 = null;
+    for (let n = 1; n <= 12; n++) {
+      accounts = Array.from({ length: n }, (_, i) => ({ id: "p" + i, profileDir: "Profile " + i }));
+      const fit = tileFitFor(n);
+      capacity = fit.capacity;
+      const rects = [];
+      for (let i = 0; i < n; i++) {
+        const g = tileGeomFor(i, n);
+        if (!g) continue;                       // didn't fit → untiled, that's fine
+        if (g.x < 0 || g.y < 0 || g.x + g.w > scr.availW || g.y + g.h > scr.availH)
+          bad.push(`n=${n} i=${i} offscreen`);
+        if (g.w < 500) bad.push(`n=${n} i=${i} width ${g.w} < Chrome min`);
+        rects.push(g);
+      }
+      // Pairwise overlap check.
+      for (let a = 0; a < rects.length; a++) {
+        for (let b = a + 1; b < rects.length; b++) {
+          const A = rects[a], B = rects[b];
+          const hit = A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y;
+          if (hit) bad.push(`n=${n}: ${a} overlaps ${b}`);
+        }
+      }
+    }
+    // Screen-independent: with no more profiles than columns, every window must
+    // be a SINGLE row (full height) — never split into short rows.
+    const maxCols = Math.max(1, Math.floor(scr.availW / 500));
+    accounts = Array.from({ length: maxCols }, (_, i) => ({ id: "q" + i, profileDir: "P" + i }));
+    tallestAt3 = tileFitFor(maxCols);
+    return { ok: true, bad, capacity, tallestAt3, maxCols, scr };
+  });
+  check("tiler: no two windows EVER overlap (1..12 profiles)",
+    tiling.ok && tiling.bad.length === 0, (tiling.bad || []).slice(0, 3).join(" | "));
+  check("tiler: reports a real capacity for this screen",
+    tiling.ok && tiling.capacity >= 1, "capacity=" + tiling.capacity);
+  check("tiler: prefers TALL windows (profiles ≤ columns → 1 full-height row)",
+    tiling.ok && tiling.tallestAt3 && tiling.tallestAt3.rows === 1 &&
+      tiling.tallestAt3.h === Math.floor(tiling.scr.availH),
+    tiling.tallestAt3 && `${tiling.maxCols} profiles → ${tiling.tallestAt3.cols}x${tiling.tallestAt3.rows} ${tiling.tallestAt3.w}x${tiling.tallestAt3.h}`);
+
   // 11) Checkout method: organic routes launches to the launch PAGE, not the gs link.
   const cm = await page.evaluate(() => {
     if (!document.getElementById("checkoutModeOrganic")) return { ok: false };
