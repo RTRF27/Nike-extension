@@ -3391,32 +3391,43 @@ function renderTilePreview() {
     return;
   }
   box.style.display = "block";
-  const { availW, availH } = tileScreen();
-  const scale = 320 / availW;
   const n = launchableCount();
-  const fit = tileFitFor(n);
-  const per = fit.cols * fit.rows;
-  box.style.width  = Math.round(availW * scale) + "px";
-  box.style.height = Math.round(availH * scale) + "px";
+  const plan = tilePlan(n);
+
+  // Scale the whole VIRTUAL DESKTOP (all monitors) into the preview box.
+  const minX = Math.min(...plan.displays.map(d => d.x));
+  const minY = Math.min(...plan.displays.map(d => d.y));
+  const maxX = Math.max(...plan.displays.map(d => d.x + d.w));
+  const maxY = Math.max(...plan.displays.map(d => d.y + d.h));
+  const vw = Math.max(1, maxX - minX), vh = Math.max(1, maxY - minY);
+  const scale = 340 / vw;
+  box.style.width  = Math.round(vw * scale) + "px";
+  box.style.height = Math.round(vh * scale) + "px";
 
   let html = "";
-  const shown = Math.min(n, per);
-  for (let i = 0; i < shown; i++) {
-    const x = (i % fit.cols) * fit.w;
-    const y = Math.floor(i / fit.cols) * fit.h;
-    html += `<div class="tile-cell" style="left:${x * scale}px; top:${y * scale}px; ` +
-            `width:${fit.w * scale}px; height:${fit.h * scale}px;">${i + 1}</div>`;
-  }
+  // Monitor outlines first, so windows sit visibly inside their screen.
+  plan.displays.forEach((d, i) => {
+    html += `<div class="tile-screen" style="left:${(d.x - minX) * scale}px; top:${(d.y - minY) * scale}px; ` +
+            `width:${d.w * scale}px; height:${d.h * scale}px;">` +
+            `<span class="tile-screen-tag">${d.primary ? "MAIN" : "MONITOR " + (i + 1)} · ${d.w}×${d.h}</span></div>`;
+  });
+  plan.rects.forEach((r, i) => {
+    html += `<div class="tile-cell" style="left:${(r.x - minX) * scale}px; top:${(r.y - minY) * scale}px; ` +
+            `width:${r.w * scale}px; height:${r.h * scale}px;">${i + 1}</div>`;
+  });
 
-  const grid = `${fit.cols}×${fit.rows}`;
+  const per = plan.rects.length;
+  const layout = plan.grids.filter(g => g.count > 0)
+    .map(g => `${g.count}× ${g.w}×${g.h} (${g.cols}×${g.rows})`).join(" · ");
+  const mon = plan.monitors > 1 ? ` across ${plan.monitors} monitors` : "";
   let cap;
   if (n > per) {
-    cap = `<span class="tile-warn">⚠ ${n} profiles — only ${per} fit without overlapping.</span> ` +
+    cap = `<span class="tile-warn">⚠ ${n} profiles — only ${per} fit without overlapping${mon}.</span> ` +
           `The other ${n - per} open at Chrome's default size (not tiled). ` +
-          `Screen fits <strong>${fit.capacity}</strong> max at ${CHROME_MIN_W}×${TILE_MIN_H}px.`;
+          `Max is <strong>${plan.capacity}</strong>${mon}.`;
   } else {
-    cap = `✓ ${n} window(s), no overlap · ${fit.w}×${fit.h}px · ${grid} grid` +
-          `${fit.auto ? " (auto-fit)" : ""} · screen fits <strong>${fit.capacity}</strong> max`;
+    cap = `✓ ${n} window(s), no overlap${mon} · ${layout}` +
+          `${plan.auto ? " · auto-fit" : ""} · max <strong>${plan.capacity}</strong>`;
   }
   box.innerHTML = html + `<div class="tile-cap">${cap}</div>`;
 }
@@ -3432,6 +3443,28 @@ function tileScreen() {
     availW: (window.screen && screen.availWidth)  || 1920,
     availH: (window.screen && screen.availHeight) || 1040,
   };
+}
+
+// ── Multi-monitor ─────────────────────────────────────────────
+// `screen` only ever describes the display the dashboard is on, so it can't
+// reach a second monitor. The native host enumerates EVERY screen's working
+// area in Chrome's virtual-desktop coordinates, letting x/y address any of them.
+let _displays = null;
+async function refreshDisplays() {
+  try {
+    const r = await hostSend({ cmd: "getDisplays" });
+    if (r && r.ok && Array.isArray(r.displays) && r.displays.length) {
+      _displays = r.displays;
+      return _displays;
+    }
+  } catch (e) {}
+  _displays = null;                     // host offline / older host → single screen
+  return null;
+}
+function tileDisplays() {
+  if (_displays && _displays.length) return _displays;
+  const s = tileScreen();
+  return [{ id: 0, x: 0, y: 0, w: s.availW, h: s.availH, primary: true }];
 }
 function tileAutoFit() {
   const el = $("tileAutoFit");
@@ -3461,62 +3494,80 @@ function tileWH() {
   };
 }
 
-// Work out a grid that shows `n` windows with NO OVERLAP.
-// Returns { cols, rows, w, h, capacity, fits, auto }.
-//   capacity = the most windows this screen can ever show without overlapping
-//   fits     = whether all `n` actually fit
-function tileFitFor(n) {
-  const { availW, availH } = tileScreen();
-  const maxCols = Math.max(1, Math.floor(availW / CHROME_MIN_W));
-  const maxRows = Math.max(1, Math.floor(availH / TILE_MIN_H));
-  const capacity = maxCols * maxRows;
+// Lay `n` windows out across EVERY monitor with no overlap anywhere.
+// Returns { rects, grids, capacity, fits, auto, monitors }:
+//   rects    = absolute {x,y,w,h,display} per window, in virtual-desktop coords
+//   grids    = per-monitor {display, cols, rows, w, h, count}
+//   capacity = the most windows all monitors can show without overlapping
+function tilePlan(n) {
+  const displays = tileDisplays();
   const want = Math.max(1, n || 1);
+  const manual = !tileAutoFit();
+  const req = tileWH();
+  const mw = Math.max(CHROME_MIN_W, req.w);
+  const mh = Math.max(120, req.h);
 
-  if (tileAutoFit()) {
-    // Spread across COLUMNS first, so windows stay as TALL as possible. A Nike
-    // launch page is vertical — you need height to see the size grid and the
-    // Buy button. 3 windows → 512×816 (tall), never 1536×272 (same area, but
-    // the buying tools would be off-screen).
-    const cols = Math.max(1, Math.min(maxCols, want));
-    const rows = Math.ceil(want / cols);
-    if (rows <= maxRows) {
-      const w = Math.floor(availW / cols);
-      const h = Math.floor(availH / rows);
-      if (w >= CHROME_MIN_W && h >= TILE_MIN_H) {
-        return { cols, rows, w, h, capacity, fits: true, auto: true };
-      }
+  const caps = displays.map(d => {
+    const maxCols = Math.max(1, Math.floor(d.w / (manual ? mw : CHROME_MIN_W)));
+    const maxRows = Math.max(1, Math.floor(d.h / (manual ? mh : TILE_MIN_H)));
+    return { d, maxCols, maxRows, capacity: maxCols * maxRows, share: 0 };
+  });
+  const capacity = caps.reduce((a, c) => a + c.capacity, 0);
+
+  // Balance across monitors round-robin rather than filling monitor 1 first —
+  // spreading keeps every window as large as possible.
+  let left = Math.min(want, capacity);
+  while (left > 0) {
+    let placed = false;
+    for (const c of caps) {
+      if (left <= 0) break;
+      if (c.share < c.capacity) { c.share++; left--; placed = true; }
     }
-    // More windows than the screen can hold — use the densest legal grid and
-    // report fits:false so the UI can say how many actually make it.
-    return {
-      cols: maxCols, rows: maxRows,
-      w: Math.floor(availW / maxCols), h: Math.floor(availH / maxRows),
-      capacity, fits: false, auto: true,
-    };
+    if (!placed) break;
   }
 
-  // Manual size: honour it, but clamp the width to Chrome's floor so the
-  // spacing matches what really renders (otherwise: guaranteed overlap).
-  const req = tileWH();
-  const w = Math.max(CHROME_MIN_W, req.w);
-  const h = Math.max(120, req.h);
-  const cols = Math.max(1, Math.floor(availW / w));
-  const rows = Math.max(1, Math.floor(availH / h));
-  return { cols, rows, w, h, capacity: cols * rows, fits: want <= cols * rows, auto: false };
+  const rects = [], grids = [];
+  for (const c of caps) {
+    if (!c.share) { grids.push({ display: c.d, cols: 0, rows: 0, w: 0, h: 0, count: 0 }); continue; }
+    // Spread across COLUMNS first so windows stay as TALL as possible — a Nike
+    // launch page is vertical, and a short window hides the size grid + Buy.
+    const cols = Math.max(1, Math.min(c.maxCols, c.share));
+    const rows = Math.ceil(c.share / cols);
+    const w = manual ? mw : Math.floor(c.d.w / cols);
+    const h = manual ? mh : Math.floor(c.d.h / rows);
+    for (let i = 0; i < c.share; i++) {
+      rects.push({
+        w, h,
+        x: c.d.x + (i % cols) * w,
+        y: c.d.y + Math.floor(i / cols) * h,
+        display: c.d.id,
+      });
+    }
+    grids.push({ display: c.d, cols, rows, w, h, count: c.share });
+  }
+  return { rects, grids, capacity, fits: want <= capacity, auto: !manual, monitors: displays.length, displays };
+}
+
+// Summary of the plan (first monitor that has windows), kept for the preview
+// caption and tests. `capacity` spans ALL monitors.
+function tileFitFor(n) {
+  const plan = tilePlan(n);
+  const g = plan.grids.find(x => x.count > 0) || plan.grids[0] ||
+            { cols: 1, rows: 1, w: 0, h: 0 };
+  return {
+    cols: g.cols || 1, rows: g.rows || 1, w: g.w, h: g.h,
+    capacity: plan.capacity, fits: plan.fits, auto: plan.auto,
+    monitors: plan.monitors,
+  };
 }
 
 // The tile geometry {w,h,x,y} for the index-th launched window, or null when
-// tiling is off / this window doesn't fit. Shared by the launcher hint AND the
-// in-page resize. Returning null for overflow is deliberate: a Chrome-default
-// window is recoverable, an exactly-stacked one is invisible.
+// tiling is off / this window doesn't fit anywhere. Returning null for overflow
+// is deliberate: a Chrome-default window is recoverable, a stacked one is not.
 function tileGeomFor(index, total) {
   if (!tileWindowsEnabled()) return null;
-  const fit = tileFitFor(total || launchableCount());
-  const per = fit.cols * fit.rows;
-  if (index >= per) return null;             // never wrap into an overlap
-  const x = (index % fit.cols) * fit.w;
-  const y = Math.floor(index / fit.cols) * fit.h;
-  return { w: fit.w, h: fit.h, x, y };
+  const plan = tilePlan(total || launchableCount());
+  return plan.rects[index] || null;
 }
 // Return { size, position } for the native-host launch hint (best-effort — only
 // honoured when Chrome cold-starts the profile's process).
@@ -3640,6 +3691,9 @@ async function launchAll() {
     flashTemp($("statusMsg"), "No accounts have a Chrome profile set yet.", "#fa5400");
     return;
   }
+  // Know the real monitor layout BEFORE computing tile positions, so windows
+  // can spread onto a second screen instead of piling onto the primary.
+  if (tileWindowsEnabled()) await refreshDisplays();
 
   // Preflight gate: if a recent run flagged any profile BLOCKED (red), warn
   // before launching so you don't watch it fail live. Confirm-to-proceed only
@@ -4110,10 +4164,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("selectNoneBtn")) $("selectNoneBtn").addEventListener("click", () => selectAllProfiles(false));
   if ($("openSelectedBtn")) $("openSelectedBtn").addEventListener("click", launchSelected);
   // Tile-layout preview: toggle on the button, live-update as the size changes.
-  if ($("tilePreviewBtn")) $("tilePreviewBtn").addEventListener("click", () => {
+  if ($("tilePreviewBtn")) $("tilePreviewBtn").addEventListener("click", async () => {
     const box = $("tilePreview");
     if (box && box.style.display === "block" && tileWindowsEnabled()) { box.style.display = "none"; }
-    else { if ($("tileWindowsToggle") && !$("tileWindowsToggle").checked) $("tileWindowsToggle").checked = true; renderTilePreview(); }
+    else {
+      if ($("tileWindowsToggle") && !$("tileWindowsToggle").checked) $("tileWindowsToggle").checked = true;
+      await refreshDisplays();          // pick up a monitor plugged in since load
+      renderTilePreview();
+    }
   });
   ["tileW", "tileH"].forEach(id => { const el = $(id); if (el) el.addEventListener("input", () => { if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); }); });
   if ($("tileWindowsToggle")) $("tileWindowsToggle").addEventListener("change", () => { syncTileModeUI(); if ($("tilePreview") && $("tilePreview").style.display === "block") renderTilePreview(); });

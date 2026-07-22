@@ -26,9 +26,9 @@
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
-const { spawn } = require("child_process");
+const { spawn, execSync } = require("child_process");
 
-const HOST_VERSION = "1.3.0";
+const HOST_VERSION = "1.4.0";
 
 // ── Shared config file ("the generic file") ───────────────────
 const CONFIG_DIR = path.join(os.homedir(), ".snkrs-bot");
@@ -306,6 +306,45 @@ function extensionDirValid(dir) {
 // chrome invocation opens them all as tabs in that profile — reliably, even
 // when the profile's Chrome is cold-starting (separate rapid launches can race
 // and get dropped, which is why multi-product only opened one tab).
+// ── Monitor enumeration (multi-display window tiling) ─────────
+// The dashboard's own `screen` object only ever describes the display it is on,
+// so it cannot tile across a second monitor. Ask the OS for EVERY screen's
+// WORKING AREA (taskbar/dock excluded) in the same virtual-desktop coordinate
+// space Chrome uses for --window-position, so x/y can address any monitor.
+// Cached per host process — displays don't change mid-drop.
+let _displaysCache = null;
+function listDisplays() {
+  if (_displaysCache) return _displaysCache;
+  try {
+    if (process.platform === "win32") {
+      const ps =
+        "Add-Type -AssemblyName System.Windows.Forms; " +
+        "[System.Windows.Forms.Screen]::AllScreens | ForEach-Object { " +
+        "'{0},{1},{2},{3},{4}' -f $_.WorkingArea.X,$_.WorkingArea.Y," +
+        "$_.WorkingArea.Width,$_.WorkingArea.Height,$_.Primary }";
+      const out = execSync(
+        `powershell -NoProfile -NonInteractive -Command "${ps}"`,
+        { encoding: "utf8", timeout: 8000, windowsHide: true }
+      );
+      const screens = out.trim().split(/\r?\n/).filter(Boolean).map((line, i) => {
+        const [x, y, w, h, primary] = line.trim().split(",");
+        return {
+          id: i, x: parseInt(x, 10) || 0, y: parseInt(y, 10) || 0,
+          w: parseInt(w, 10) || 0, h: parseInt(h, 10) || 0,
+          primary: String(primary).trim().toLowerCase() === "true",
+        };
+      }).filter(s => s.w > 100 && s.h > 100);
+      if (screens.length) {
+        // Primary first, then left-to-right — matches how people read a desk.
+        screens.sort((a, b) => (b.primary - a.primary) || (a.x - b.x) || (a.y - b.y));
+        _displaysCache = screens;
+        return screens;
+      }
+    }
+  } catch (e) { /* fall through — dashboard uses its own screen instead */ }
+  return null;
+}
+
 function launchProfile(profileDir, urlOrUrls, extensionDir, windowOpt, loadExt) {
   const chrome = findChrome();
   if (!chrome) {
@@ -407,6 +446,8 @@ function handle(msg) {
       }
     case "launch":
       return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir, msg.window, !!msg.loadExtension);
+    case "getDisplays":
+      return { ok: true, displays: listDisplays() };
     case "getOrders":
       return { ok: true, orders: readOrders() };
     case "setOrders":

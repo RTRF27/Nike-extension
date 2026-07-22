@@ -354,6 +354,50 @@ async function main() {
     tiling.ok && tiling.bad.length === 0, (tiling.bad || []).slice(0, 3).join(" | "));
   check("tiler: reports a real capacity for this screen",
     tiling.ok && tiling.capacity >= 1, "capacity=" + tiling.capacity);
+  // 9c) Multi-monitor spreading: with a second screen to the right, capacity
+  //     must grow, windows must land on BOTH screens, stay inside their own
+  //     monitor's bounds, and still never overlap in virtual-desktop space.
+  const multi = await page.evaluate(() => {
+    if (typeof tilePlan !== "function") return { ok: false };
+    if (document.getElementById("tileWindowsToggle")) document.getElementById("tileWindowsToggle").checked = true;
+    if (document.getElementById("tileAutoFit")) document.getElementById("tileAutoFit").checked = true;
+    const SCREENS = [
+      { id: 0, x: 0,    y: 0, w: 1536, h: 816, primary: true },
+      { id: 1, x: 1536, y: 0, w: 1920, h: 1040, primary: false },  // second monitor, right
+    ];
+    _displays = SCREENS;
+    const one = (() => { _displays = [SCREENS[0]]; return tilePlan(1).capacity; })();
+    _displays = SCREENS;
+    const plan = tilePlan(12);
+    const bad = [];
+    // Every window must sit fully inside exactly one monitor.
+    for (const r of plan.rects) {
+      const home = SCREENS.find(s => r.x >= s.x && r.y >= s.y &&
+        r.x + r.w <= s.x + s.w && r.y + r.h <= s.y + s.h);
+      if (!home) bad.push(`rect ${r.x},${r.y} ${r.w}x${r.h} not inside any monitor`);
+      if (r.w < 500) bad.push(`width ${r.w} < Chrome min`);
+    }
+    // Pairwise overlap in virtual-desktop coordinates.
+    for (let a = 0; a < plan.rects.length; a++) {
+      for (let b = a + 1; b < plan.rects.length; b++) {
+        const A = plan.rects[a], B = plan.rects[b];
+        if (A.x < B.x + B.w && A.x + A.w > B.x && A.y < B.y + B.h && A.y + A.h > B.y)
+          bad.push(`${a} overlaps ${b}`);
+      }
+    }
+    const used = new Set(plan.rects.map(r => r.display));
+    _displays = null;   // restore
+    return { ok: true, bad, capacity: plan.capacity, singleCap: one,
+             placed: plan.rects.length, screensUsed: used.size, monitors: plan.monitors };
+  });
+  check("multi-monitor: capacity grows with a second screen",
+    multi.ok && multi.capacity > multi.singleCap, `${multi.singleCap} → ${multi.capacity}`);
+  check("multi-monitor: windows land on BOTH screens",
+    multi.ok && multi.screensUsed === 2, "screens used=" + multi.screensUsed);
+  check("multi-monitor: every window inside a monitor, none overlap",
+    multi.ok && multi.bad.length === 0, (multi.bad || []).slice(0, 3).join(" | "));
+  check("multi-monitor: all 12 profiles placed", multi.ok && multi.placed === 12, "placed=" + multi.placed);
+
   check("tiler: prefers TALL windows (profiles ≤ columns → 1 full-height row)",
     tiling.ok && tiling.tallestAt3 && tiling.tallestAt3.rows === 1 &&
       tiling.tallestAt3.h === Math.floor(tiling.scr.availH),

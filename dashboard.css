@@ -1409,3 +1409,13 @@ select.inp { cursor: pointer; }
 
 /* Tiler: overflow warning in the layout preview caption */
 .tile-warn { color: var(--orange); font-weight: 700; }
+
+/* Tiler preview: monitor outlines (multi-display) */
+.tile-screen {
+  position: absolute; border: 1px solid var(--line); border-radius: 3px;
+  background: rgba(255,255,255,.02); box-sizing: border-box;
+}
+.tile-screen-tag {
+  position: absolute; top: 2px; left: 4px; font-size: 8px; letter-spacing: .5px;
+  color: var(--muted); font-weight: 700; white-space: nowrap; pointer-events: none;
+}
