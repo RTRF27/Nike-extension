@@ -116,15 +116,117 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
-// ── Banners ──────────────────────────────────────────────────
+// ── Status stepper ───────────────────────────────────────────
+// A single top bar that shows the WHOLE journey the bot will take, start to
+// end, with the current stage lit up — so at a glance you know what it's doing
+// and what size it will cop. On failure the whole bar goes red and says a human
+// needs to step in. Rendered identically by the launch-page and checkout
+// scripts so the story is continuous as the tab moves nike.com → gs.nike.com.
+const FLOW_STEPS = [
+  { key: "waiting",  icon: "⏳", label: "Waiting for drop" },
+  { key: "size",     icon: "👟", label: "Selecting size" },
+  { key: "checkout", icon: "💳", label: "Checkout" },
+  { key: "submit",   icon: "🚀", label: "Submitting" },
+  { key: "done",     icon: "✅", label: "Done" },
+];
+function nowClock() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+// The exact size the bot committed to (matters most in RANDOM mode — this is how
+// you learn WHICH size it grabbed). Persisted so the gs.nike.com checkout page
+// (a different origin, same tab) can show the same size in its status bar.
+let _pickedSize = "";
+function recordPickedSize(label) {
+  _pickedSize = label || "";
+  try { chrome.storage.local.set({ snkrsPickedSize: _pickedSize }); } catch (e) {}
+}
+// renderStatusBar(activeKey, { size, time, label, errorMsg, tone })
+//   tone: "win" | "pending" (colours the DONE step), else default.
+function renderStatusBar(activeKey, opts) {
+  opts = opts || {};
+  let bar = document.getElementById("snkrs-status-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "snkrs-status-bar";
+    bar.style.cssText =
+      "position:fixed;top:0;left:0;width:100%;z-index:2147483647;box-sizing:border-box;" +
+      "display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 14px;" +
+      "background:#111;border-bottom:2px solid #000;font:700 13px/1.25 sans-serif;" +
+      "letter-spacing:.4px;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);";
+    document.body.appendChild(bar);
+  }
+  // Remove the old plain banner if it's still around.
+  const old = document.getElementById("snkrs-bot-banner");
+  if (old) old.remove();
+
+  if (activeKey === "error") {
+    bar.style.background = "#c1121f";
+    bar.style.borderBottomColor = "#7a0b13";
+    bar.innerHTML = "";
+    const msg = document.createElement("div");
+    msg.style.cssText = "width:100%;text-align:center;font-size:14px;letter-spacing:.6px;";
+    msg.textContent = `❌ ERROR — NEEDS MANUAL${opts.errorMsg ? ": " + opts.errorMsg : ""}`;
+    bar.appendChild(msg);
+    return;
+  }
+
+  // Re-apply the full flex layout each render — a prior showBanner() call may
+  // have left the element as a centred single-line bar.
+  bar.style.cssText =
+    "position:fixed;top:0;left:0;width:100%;z-index:2147483647;box-sizing:border-box;" +
+    "display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 14px;" +
+    "background:#111;border-bottom:2px solid #000;font:700 13px/1.25 sans-serif;" +
+    "letter-spacing:.4px;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);";
+  const activeIdx = FLOW_STEPS.findIndex(s => s.key === activeKey);
+  bar.innerHTML = "";
+  FLOW_STEPS.forEach((step, i) => {
+    const state = i < activeIdx ? "done" : (i === activeIdx ? "active" : "todo");
+    let text = step.label;
+    if (step.key === "size" && opts.size) text = opts.size;
+    if (step.key === "done") {
+      if (opts.label) text = opts.label;
+      if (opts.time) text += " · " + opts.time;
+    } else if (opts.label && i === activeIdx) {
+      text = opts.label;
+    }
+    let bg = "transparent", color = "#6b7280", icon = step.icon, weight = "600";
+    if (state === "done") { color = "#1db954"; icon = "✓"; }
+    if (state === "active") {
+      color = "#fff"; weight = "800";
+      bg = step.key === "done"
+        ? (opts.tone === "win" ? "#1db954" : opts.tone === "pending" ? "#2563eb" : "#1db954")
+        : "#fa5400";
+    }
+    const seg = document.createElement("span");
+    seg.style.cssText =
+      `display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;` +
+      `background:${bg};color:${color};font-weight:${weight};` +
+      (state === "active" ? "box-shadow:0 0 0 1px rgba(255,255,255,.15);" : "");
+    seg.textContent = `${icon} ${text}`;
+    bar.appendChild(seg);
+    if (i < FLOW_STEPS.length - 1) {
+      const arr = document.createElement("span");
+      arr.textContent = "→";
+      arr.style.cssText = "color:#4b5563;font-weight:700;";
+      bar.appendChild(arr);
+    }
+  });
+}
+
+// Back-compat shim: existing showBanner(text,...) calls still work, but route
+// through the stepper where the text maps cleanly to a stage. Free-text callers
+// (test mode, etc.) fall back to a simple coloured bar on the same element.
 function showBanner(text, bg = "#fa5400", color = "#fff") {
-  const existing = document.getElementById("snkrs-bot-banner");
-  if (existing) existing.remove();
-  const div = document.createElement("div");
-  div.id = "snkrs-bot-banner";
-  div.style.cssText = `position:fixed;top:0;left:0;width:100%;padding:10px 16px;background:${bg};color:${color};z-index:999999;font-weight:700;text-align:center;font-size:13px;letter-spacing:1px;font-family:sans-serif;`;
+  const bar = document.getElementById("snkrs-status-bar");
+  const div = bar || document.createElement("div");
+  if (!bar) { div.id = "snkrs-status-bar"; document.body.appendChild(div); }
+  div.style.cssText =
+    `position:fixed;top:0;left:0;width:100%;z-index:2147483647;box-sizing:border-box;` +
+    `padding:9px 16px;background:${bg};color:${color};font:700 13px/1.3 sans-serif;` +
+    `text-align:center;letter-spacing:1px;box-shadow:0 2px 10px rgba(0,0,0,.4);`;
   div.textContent = text;
-  document.body.appendChild(div);
 }
 
 // ── Page checks ───────────────────────────────────────────────
@@ -343,7 +445,7 @@ function checkStatusAfterReload() {
       sessionStorage.removeItem(POLLER_ACTIVE_KEY);
       sessionStorage.removeItem(POLLER_COUNT_KEY);
       logBG(`🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
-      showBanner("🎉🔥 GOT 'EM — YOU WON!!! CHECK YOUR EMAIL! 🔥🎉", "#1db954");
+      renderStatusBar("done", { time: nowClock(), label: "GOT 'EM 🎉", tone: "win" });
       launchConfetti();
       return true;
 
@@ -357,7 +459,7 @@ function checkStatusAfterReload() {
       sessionStorage.removeItem(POLLER_ACTIVE_KEY);
       sessionStorage.removeItem(POLLER_COUNT_KEY);
       logBG(`⏳${tag} Entry is PENDING / You\'re in line — stopping bot. Nike is processing.`);
-      showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+      renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
       return true;
 
     case STATUS.ENTRY_IN:
@@ -825,7 +927,7 @@ function startDropWatcher(tag, preferred) {
   if (dropWatcherActive) return;
   dropWatcherActive = true;
 
-  showBanner("⏳ BOT READY — WATCHING FOR DROP TO GO LIVE…", "#111");
+  renderStatusBar("waiting", { size: sizeLabel(preferred) });
   logBG(`⏳${tag} Drop not live yet. Bot is watching and will auto-enter when sizes appear.`);
 
   const observer = new MutationObserver(async () => {
@@ -843,7 +945,7 @@ function startDropWatcher(tag, preferred) {
       if (sizeBtn) {
         observer.disconnect();
         logBG(`🚀${tag} DROP IS LIVE! size ${sizeLabel(preferred)} found — entering now!`);
-        showBanner("🚀 DROP LIVE — ENTERING NOW!", "#fa5400");
+        renderStatusBar("size", { size: sizeLabel(preferred) });
         await executeEntry(tag, preferred);
       }
       return;
@@ -853,7 +955,7 @@ function startDropWatcher(tag, preferred) {
     if (status === STATUS.ENTRY_IN || status === STATUS.PURCHASED || status === STATUS.PENDING) {
       observer.disconnect();
       if (status === STATUS.PENDING) {
-        showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+        renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
         logBG(`⏳${tag} Pending detected — bot stopped watching.`);
       }
     }
@@ -873,7 +975,7 @@ function startDropWatcher(tag, preferred) {
         observer.disconnect();
         if (entryAttempted) return; // double-check before firing
         logBG(`🚀${tag} DROP IS LIVE (poll)! size ${sizeLabel(preferred)} found — entering now!`);
-        showBanner("🚀 DROP LIVE — ENTERING NOW!", "#fa5400");
+        renderStatusBar("size", { size: sizeLabel(preferred) });
         await executeEntry(tag, preferred);
       } else if (!_stuckDiagShown && !isRandomSize()) {
         // Drop is LIVE and sizes exist, but none match the fixed target — the
@@ -886,7 +988,7 @@ function startDropWatcher(tag, preferred) {
         if (avail.length) {
           _stuckDiagShown = true;
           logBG(`⚠️${tag} Drop is LIVE but size ${sizeLabel(preferred)} isn't among the ${avail.length} available: ${avail.join(", ")}. Turn on 🎲 Random size (or pick one of these) — the bot will keep watching meanwhile.`);
-          showBanner(`⚠️ ${sizeLabel(preferred)} not offered — available: ${avail.slice(0, 8).join(", ")}. Use 🎲 Random.`, "#e8590c");
+          renderStatusBar("error", { errorMsg: `${sizeLabel(preferred)} not offered — use 🎲 Random or pick a size manually` });
         }
       }
     }
@@ -895,7 +997,7 @@ function startDropWatcher(tag, preferred) {
       clearInterval(pollId);
       observer.disconnect();
       if (status === STATUS.PENDING) {
-        showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+        renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
         logBG(`⏳${tag} Pending detected in poll — bot stopped.`);
       }
     }
@@ -908,7 +1010,7 @@ async function executeEntry(tag, preferred) {
   // PANIC: dashboard raised a global abort — do not enter this draw.
   if (await checkAbort()) {
     logBG(`🛑${tag} PANIC — abort raised. NOT entering the draw.`);
-    showBanner("🛑 ABORTED — bot stopped, no entry made.", "#e03131");
+    showBanner("🛑 STOPPED — no entry made.", "#374151");
     return;
   }
   entryAttempted = true;
@@ -924,11 +1026,17 @@ async function executeEntry(tag, preferred) {
     return;
   }
 
+  // Now we know the REAL size — even in random mode. Show it at the top and
+  // record it so the checkout page's status bar can show it too.
+  const pickedLabel = (sizeBtn.innerText || "").trim() || sizeLabel(preferred);
+  recordPickedSize(pickedLabel);
+  renderStatusBar("size", { size: pickedLabel });
+
   // v1.0 proven flow: ONE size click, wait, ONE CTA click. No retry loops, no
   // native .click(), no selection gating — that extra machinery broke live
   // drops. Random size just changes WHICH button findPreferredSizeButton picks.
-  logBG(`✅${tag} Clicking size ${sizeLabel(preferred)}…`);
-  humanClick(sizeBtn, `Size ${sizeLabel(preferred)}`);
+  logBG(`✅${tag} Clicking size ${pickedLabel}…`);
+  humanClick(sizeBtn, `Size ${pickedLabel}`);
 
   await wait(randInt(500, 900));
 
@@ -952,6 +1060,7 @@ async function executeEntry(tag, preferred) {
   const productTitle = document.title || location.href;
   sessionStorage.setItem(POLLER_PRODUCT_KEY, productTitle);
 
+  renderStatusBar("checkout", { size: pickedLabel, label: "Entering — clicking " + ctaText });
   logBG(`🛒${tag} Clicking "${ctaText}" — entering draw…`);
   humanClick(ctaBtn, ctaText);
 
@@ -962,7 +1071,7 @@ async function executeEntry(tag, preferred) {
   // fires) and skip the retry — never double-click Buy.
   if (addedToBagConfirmed()) {
     logBG(`🛒✅${tag} ADDED TO BAG — ${sizeLabel(preferred)} is in the cart. Proceed to checkout to complete the purchase.`);
-    showBanner(`🛒 ADDED TO BAG — ${sizeLabel(preferred)}! Go to bag to check out.`, "#1db954");
+    renderStatusBar("checkout", { size: sizeLabel(preferred), label: "Added to bag — completing checkout" });
     return;
   }
 
@@ -972,7 +1081,7 @@ async function executeEntry(tag, preferred) {
 
     if (postStatus === STATUS.ENTRY_IN) {
       logBG(`📋${tag} Entry confirmed! Draw entered for ${sizeLabel(preferred)}. Starting status poller…`);
-      showBanner("✓ ENTRY SUBMITTED — monitoring for result", "#111");
+      renderStatusBar("done", { time: nowClock(), label: "Entry submitted" });
       startStatusPoller();
     } else if (postStatus === STATUS.ENTER) {
       logBG(`⚠️${tag} CTA click may not have registered — retrying once…`);
@@ -982,7 +1091,7 @@ async function executeEntry(tag, preferred) {
       await wait(2000);
       if (addedToBagConfirmed()) {
         logBG(`🛒✅${tag} ADDED TO BAG — ${sizeLabel(preferred)} is in the cart.`);
-        showBanner(`🛒 ADDED TO BAG — ${sizeLabel(preferred)}!`, "#1db954");
+        renderStatusBar("checkout", { size: sizeLabel(preferred), label: "Added to bag — completing checkout" });
       } else if (detectPageStatus() === STATUS.ENTRY_IN) {
         logBG(`📋${tag} Entry confirmed on retry! Starting poller…`);
         startStatusPoller();
@@ -1026,12 +1135,12 @@ async function runSNKRSFlow() {
   }
   if (currentStatus === STATUS.PENDING) {
     logBG(`⏳${tag} Entry is PENDING / You\'re in line — bot stopped. Nike is processing.`);
-    showBanner("⏳ ENTRY PENDING — YOU'RE IN LINE! Bot stopped.", "#111");
+    renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
     return;
   }
   if (currentStatus === STATUS.PURCHASED) {
     logBG(`🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
-    showBanner("🎉🔥 GOT 'EM — YOU WON!!! CHECK YOUR EMAIL! 🔥🎉", "#1db954");
+    renderStatusBar("done", { time: nowClock(), label: "GOT 'EM 🎉", tone: "win" });
     launchConfetti();
     return;
   }
@@ -1051,7 +1160,7 @@ async function runSNKRSFlow() {
   // Drop is already live — enter immediately
   if (currentStatus === STATUS.ENTER) {
     logBG(`👟${tag} Drop is live on page load. Entering for ${sizeLabel(preferred)}…`);
-    showBanner(`🟠 BOT ACTIVE — targeting ${sizeLabel(preferred)}`, "#fa5400");
+    renderStatusBar("size", { size: sizeLabel(preferred) });
 
     // FIX: Wait for size buttons to be stable (Nike loads them but they may
     // briefly show as disabled right as the drop opens)
@@ -1067,7 +1176,7 @@ async function runSNKRSFlow() {
       // Alert loudly and DO NOT enter anything.
       if (hasKeyword && !scope) {
         logBG(`❌${tag} Product "${kw}" was NOT found on this page — bot did NOT buy anything (correct). Check the SKU/keyword or the URL.`);
-        showBanner(`❌ PRODUCT "${kw}" NOT FOUND — nothing bought. Check SKU/URL.`, "#e03131");
+        renderStatusBar("error", { errorMsg: `Product "${kw}" not found — check the SKU/URL` });
         // Keep watching in case the product card is still lazy-loading, but the
         // scope guard means we still won't buy a different product.
         startDropWatcher(tag, preferred);

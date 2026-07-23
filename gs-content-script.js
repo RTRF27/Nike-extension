@@ -45,6 +45,105 @@ window.snkrsReset = resetRunGuard;
 
 function log(...args) { console.log("[SNKRSBot GS]", ...args); }
 
+// ── Status stepper (mirrors snkrs-content-script) ─────────────
+// Same top bar as the launch page, so the journey reads continuously as the tab
+// moves nike.com → gs.nike.com. Here we own the CHECKOUT → SUBMIT → DONE half.
+const FLOW_STEPS = [
+  { key: "waiting",  icon: "⏳", label: "Waiting for drop" },
+  { key: "size",     icon: "👟", label: "Size selected" },
+  { key: "checkout", icon: "💳", label: "Checkout" },
+  { key: "submit",   icon: "🚀", label: "Submitting" },
+  { key: "done",     icon: "✅", label: "Done" },
+];
+function nowClock() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+// The launch page records the EXACT size it grabbed (incl. the random one) in
+// extension storage; prefer that so the checkout bar shows the real size.
+let _pickedSize = "";
+function stepperSize() {
+  if (_pickedSize) return _pickedSize;
+  if (settings && (settings.preferredSizeType === "random" ||
+      String(settings.preferredSize || "").toUpperCase() === "RANDOM")) return "🎲 random";
+  const s = settings && settings.preferredSize;
+  return s ? (/^[A-Z]/i.test(String(s)) && String(s).length <= 3 ? String(s).toUpperCase() : "US " + s) : "";
+}
+function renderStatusBar(activeKey, opts) {
+  opts = opts || {};
+  let bar = document.getElementById("snkrs-status-bar");
+  if (!bar) {
+    if (!document.body) return;
+    bar = document.createElement("div");
+    bar.id = "snkrs-status-bar";
+    bar.style.cssText =
+      "position:fixed;top:0;left:0;width:100%;z-index:2147483647;box-sizing:border-box;" +
+      "display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 14px;" +
+      "background:#111;border-bottom:2px solid #000;font:700 13px/1.25 sans-serif;" +
+      "letter-spacing:.4px;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);";
+    document.body.appendChild(bar);
+  }
+  if (activeKey === "error") {
+    bar.style.background = "#c1121f"; bar.style.borderBottomColor = "#7a0b13";
+    bar.innerHTML = "";
+    const msg = document.createElement("div");
+    msg.style.cssText = "width:100%;text-align:center;font-size:14px;letter-spacing:.6px;";
+    msg.textContent = `❌ ERROR — NEEDS MANUAL${opts.errorMsg ? ": " + opts.errorMsg : ""}`;
+    bar.appendChild(msg);
+    return;
+  }
+  bar.style.cssText =
+    "position:fixed;top:0;left:0;width:100%;z-index:2147483647;box-sizing:border-box;" +
+    "display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:8px 14px;" +
+    "background:#111;border-bottom:2px solid #000;font:700 13px/1.25 sans-serif;" +
+    "letter-spacing:.4px;color:#fff;box-shadow:0 2px 10px rgba(0,0,0,.4);";
+  const activeIdx = FLOW_STEPS.findIndex(s => s.key === activeKey);
+  bar.innerHTML = "";
+  FLOW_STEPS.forEach((step, i) => {
+    const state = i < activeIdx ? "done" : (i === activeIdx ? "active" : "todo");
+    let text = step.label;
+    if (step.key === "size" && (opts.size || stepperSize())) text = opts.size || stepperSize();
+    if (step.key === "done") { if (opts.label) text = opts.label; if (opts.time) text += " · " + opts.time; }
+    else if (opts.label && i === activeIdx) text = opts.label;
+    let bg = "transparent", color = "#6b7280", icon = step.icon, weight = "600";
+    if (state === "done") { color = "#1db954"; icon = "✓"; }
+    if (state === "active") {
+      color = "#fff"; weight = "800";
+      bg = step.key === "done" ? (opts.tone === "win" ? "#1db954" : "#1db954") : "#fa5400";
+    }
+    const seg = document.createElement("span");
+    seg.style.cssText =
+      `display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;` +
+      `background:${bg};color:${color};font-weight:${weight};` +
+      (state === "active" ? "box-shadow:0 0 0 1px rgba(255,255,255,.15);" : "");
+    seg.textContent = `${icon} ${text}`;
+    bar.appendChild(seg);
+    if (i < FLOW_STEPS.length - 1) {
+      const arr = document.createElement("span");
+      arr.textContent = "→"; arr.style.cssText = "color:#4b5563;font-weight:700;";
+      bar.appendChild(arr);
+    }
+  });
+}
+// Map a checkout-machine event code to the stepper.
+function stepperFromEvent(code) {
+  switch (code) {
+    case "started": case "loaded": case "delivery":
+      renderStatusBar("checkout", { label: "Filling checkout" }); break;
+    case "filled": case "ready":
+      renderStatusBar("checkout", { label: "Card filled — arming submit" }); break;
+    case "holding":
+      renderStatusBar("submit", { label: "Holding for drop" }); break;
+    case "submitting":
+      renderStatusBar("submit"); break;
+    case "submitted": case "done":
+      renderStatusBar("done", { time: nowClock(), label: "Order submitted" }); break;
+    case "error":
+      renderStatusBar("error", { errorMsg: "checkout stuck — finish it by hand" }); break;
+  }
+}
+
 // True while THIS content script's extension context is still valid.
 function extAlive() { try { return !!(chrome.runtime && chrome.runtime.id); } catch (e) { return false; } }
 
@@ -59,6 +158,7 @@ function logBG(msg) {
 // Analytics: forward the machine's structured events to the background, which
 // timestamps + attributes them to this profile for the Drop Replay/History view.
 function emitEvent(evt) {
+  try { stepperFromEvent(evt.code); } catch (e) {}   // drive the top status bar
   if (!extAlive()) return;
   try {
     chrome.runtime.sendMessage({
@@ -196,14 +296,17 @@ function watchForConfirmation(tag) {
     const text = (document.body.innerText || "").toUpperCase();
     if (text.includes("PROCESSING YOUR ENTRY") || text.includes("JUST A MINUTE")) return;
     if (!location.hostname.includes("gs.nike.com")) {
-      clearInterval(iv); logBG(`🎉${tag} Entry complete → ${location.href}`); return;
+      clearInterval(iv); renderStatusBar("done", { time: nowClock(), label: "Order complete", tone: "win" });
+      logBG(`🎉${tag} Entry complete → ${location.href}`); return;
     }
     if (text.includes("ORDER CONFIRMED") || text.includes("THANK YOU") ||
         text.includes("YOU'RE IN") || location.href !== startUrl) {
-      clearInterval(iv); logBG(`🎉${tag} ORDER SUBMITTED! ${location.href}`); return;
+      clearInterval(iv); renderStatusBar("done", { time: nowClock(), label: "Order submitted", tone: "win" });
+      logBG(`🎉${tag} ORDER SUBMITTED! ${location.href}`); return;
     }
     if (Date.now() - startTs > 30000) {
-      clearInterval(iv); logBG(`⚠️${tag} No confirmation after 30s — check manually.`);
+      clearInterval(iv); renderStatusBar("error", { errorMsg: "no confirmation after 30s — check the order manually" });
+      logBG(`⚠️${tag} No confirmation after 30s — check manually.`);
     }
   }, 1000);
 }
@@ -252,6 +355,13 @@ async function runCheckoutFlow() {
   logBG(`🟢${profileTag()} GS checkout script injected on ${location.hostname}` +
         ` (enabled=${settings?.enabled !== false}, testMode=${!!settings?.testMode})`);
   if (!settings?.enabled) { logBG(`⏹️${profileTag()} Bot disabled in settings — not running checkout.`); return; }
+  // Pull the exact size the launch page grabbed (random included), then paint
+  // the checkout half of the journey.
+  try {
+    const d = await chrome.storage.local.get("snkrsPickedSize");
+    _pickedSize = (d && d.snkrsPickedSize) || "";
+  } catch (e) {}
+  try { renderStatusBar("checkout", { label: "Loading checkout" }); } catch (e) {}
   if (document.readyState !== "complete") {
     await new Promise(resolve => window.addEventListener("load", resolve, { once: true }));
   }
