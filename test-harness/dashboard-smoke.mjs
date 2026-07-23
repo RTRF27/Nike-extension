@@ -270,6 +270,19 @@ async function main() {
       spread: typeof sizeSpreadSummary === "function" ? sizeSpreadSummary() : "",
     };
   });
+  // Coverage: with ≥ as many tasks as sizes, EVERY in-range size must appear —
+  // none silently dropped (regression: "US 10" vanished from a 9–12 roll).
+  const cover = await page.evaluate(() => {
+    const pool = footwearRange("9", "12");            // 9,9.5,10,10.5,11,11.5,12
+    for (let t = 0; t < 300; t++) {
+      const got = new Set(dealFromPool(pool, pool.length).map(v => v.split(":")[1]));
+      if (got.size !== pool.length) return { ok: false, missing: pool.filter(p => !got.has(p.split(":")[1])) };
+    }
+    return { ok: true, includesTen: footwearRange("9", "12").some(v => v.endsWith(":10")) };
+  });
+  check("US 10 is in the 9–12 pool", cover.includesTen);
+  check("no in-range size is ever dropped when tasks ≥ sizes", cover.ok, JSON.stringify(cover.missing));
+
   check("random rolls CONCRETE sizes (no live RANDOM sentinel)", roll.ok && roll.allConcrete, (roll.sizes || []).join(","));
   check("rolled sizes stay inside the US 9–12 range", roll.ok && roll.allInRange, (roll.sizes || []).join(","));
   check("rolled sizes are footwear", roll.ok && roll.allFootwear);

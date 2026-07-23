@@ -425,11 +425,15 @@ function shuffle(arr) {
   return a;
 }
 // Deal n picks from a pool, evenly + randomly (each size used about equally).
+// The bag is whole SHUFFLED passes of the pool concatenated, and we take it in
+// order — so the first pool.length picks are one-of-each. That guarantees every
+// size appears when there are at least as many tasks as sizes (a final reshuffle
+// used to drop sizes here, e.g. "US 10" vanishing from a 9–12 roll).
 function dealFromPool(pool, n) {
   if (!pool.length || n <= 0) return [];
   const bag = [];
   while (bag.length < n) bag.push(...shuffle(pool));
-  return shuffle(bag).slice(0, n);
+  return bag.slice(0, n);
 }
 function newProduct() { return { id: uid(), url: "", keyword: "", sizePool: [] }; }
 
