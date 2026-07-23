@@ -216,12 +216,22 @@
                 </div>
                 <label class="switch"><input type="checkbox" id="singleRandomSize"><span class="track"></span></label>
               </div>
-              <div id="randomRangeRow" style="display:none; align-items:center; gap:8px; margin-top:10px;">
-                <label class="lbl" style="margin:0;">Roll between</label>
-                <select id="randomMin" class="inp" style="width:92px;"></select>
-                <span class="muted">and</span>
-                <select id="randomMax" class="inp" style="width:92px;"></select>
-                <button id="rerollBtn" type="button" class="btn btn-mini btn-dark">🎲 Re-roll</button>
+              <div id="randomRangeRow" style="display:none; flex-direction:column; gap:8px; margin-top:10px;">
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <label class="lbl" style="margin:0;">Category</label>
+                  <select id="randomKind" class="inp" style="width:170px;">
+                    <option value="footwear">👟 Footwear (US)</option>
+                    <option value="apparel">👕 Apparel (XXS–XXL)</option>
+                  </select>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                  <label class="lbl" style="margin:0;">Roll between</label>
+                  <select id="randomMin" class="inp" style="width:92px;"></select>
+                  <span class="muted">and</span>
+                  <select id="randomMax" class="inp" style="width:92px;"></select>
+                  <label class="chk" id="noHalfWrap" style="margin-left:4px;"><input type="checkbox" id="randomNoHalf"> No half sizes</label>
+                  <button id="rerollBtn" type="button" class="btn btn-mini btn-dark">🎲 Re-roll</button>
+                </div>
               </div>
               <label class="lbl" style="margin-top:14px;">Size pool <span class="muted">(randomly assigned to accounts)</span></label>
               <div class="size-pool" id="singleSizePool"></div>

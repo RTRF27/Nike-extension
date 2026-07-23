@@ -289,6 +289,28 @@ async function main() {
   check("range gives a real spread (>1 distinct size across 10 tasks)", roll.ok && roll.distinct > 1, "distinct=" + roll.distinct);
   check("spread summary lists the sizes", roll.ok && /US \d/.test(roll.spread), roll.spread);
 
+  // 6e) "No half sizes" (slippers) and apparel (XXS–XXL for tees/jackets).
+  const opts = await page.evaluate(() => {
+    accounts = Array.from({ length: 8 }, (_, i) => ({ id: "o" + i, profileDir: "P" + i, size: "", sizeType: "footwear" }));
+    // No-half footwear
+    randomKind = "footwear"; randomMin = "9"; randomMax = "12"; randomNoHalf = true;
+    rollRandomSizes();
+    const noHalf = { anyHalf: accounts.some(a => a.size.includes(".")), inRange: accounts.every(a => { const n = +a.size; return n >= 9 && n <= 12; }) };
+    // Apparel XXS–XXL
+    randomKind = "apparel"; randomMinA = "XXS"; randomMaxA = "XXL"; randomNoHalf = false;
+    rollRandomSizes();
+    const validAp = ["XXS", "XS", "S", "M", "L", "XL", "XXL"];
+    const apparel = { allApparelType: accounts.every(a => a.sizeType === "apparel"),
+                      allValid: accounts.every(a => validAp.includes(a.size)),
+                      spread: sizeSpreadSummary() };
+    return { noHalf, apparel };
+  });
+  check("no-half rolls WHOLE sizes only", opts.noHalf.anyHalf === false);
+  check("no-half still respects the range", opts.noHalf.inRange);
+  check("apparel roll assigns apparel-type sizes", opts.apparel.allApparelType);
+  check("apparel roll stays within XXS–XXL", opts.apparel.allValid);
+  check("apparel spread reads as letters (no 'US')", !/US /.test(opts.apparel.spread), opts.apparel.spread);
+
   // 7) Outcome notifications: card present, buildNotifyConfig reflects toggles.
   const notify = await page.evaluate(() => {
     if (!document.getElementById("notifyEnabled")) return { present: false };

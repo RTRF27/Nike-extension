@@ -381,7 +381,8 @@ const ORDERS_KEY  = "snkrsOrders";
 const CARDS_KEY   = "snkrsCardProfiles";
 
 const FOOTWEAR_SIZES = ["5","5.5","6","6.5","7","7.5","8","8.5","9","9.5","10","10.5","11","11.5","12","12.5","13","13.5","14"];
-const APPAREL_SIZES  = ["XS","S","M","L","XL","XXL"];
+// Small → large, so a range slice works. Tees/jackets run XXS–XXL (+XXXL).
+const APPAREL_SIZES  = ["XXS","XS","S","M","L","XL","XXL","XXXL"];
 
 let discoveredProfiles = [];   // [{dir,name}]
 let hostOk = false;
@@ -393,8 +394,12 @@ const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl
 
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
 let singleRandomSize = false;  // single-product: roll a size per task from a range
-let randomMin = "9";           // 🎲 roll range (inclusive), footwear US sizes
+let randomKind = "footwear";   // 🎲 roll from footwear (US) or apparel (XXS–XXL)
+let randomMin = "9";           // footwear roll range (inclusive)
 let randomMax = "12";
+let randomMinA = "XXS";        // apparel roll range (inclusive)
+let randomMaxA = "XXL";
+let randomNoHalf = false;      // footwear: roll whole sizes only (slippers/sandals)
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
 let proxyAssignments = {};     // {profileDir: "host:port:user:pass"} manual overrides (swap)
@@ -446,20 +451,49 @@ function footwearRange(minV, maxV) {
   if (a < 0) a = FOOTWEAR_SIZES.indexOf("9");
   if (b < 0) b = FOOTWEAR_SIZES.indexOf("12");
   if (a > b) { const t = a; a = b; b = t; }
-  return FOOTWEAR_SIZES.slice(a, b + 1).map(s => "footwear:" + s);
+  let sizes = FOOTWEAR_SIZES.slice(a, b + 1);
+  // "No half sizes" — whole sizes only (e.g. slippers/sandals that only list
+  // 9/10/11). Fall back to the unfiltered range if that leaves nothing.
+  if (randomNoHalf) {
+    const whole = sizes.filter(s => !s.includes("."));
+    if (whole.length) sizes = whole;
+  }
+  return sizes.map(s => "footwear:" + s);
 }
-// A short "US 9×2, US 10×3…" summary of what got rolled, so you can eyeball the
-// spread the moment you assign.
+// Apparel (tees/jackets): roll a letter size from a range, e.g. XXS–XXL.
+function apparelRange(minV, maxV) {
+  let a = APPAREL_SIZES.indexOf(String(minV));
+  let b = APPAREL_SIZES.indexOf(String(maxV));
+  if (a < 0) a = 0;
+  if (b < 0) b = APPAREL_SIZES.length - 1;
+  if (a > b) { const t = a; a = b; b = t; }
+  return APPAREL_SIZES.slice(a, b + 1).map(s => "apparel:" + s);
+}
+function randomPool() {
+  return randomKind === "apparel"
+    ? apparelRange(randomMinA, randomMaxA)
+    : footwearRange(randomMin, randomMax);
+}
+// A short "US 9×2 · US 10×3" (or "M×2 · L×1") summary of what got rolled, so you
+// can eyeball the spread the moment you assign.
 function sizeSpreadSummary() {
-  const counts = {};
+  const counts = {}, isApparel = randomKind === "apparel";
   (accounts || []).forEach(a => { if (a && a.size) counts[a.size] = (counts[a.size] || 0) + 1; });
-  const keys = Object.keys(counts).sort((x, y) => parseFloat(x) - parseFloat(y));
-  return keys.length ? "Spread: " + keys.map(s => `US ${s}×${counts[s]}`).join(", ") : "";
+  const order = isApparel ? APPAREL_SIZES : FOOTWEAR_SIZES;
+  const keys = Object.keys(counts).sort((x, y) => order.indexOf(x) - order.indexOf(y));
+  const fmt = (s) => isApparel ? s : "US " + s;
+  return keys.length ? "Spread: " + keys.map(s => `${fmt(s)}×${counts[s]}`).join(", ") : "";
 }
-// Roll concrete footwear sizes from the range onto every account.
+// Human label for the current roll range, e.g. "US 9–US 12" or "XXS–XXL".
+function rollRangeLabel() {
+  return randomKind === "apparel"
+    ? `${randomMinA}–${randomMaxA}`
+    : `US ${randomMin}–US ${randomMax}${randomNoHalf ? " (no half)" : ""}`;
+}
+// Roll a concrete size from the active range (footwear US or apparel) onto every
+// account, before the drop.
 function rollRandomSizes() {
-  const pool = footwearRange(randomMin, randomMax);
-  const sizes = dealFromPool(pool, accounts.length);
+  const sizes = dealFromPool(randomPool(), accounts.length);
   accounts.forEach((acct, i) => {
     acct.url = ""; acct.keyword = ""; acct.targets = [];
     const { size, sizeType } = parseSizeValue(sizes[i]);
@@ -546,15 +580,23 @@ function renderDropUI() {
   applyMultiUI();
 }
 
-// Fill the roll-range dropdowns with footwear sizes.
+// Fill the roll-range dropdowns for the active category (footwear or apparel).
 function fillRandomRange() {
+  const apparel = randomKind === "apparel";
+  const list = apparel ? APPAREL_SIZES : FOOTWEAR_SIZES;
+  const fmt = apparel ? (s => s) : (s => "US " + s);
+  const cur = apparel ? [randomMinA, randomMaxA] : [randomMin, randomMax];
   ["randomMin", "randomMax"].forEach((id, i) => {
     const sel = $(id);
     if (!sel) return;
     sel.innerHTML = "";
-    FOOTWEAR_SIZES.forEach(s => sel.appendChild(el("option", { value: s }, "US " + s)));
-    sel.value = i === 0 ? randomMin : randomMax;
+    list.forEach(s => sel.appendChild(el("option", { value: s }, fmt(s))));
+    sel.value = cur[i];
   });
+  if ($("randomKind")) $("randomKind").value = randomKind;
+  const nh = $("noHalfWrap");
+  if (nh) nh.style.display = apparel ? "none" : "";       // half sizes are footwear-only
+  if ($("randomNoHalf")) $("randomNoHalf").checked = randomNoHalf;
 }
 
 // When 🎲 Random is on, show the roll range and dim the manual pool (unused).
@@ -737,7 +779,7 @@ async function randomAssign() {
     rollRandomSizes();
     renderAccounts();
     await saveAll(true);
-    flashTemp(msg, `🎲 Rolled sizes for ${accounts.length} account(s) from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`, "#1db954", 7000);
+    flashTemp(msg, `🎲 Rolled sizes for ${accounts.length} account(s) from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "#1db954", 7000);
     await assignCheckoutUrls(msg); // build direct checkout URLs for the rolled sizes
   } else {
     if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above, or turn on 🎲 Random size.", "#fa5400"); return; }
@@ -3180,7 +3222,7 @@ function buildConfig() {
       scheduleEnabled: scheduleIsEnabled(),
       sizePool: singleSizePool.slice(),
       randomSize: singleRandomSize,
-      randomMin, randomMax,
+      randomKind, randomMin, randomMax, randomMinA, randomMaxA, randomNoHalf,
     },
     multiProduct,
     products: products.map(p => ({
@@ -4091,11 +4133,14 @@ function applyConfigToUI(cfg) {
 
   singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
   singleRandomSize = !!drop.randomSize;
+  randomKind = drop.randomKind === "apparel" ? "apparel" : "footwear";
   randomMin = drop.randomMin || "9";
   randomMax = drop.randomMax || "12";
+  randomMinA = drop.randomMinA || "XXS";
+  randomMaxA = drop.randomMaxA || "XXL";
+  randomNoHalf = !!drop.randomNoHalf;
   if ($("singleRandomSize")) $("singleRandomSize").checked = singleRandomSize;
-  if ($("randomMin")) $("randomMin").value = randomMin;
-  if ($("randomMax")) $("randomMax").value = randomMax;
+  fillRandomRange();
   multiProduct = !!cfg.multiProduct;
   products = Array.isArray(cfg.products) ? cfg.products.map(p => ({
     id: p.id || uid(),
@@ -4417,27 +4462,41 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveAll(true);
     const m = $("assignMsg");
     if (m) flashTemp(m, singleRandomSize
-      ? `🎲 Rolled sizes from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`
+      ? `🎲 Rolled sizes from ${rollRangeLabel()}. ${sizeSpreadSummary()}`
       : "Random size off — pick sizes below.", singleRandomSize ? "#1db954" : "#888", 7000);
   });
+  // Shared: re-roll now and report the spread (only when random is on + accounts).
+  const reRoll = (verb) => {
+    if (!singleRandomSize || !accounts.length) { saveAll(true); return; }
+    rollRandomSizes(); renderAccounts(); saveAll(true);
+    const m = $("assignMsg");
+    if (m) flashTemp(m, `🎲 ${verb} from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "#1db954", 6000);
+  };
   if ($("rerollBtn")) $("rerollBtn").addEventListener("click", () => {
     if (!accounts.length) { flashTemp($("assignMsg"), "Add accounts first.", "#fa5400"); return; }
     rollRandomSizes(); renderAccounts(); saveAll(true);
-    flashTemp($("assignMsg"), `🎲 Re-rolled from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`, "#1db954", 6000);
+    flashTemp($("assignMsg"), `🎲 Re-rolled from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "#1db954", 6000);
   });
-  // Re-roll when the range changes (only meaningful while random is on).
-  ["randomMin", "randomMax"].forEach(id => {
+  // Category switch (footwear ↔ apparel): repopulate the range, then re-roll.
+  if ($("randomKind")) $("randomKind").addEventListener("change", () => {
+    randomKind = $("randomKind").value === "apparel" ? "apparel" : "footwear";
+    fillRandomRange();
+    reRoll("Rolled");
+  });
+  // Range dropdowns store into the ACTIVE category's pair.
+  ["randomMin", "randomMax"].forEach((id, i) => {
     const el = $(id);
     if (!el) return;
     el.addEventListener("change", () => {
-      randomMin = $("randomMin") ? $("randomMin").value : randomMin;
-      randomMax = $("randomMax") ? $("randomMax").value : randomMax;
-      if (singleRandomSize && accounts.length) {
-        rollRandomSizes(); renderAccounts(); saveAll(true);
-        const m = $("assignMsg");
-        if (m) flashTemp(m, `🎲 Re-rolled from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`, "#1db954", 6000);
-      } else { saveAll(true); }
+      const v = el.value;
+      if (randomKind === "apparel") { if (i === 0) randomMinA = v; else randomMaxA = v; }
+      else { if (i === 0) randomMin = v; else randomMax = v; }
+      reRoll("Re-rolled");
     });
+  });
+  if ($("randomNoHalf")) $("randomNoHalf").addEventListener("change", () => {
+    randomNoHalf = $("randomNoHalf").checked;
+    reRoll("Re-rolled");
   });
   $("addProductBtn").addEventListener("click", () => {
     products.push(newProduct());
