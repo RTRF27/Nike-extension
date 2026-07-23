@@ -293,14 +293,15 @@ checkout suite is unchanged. Proxy/notification config plumbing is covered by
 
 ## Random size + full log control (v4.27)
 
-**🎲 Random size — cop any available size.** Some drops list sizes the preset
-picker never offered (half sizes, region-only sizes). Instead of a fixed size,
-turn on **🎲 Random size (cop any available)** in the PRODUCT card, pick the
-**🎲 Random** chip in any size pool, or choose **🎲 Random (any available size)**
-in a per-account size dropdown. At go-live the bot grabs *any* size that's
-actually clickable — scoped to your product keyword if one is set, so it still
-never buys the wrong item. Random accounts always run the **launch-page flow**
-(no direct link is built, since there's no fixed size to bake into a URL).
+**🎲 Random size — roll a size per task from a range.** Turn on **🎲 Random size
+(roll from a range)** in the PRODUCT card and set a range (default **US 9–US
+12**). Each account is dealt a **concrete** size from that range **before** the
+drop — evenly + randomly, so the spread is even and visible up front (the status
+bar on every tab shows the exact size it will cop, e.g. `👟 US 10.5`). Because
+each task ends up with a fixed size, checkout is a plain fixed-size cop and
+direct-link URLs can be built as normal. **🎲 Re-roll** reshuffles the spread.
+(The `US 9` matcher also matches a youth `US 9Y` grid, so a rolled adult size
+still lands on a kids' drop.)
 
 **Waits for sizes, then goes.** Whether the size is fixed or random, each tab
 **sits on the launch page and watches** (MutationObserver + a 500 ms poll safety

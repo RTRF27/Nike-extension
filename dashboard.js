@@ -392,7 +392,9 @@ let liveStatuses = {};         // {profileDir: {code,message,time}}
 const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl}
 
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
-let singleRandomSize = false;  // single-product: cop any available size (ignore pool)
+let singleRandomSize = false;  // single-product: roll a size per task from a range
+let randomMin = "9";           // 🎲 roll range (inclusive), footwear US sizes
+let randomMax = "12";
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
 let proxyAssignments = {};     // {profileDir: "host:port:user:pass"} manual overrides (swap)
@@ -431,6 +433,36 @@ function dealFromPool(pool, n) {
 }
 function newProduct() { return { id: uid(), url: "", keyword: "", sizePool: [] }; }
 
+// 🎲 Random = roll a concrete size PER TASK from a range, BEFORE the drop, so
+// the spread is visible on every tab up front and checkout is a plain fixed-size
+// cop. Build the pool of footwear sizes between min and max (inclusive).
+function footwearRange(minV, maxV) {
+  let a = FOOTWEAR_SIZES.indexOf(String(minV));
+  let b = FOOTWEAR_SIZES.indexOf(String(maxV));
+  if (a < 0) a = FOOTWEAR_SIZES.indexOf("9");
+  if (b < 0) b = FOOTWEAR_SIZES.indexOf("12");
+  if (a > b) { const t = a; a = b; b = t; }
+  return FOOTWEAR_SIZES.slice(a, b + 1).map(s => "footwear:" + s);
+}
+// A short "US 9×2, US 10×3…" summary of what got rolled, so you can eyeball the
+// spread the moment you assign.
+function sizeSpreadSummary() {
+  const counts = {};
+  (accounts || []).forEach(a => { if (a && a.size) counts[a.size] = (counts[a.size] || 0) + 1; });
+  const keys = Object.keys(counts).sort((x, y) => parseFloat(x) - parseFloat(y));
+  return keys.length ? "Spread: " + keys.map(s => `US ${s}×${counts[s]}`).join(", ") : "";
+}
+// Roll concrete footwear sizes from the range onto every account.
+function rollRandomSizes() {
+  const pool = footwearRange(randomMin, randomMax);
+  const sizes = dealFromPool(pool, accounts.length);
+  accounts.forEach((acct, i) => {
+    acct.url = ""; acct.keyword = ""; acct.targets = [];
+    const { size, sizeType } = parseSizeValue(sizes[i]);
+    acct.size = size; acct.sizeType = sizeType;
+  });
+}
+
 // ── Size-pool chip multi-select ───────────────────────────────
 function buildSizePool(container, selected, onChange) {
   container.innerHTML = "";
@@ -450,9 +482,6 @@ function buildSizePool(container, selected, onChange) {
   };
   addGroup("Footwear (US M)", FOOTWEAR_SIZES, "footwear", s => "US " + s);
   addGroup("Apparel", APPAREL_SIZES, "apparel", s => s);
-  // 🎲 Random: an account dealt this cops any size available at the drop.
-  // Mix it with fixed sizes, or pick it alone for an all-random pool.
-  addGroup("Any size", ["RANDOM"], "random", () => "🎲 Random");
 }
 
 // ── Multi-product UI ──────────────────────────────────────────
@@ -507,17 +536,32 @@ function buildProductRow(p, idx) {
 function renderDropUI() {
   buildSizePool($("singleSizePool"), singleSizePool, (s) => { singleSizePool = s; });
   if ($("singleRandomSize")) $("singleRandomSize").checked = singleRandomSize;
+  fillRandomRange();
   applyRandomSizeUI();
   $("multiProductToggle").checked = multiProduct;
   applyMultiUI();
 }
 
-// Dim the size pool when 🎲 Random size is on — the pool is ignored then.
+// Fill the roll-range dropdowns with footwear sizes.
+function fillRandomRange() {
+  ["randomMin", "randomMax"].forEach((id, i) => {
+    const sel = $(id);
+    if (!sel) return;
+    sel.innerHTML = "";
+    FOOTWEAR_SIZES.forEach(s => sel.appendChild(el("option", { value: s }, "US " + s)));
+    sel.value = i === 0 ? randomMin : randomMax;
+  });
+}
+
+// When 🎲 Random is on, show the roll range and dim the manual pool (unused).
 function applyRandomSizeUI() {
+  const row = $("randomRangeRow");
+  if (row) row.style.display = singleRandomSize ? "flex" : "none";
   const pool = $("singleSizePool");
-  if (!pool) return;
-  pool.style.opacity = singleRandomSize ? "0.4" : "";
-  pool.style.pointerEvents = singleRandomSize ? "none" : "";
+  if (pool) {
+    pool.style.opacity = singleRandomSize ? "0.4" : "";
+    pool.style.pointerEvents = singleRandomSize ? "none" : "";
+  }
 }
 
 // ── Product lookup + thumbnail preview ────────────────────────
@@ -684,16 +728,13 @@ async function randomAssign() {
     flashTemp(msg, `🎲 Each account will cop all ${prods.length} products (${prods.length} tabs each).`, "#1db954", 4000);
     await assignCheckoutUrls(msg); // build a direct checkout URL per product
   } else if (singleRandomSize) {
-    // Random-size mode: no pool needed — every account copies any size that
-    // loads at the drop, via the launch-page flow.
-    accounts.forEach((acct) => {
-      acct.url = ""; acct.keyword = ""; acct.targets = [];
-      acct.size = "RANDOM"; acct.sizeType = "random";
-    });
+    // 🎲 Roll a concrete size per task from the range NOW (not at drop time), so
+    // every tab targets a fixed size you can see up front.
+    rollRandomSizes();
     renderAccounts();
     await saveAll(true);
-    flashTemp(msg, `🎲 All ${accounts.length} account(s) set to RANDOM — each cops any size available at the drop.`, "#1db954", 5000);
-    await assignCheckoutUrls(msg);
+    flashTemp(msg, `🎲 Rolled sizes for ${accounts.length} account(s) from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`, "#1db954", 7000);
+    await assignCheckoutUrls(msg); // build direct checkout URLs for the rolled sizes
   } else {
     if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above, or turn on 🎲 Random size.", "#fa5400"); return; }
     const sizes = dealFromPool(singleSizePool, accounts.length);
@@ -2635,9 +2676,6 @@ function attachCardFormatters(numberEl, expiryEl, cvvEl) {
 function fillSizeSelect(sel, size, sizeType) {
   sel.innerHTML = "";
   sel.appendChild(el("option", { value: "" }, "— pick size —"));
-  // Random: cop whatever size is available at the drop (handles sizes the
-  // preset list never offered). Kept at the top so it's easy to reach.
-  sel.appendChild(el("option", { value: "random:RANDOM" }, "🎲 Random (any available size)"));
   const g1 = el("optgroup", { label: "Footwear (US M)" });
   FOOTWEAR_SIZES.forEach(s => g1.appendChild(el("option", { value: "footwear:" + s }, "US " + s)));
   sel.appendChild(g1);
@@ -3138,6 +3176,7 @@ function buildConfig() {
       scheduleEnabled: scheduleIsEnabled(),
       sizePool: singleSizePool.slice(),
       randomSize: singleRandomSize,
+      randomMin, randomMax,
     },
     multiProduct,
     products: products.map(p => ({
@@ -4048,7 +4087,11 @@ function applyConfigToUI(cfg) {
 
   singleSizePool = Array.isArray(drop.sizePool) ? drop.sizePool.slice() : [];
   singleRandomSize = !!drop.randomSize;
+  randomMin = drop.randomMin || "9";
+  randomMax = drop.randomMax || "12";
   if ($("singleRandomSize")) $("singleRandomSize").checked = singleRandomSize;
+  if ($("randomMin")) $("randomMin").value = randomMin;
+  if ($("randomMax")) $("randomMax").value = randomMax;
   multiProduct = !!cfg.multiProduct;
   products = Array.isArray(cfg.products) ? cfg.products.map(p => ({
     id: p.id || uid(),
@@ -4363,21 +4406,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   if ($("singleRandomSize")) $("singleRandomSize").addEventListener("change", () => {
     singleRandomSize = $("singleRandomSize").checked;
     applyRandomSizeUI();
-    // Apply immediately so the toggle alone is enough — no need to also click
-    // "Randomly assign". Turning it ON sets every account to RANDOM; turning it
-    // OFF clears those RANDOM sizes so stale "RANDOM" rows don't linger.
-    if (accounts.length) {
-      accounts.forEach(acct => {
-        if (singleRandomSize) { acct.url = ""; acct.keyword = ""; acct.targets = []; acct.size = "RANDOM"; acct.sizeType = "random"; }
-        else if (isRandomVal(acct.size)) { acct.size = ""; acct.sizeType = "footwear"; }
-      });
-      renderAccounts();
-    }
+    // Roll immediately so the toggle alone is enough (no need to also click
+    // "Randomly assign") and the spread shows on the rows right away.
+    if (singleRandomSize && accounts.length) rollRandomSizes();
+    renderAccounts();
     saveAll(true);
     const m = $("assignMsg");
     if (m) flashTemp(m, singleRandomSize
-      ? `🎲 Random ON — all ${accounts.length} account(s) will cop any size at the drop. Reload the extension in each launched profile, then relaunch.`
-      : "Random size off — set sizes below or re-enable random.", singleRandomSize ? "#1db954" : "#888", 7000);
+      ? `🎲 Rolled sizes from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`
+      : "Random size off — pick sizes below.", singleRandomSize ? "#1db954" : "#888", 7000);
+  });
+  if ($("rerollBtn")) $("rerollBtn").addEventListener("click", () => {
+    if (!accounts.length) { flashTemp($("assignMsg"), "Add accounts first.", "#fa5400"); return; }
+    rollRandomSizes(); renderAccounts(); saveAll(true);
+    flashTemp($("assignMsg"), `🎲 Re-rolled from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`, "#1db954", 6000);
+  });
+  // Re-roll when the range changes (only meaningful while random is on).
+  ["randomMin", "randomMax"].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      randomMin = $("randomMin") ? $("randomMin").value : randomMin;
+      randomMax = $("randomMax") ? $("randomMax").value : randomMax;
+      if (singleRandomSize && accounts.length) {
+        rollRandomSizes(); renderAccounts(); saveAll(true);
+        const m = $("assignMsg");
+        if (m) flashTemp(m, `🎲 Re-rolled from US ${randomMin}–US ${randomMax}. ${sizeSpreadSummary()}`, "#1db954", 6000);
+      } else { saveAll(true); }
+    });
   });
   $("addProductBtn").addEventListener("click", () => {
     products.push(newProduct());

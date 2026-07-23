@@ -251,6 +251,31 @@ async function main() {
   check("swapped account shows the new IP + (swapped) tag", /ip3\.prov\.com/.test(swap.text) && /swapped/.test(swap.text), swap.text);
   check("assignment rows render a ⟳ swap button", swap.hasSwapBtn);
 
+  // 6d) 🎲 Random = PRE-ROLL concrete sizes from a range (not a live sentinel),
+  //     so every task targets a fixed, visible size and the spread is knowable.
+  const roll = await page.evaluate(() => {
+    if (typeof rollRandomSizes !== "function") return { ok: false };
+    accounts = Array.from({ length: 10 }, (_, i) => ({ id: "r" + i, profileDir: "P" + i, size: "", sizeType: "footwear" }));
+    randomMin = "9"; randomMax = "12";
+    rollRandomSizes();
+    const sizes = accounts.map(a => a.size);
+    const types = accounts.map(a => a.sizeType);
+    const nums = sizes.map(parseFloat);
+    return {
+      ok: true, sizes,
+      allConcrete: sizes.every(s => /^\d/.test(s)),         // never the "RANDOM" sentinel
+      allInRange: nums.every(n => n >= 9 && n <= 12),
+      allFootwear: types.every(t => t === "footwear"),
+      distinct: new Set(sizes).size,
+      spread: typeof sizeSpreadSummary === "function" ? sizeSpreadSummary() : "",
+    };
+  });
+  check("random rolls CONCRETE sizes (no live RANDOM sentinel)", roll.ok && roll.allConcrete, (roll.sizes || []).join(","));
+  check("rolled sizes stay inside the US 9–12 range", roll.ok && roll.allInRange, (roll.sizes || []).join(","));
+  check("rolled sizes are footwear", roll.ok && roll.allFootwear);
+  check("range gives a real spread (>1 distinct size across 10 tasks)", roll.ok && roll.distinct > 1, "distinct=" + roll.distinct);
+  check("spread summary lists the sizes", roll.ok && /US \d/.test(roll.spread), roll.spread);
+
   // 7) Outcome notifications: card present, buildNotifyConfig reflects toggles.
   const notify = await page.evaluate(() => {
     if (!document.getElementById("notifyEnabled")) return { present: false };
