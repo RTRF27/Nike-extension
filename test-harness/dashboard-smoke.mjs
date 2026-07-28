@@ -305,6 +305,66 @@ async function main() {
                       spread: sizeSpreadSummary() };
     return { noHalf, apparel };
   });
+  // 6f) Tasks CSV: Void-style bulk task loading, matched to real accounts.
+  const csv = await page.evaluate(() => {
+    cardProfiles = [{ id: "c1", name: "Visa Main" }, { id: "c2", name: "Amex" }];
+    const text = [
+      "label,profile,sku,size,size_type,card,region,arm",
+      'Acct One,Profile 1,HQ4309-001,10,footwear,Visa Main,SG,true',
+      '"Tang, R",Profile 2,HQ4309-001,10.5,footwear,Amex,MY,false',
+      "Acct Three,Profile 3,HQ4309-001,L,apparel,Nope,,false",
+    ].join("\n");
+    importTasksCsv(text);
+    const a = accounts;
+    return {
+      n: a.length,
+      quotedLabel: a[1] && a[1].label,               // comma inside quotes survived
+      cardMapped: a[0] && a[0].cardId,               // matched by NAME → id
+      badCard: a[2] && a[2].cardId,                  // unknown name → empty, not silent id
+      region: [a[0].regionOverride, a[1].regionOverride, a[2].regionOverride],
+      armed: [a[0].autoLaunch, a[1].autoLaunch],
+      apparel: a[2] && a[2].sizeType,
+      sizes: a.map(x => x.size),
+      header: (typeof TASK_CSV_COLS !== "undefined") ? TASK_CSV_COLS.join(",") : "",
+    };
+  });
+  // 6g) Named proxy groups ([Vital] headers) — Void keeps one file per group.
+  const grp = await page.evaluate(() => {
+    document.getElementById("proxyList").value = [
+      "[Vital]", "v1.prov.com:8000:u:p", "v2.prov.com:8000:u:p",
+      "[Vital 2]", "w1.prov.com:8000:u:p", "w2.prov.com:8000:u:p", "w3.prov.com:8000:u:p",
+    ].join("\n");
+    const groups = proxyGroups();
+    accounts = [
+      { id: "g1", profileDir: "P1", proxyGroup: "Vital" },
+      { id: "g2", profileDir: "P2", proxyGroup: "Vital" },
+      { id: "g3", profileDir: "P3", proxyGroup: "Vital 2" },
+    ];
+    proxyAssignments = {};
+    const picked = accounts.map(a => currentProxyForDir(a.profileDir));
+    // A flat list with no headers must behave exactly as before.
+    document.getElementById("proxyList").value = "a.prov.com:1:u:p\nb.prov.com:1:u:p";
+    const flat = proxyLines();
+    return { names: Object.keys(groups), counts: Object.values(groups).map(v => v.length),
+             picked, flatLen: flat.length, flatHasHeader: flat.some(l => l.startsWith("[")) };
+  });
+  check("proxy groups parse from [Name] headers", grp.names.join(",") === "Vital,Vital 2", grp.names.join(","));
+  check("each group keeps its own proxies", grp.counts.join(",") === "2,3", grp.counts.join(","));
+  check("a task only draws IPs from ITS group",
+    grp.picked[0].startsWith("v") && grp.picked[1].startsWith("v") && grp.picked[2].startsWith("w"),
+    grp.picked.join(" | "));
+  check("accounts in one group get different IPs", grp.picked[0] !== grp.picked[1], grp.picked.join(" | "));
+  check("flat list (no headers) still works unchanged", grp.flatLen === 2 && !grp.flatHasHeader);
+
+  check("tasks CSV imports every row", csv.n === 3, "n=" + csv.n);
+  check("tasks CSV handles quoted commas in a field", csv.quotedLabel === "Tang, R", csv.quotedLabel);
+  check("tasks CSV maps card by NAME to a saved card", csv.cardMapped === "c1", csv.cardMapped);
+  check("unknown card name does NOT silently bind a card", csv.badCard === "", "got=" + csv.badCard);
+  check("tasks CSV reads region + arm flags", csv.region.join(",") === "SG,MY," && csv.armed.join(",") === "true,false",
+    csv.region.join(",") + " | " + csv.armed.join(","));
+  check("tasks CSV keeps apparel size type", csv.apparel === "apparel", csv.apparel);
+  check("tasks CSV preserves sizes", csv.sizes.join(",") === "10,10.5,L", csv.sizes.join(","));
+
   check("no-half rolls WHOLE sizes only", opts.noHalf.anyHalf === false);
   check("no-half still respects the range", opts.noHalf.inRange);
   check("apparel roll assigns apparel-type sizes", opts.apparel.allApparelType);

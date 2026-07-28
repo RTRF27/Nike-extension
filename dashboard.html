@@ -323,6 +323,9 @@
             <button id="selectNoneBtn" class="btn btn-mini btn-dark">☐ NONE</button>
             <button id="armAllBtn"   class="btn btn-mini btn-dark">⏰ ARM ALL</button>
             <button id="unarmAllBtn" class="btn btn-mini btn-danger">✕ UNARM ALL</button>
+            <button id="exportTasksBtn" class="btn btn-mini btn-dark" title="Download every account as tasks.csv">⬇ CSV</button>
+            <button id="importTasksBtn" class="btn btn-mini btn-purple" title="Bulk-load accounts from a tasks.csv">⬆ IMPORT CSV</button>
+            <input type="file" id="importTasksFile" accept=".csv,text/csv" style="display:none;">
             <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
           </div>
         </div>
@@ -768,7 +771,8 @@
             </select>
             <div id="proxyListWrap" style="margin-top:10px;">
               <label class="lbl" for="proxyList">Proxy list <span class="muted">(one per line: host:port:user:pass)</span></label>
-              <textarea id="proxyList" class="inp" rows="5" spellcheck="false" style="resize:vertical; font-family:monospace; font-size:12px;" placeholder="isp1.provider.com:8000:user:pass&#10;isp2.provider.com:8000:user:pass&#10;isp3.provider.com:8000:user:pass"></textarea>
+              <textarea id="proxyList" class="inp" rows="7" spellcheck="false" style="resize:vertical; font-family:monospace; font-size:12px;" placeholder="isp1.provider.com:8000:user:pass&#10;isp2.provider.com:8000:user:pass&#10;&#10;[Vital]&#10;isp3.provider.com:8000:user:pass&#10;&#10;[Vital 2]&#10;isp4.provider.com:8000:user:pass"></textarea>
+              <p class="hint" style="margin:6px 0 0;">Optional <strong>named groups</strong> — put <code>[Group Name]</code> on its own line and the proxies under it belong to that group. Point a task at one with the <code>proxy</code> column in the tasks CSV, and it only ever draws IPs from that group. A plain list with no headers works exactly as before.</p>
             </div>
             <div id="proxyGatewayWrap" style="margin-top:10px; display:none;">
               <label class="lbl" for="proxyGateway">Gateway endpoint <span class="muted">(host:port:user:pass)</span></label>

@@ -799,6 +799,107 @@ async function randomAssign() {
   }
 }
 
+// ── Tasks CSV (Void-style bulk task loading) ──────────────────
+// One row = one account/task, so a whole drop can be built in a spreadsheet and
+// imported, instead of clicking 50 rows. Columns mirror Void's nike.csv where
+// the concepts line up; `card` and `proxy` are matched by NAME like its
+// profile/proxy groups.
+const TASK_CSV_COLS = ["label", "profile", "sku", "size", "size_type", "card", "proxy", "region", "arm"];
+
+function csvEscape(v) {
+  const s = String(v == null ? "" : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+// Minimal RFC4180 parser — handles quoted fields, embedded commas and "" escapes.
+function parseCsv(text) {
+  const rows = []; let row = [], cell = "", q = false;
+  const src = String(text || "").replace(/\r\n?/g, "\n");
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (q) {
+      if (c === '"') { if (src[i + 1] === '"') { cell += '"'; i++; } else q = false; }
+      else cell += c;
+    } else if (c === '"') q = true;
+    else if (c === ",") { row.push(cell); cell = ""; }
+    else if (c === "\n") { row.push(cell); rows.push(row); row = []; cell = ""; }
+    else cell += c;
+  }
+  if (cell.length || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter(r => r.some(c => String(c).trim() !== ""));
+}
+
+function exportTasksCsv() {
+  const lines = [TASK_CSV_COLS.join(",")];
+  (accounts || []).forEach(a => {
+    const card = cardProfiles.find(c => c.id === a.cardId);
+    lines.push([
+      a.label || "", a.profileDir || "",
+      (multiProduct ? (a.keyword || "") : ($("dropKeyword") ? $("dropKeyword").value.trim() : "")),
+      a.size || "", a.sizeType || "footwear",
+      card ? card.name : "",
+      a.proxyGroup || "",
+      a.regionOverride || "", a.autoLaunch ? "true" : "false",
+    ].map(csvEscape).join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "reagan-tasks.csv";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  flashTemp($("statusMsg"), `⬇ Exported ${accounts.length} task(s) to reagan-tasks.csv`, "#1db954", 5000);
+}
+
+// Import REPLACES the account list — that's the point of a task file. Unknown
+// card/region names are reported rather than silently dropped, because a task
+// that silently loses its card would fail at checkout.
+function importTasksCsv(text) {
+  const rows = parseCsv(text);
+  if (rows.length < 2) { flashTemp($("statusMsg"), "CSV has no data rows.", "#fa5400", 5000); return; }
+  const head = rows[0].map(h => String(h).trim().toLowerCase().replace(/\s+/g, "_"));
+  const idx = (n) => head.indexOf(n);
+  if (idx("profile") < 0 && idx("label") < 0) {
+    flashTemp($("statusMsg"), `CSV needs at least a "label" or "profile" column. Found: ${head.join(", ")}`, "#fa5400", 8000);
+    return;
+  }
+  const get = (r, n) => { const i = idx(n); return i >= 0 ? String(r[i] || "").trim() : ""; };
+  const warn = [];
+  const next = [];
+  rows.slice(1).forEach((r, n) => {
+    const label = get(r, "label") || get(r, "profile");
+    const profileDir = get(r, "profile") || get(r, "label");
+    const cardName = get(r, "card");
+    let cardId = "";
+    if (cardName) {
+      const cp = cardProfiles.find(c => (c.name || "").toLowerCase() === cardName.toLowerCase());
+      if (cp) cardId = cp.id; else warn.push(`row ${n + 2}: no saved card named "${cardName}"`);
+    }
+    const region = get(r, "region").toUpperCase();
+    const sizeType = (get(r, "size_type") || "footwear").toLowerCase();
+    next.push({
+      id: uid(), label, profileDir,
+      size: get(r, "size"),
+      sizeType: sizeType === "apparel" ? "apparel" : "footwear",
+      cardId,
+      proxyGroup: get(r, "proxy") || get(r, "proxies"),
+      keyword: get(r, "sku"),
+      regionOverride: (region === "SG" || region === "MY") ? region : "",
+      autoLaunch: /^(true|yes|1)$/i.test(get(r, "arm")),
+      targets: [],
+    });
+  });
+  accounts = next;
+  // A SKU column means the task file owns the product too.
+  const firstSku = next.map(a => a.keyword).find(Boolean);
+  if (firstSku && !multiProduct && $("dropKeyword") && !$("dropKeyword").value.trim()) {
+    $("dropKeyword").value = firstSku;
+  }
+  renderAccounts();
+  saveAll(true);
+  const msg = `⬆ Imported ${next.length} task(s).` + (warn.length ? ` ⚠ ${warn.length} issue(s): ${warn.slice(0, 2).join("; ")}` : "");
+  flashTemp($("statusMsg"), msg, warn.length ? "#f0c070" : "#1db954", warn.length ? 12000 : 6000);
+}
+
 // ── Bot mode (FLOW / SNKRS) ───────────────────────────────────
 // The two modes drive completely different pages and content scripts, so the
 // Setup UI swaps with them: cards tagged [data-mode] only show in their mode.
@@ -3003,9 +3104,40 @@ function syncDropModeUI() {
 }
 
 // ── Proxy + notification config (Settings) ────────────────────
+// All proxies, group headers stripped. A flat list (no headers) behaves exactly
+// as before — this stays backwards compatible with every existing config.
 function proxyLines() {
   const raw = ($("proxyList") && $("proxyList").value) || "";
-  return raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  return raw.split(/\r?\n/).map(s => s.trim())
+    .filter(l => l && !/^\[.+\]$/.test(l));
+}
+// Named groups, Void-style (it keeps one file per group; here one textarea):
+//   [Vital]
+//   host:port:user:pass
+//   [Vital 2]
+//   host:port:user:pass
+// Lines before any header land in "Default", so an unheadered list still works.
+function proxyGroups() {
+  const raw = ($("proxyList") && $("proxyList").value) || "";
+  const groups = {}; let cur = "Default";
+  raw.split(/\r?\n/).forEach(line => {
+    const t = line.trim();
+    if (!t) return;
+    const m = t.match(/^\[(.+)\]$/);
+    if (m) { cur = m[1].trim(); if (!groups[cur]) groups[cur] = []; return; }
+    (groups[cur] = groups[cur] || []).push(t);
+  });
+  return groups;
+}
+function proxyGroupNames() { return Object.keys(proxyGroups()); }
+// The pool an account draws from: its named group if it has one, else everything.
+function proxyPoolFor(acct) {
+  const g = acct && acct.proxyGroup;
+  if (g) {
+    const groups = proxyGroups();
+    if (groups[g] && groups[g].length) return groups[g];
+  }
+  return proxyLines();
 }
 
 function buildProxyConfig() {
@@ -3036,10 +3168,15 @@ function buildProxyConfig() {
 // Deterministic DEFAULT proxy for an account — mirrors the background's sticky
 // mapping (accounts sorted by profileDir, round-robin over the list).
 function defaultProxyForDir(dir) {
-  const list = proxyLines();
+  const acct = (accounts || []).find(a => a && a.profileDir === dir);
+  const list = proxyPoolFor(acct);
   if (!list.length) return "";
-  const dirs = (accounts || []).map(a => a && a.profileDir).filter(Boolean).sort();
-  let i = dirs.indexOf(dir);
+  // Index within the SAME group so each group is spread evenly across the
+  // accounts that use it.
+  const peers = (accounts || [])
+    .filter(a => a && a.profileDir && (a.proxyGroup || "") === ((acct && acct.proxyGroup) || ""))
+    .map(a => a.profileDir).sort();
+  let i = peers.indexOf(dir);
   if (i < 0) i = 0;
   return list[i % list.length];
 }
@@ -4370,6 +4507,20 @@ document.addEventListener("DOMContentLoaded", async () => {
   syncDropModeUI();
 
   // ── Checkout method (Organic / Direct) selector ──
+  if ($("exportTasksBtn")) $("exportTasksBtn").addEventListener("click", exportTasksCsv);
+  if ($("importTasksBtn")) $("importTasksBtn").addEventListener("click", () => {
+    if (!accounts.length || confirm(`Import replaces all ${accounts.length} current account row(s). Continue?`)) {
+      $("importTasksFile").click();
+    }
+  });
+  if ($("importTasksFile")) $("importTasksFile").addEventListener("change", (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => { try { importTasksCsv(String(rd.result || "")); } catch (err) { flashTemp($("statusMsg"), "CSV parse failed: " + err.message, "var(--red)", 8000); } };
+    rd.readAsText(f);
+    e.target.value = "";   // allow re-importing the same file
+  });
   ["botModeSnkrs", "botModeFlow"].forEach(id => {
     const el = $(id);
     if (!el) return;
