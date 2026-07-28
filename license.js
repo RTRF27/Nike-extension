@@ -1,5 +1,5 @@
 // ============================================================
-// SNKRS Bot – License validation utilities
+// Reagan Bot – License validation utilities
 // Shared between admin.js (signing) and dashboard.js (verifying).
 // Uses the Web Crypto API (RSA-PSS / SHA-256, 2048-bit keys).
 // ============================================================

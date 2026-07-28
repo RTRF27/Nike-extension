@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – Boot Config Bootstrap (document_start)
+// Reagan Bot – Boot Config Bootstrap (document_start)
 // ============================================================
 // When the dashboard launches a Chrome profile for a drop, it opens the
 // product URL tagged with "#snkrsBoot=<profileDir>". This script runs

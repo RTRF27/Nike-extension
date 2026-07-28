@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – Product Page Content Script
+// Reagan Bot – Product Page Content Script
 // URL: nike.com/sg/launch/t/<slug>
 //
 // Confirmed from screenshots:

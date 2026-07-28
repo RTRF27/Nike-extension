@@ -1,5 +1,5 @@
 // ============================================================
-// SNKRS Bot – Admin Panel
+// Reagan Bot – Admin Panel
 // Manages the RSA key pair, generates/revokes license keys.
 // Requires license.js to be loaded first.
 // ============================================================

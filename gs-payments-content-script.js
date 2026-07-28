@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – gs-payments.nike.com iframe Content Script
+// Reagan Bot – gs-payments.nike.com iframe Content Script
 // Fast but human-like: urgent typist copping hyped shoes
 // ============================================================
 

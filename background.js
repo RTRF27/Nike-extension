@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – Background Service Worker
+// Reagan Bot – Background Service Worker
 // ============================================================
 
 // Region (SG/MY) classifier — shared pure module, also used by Node tests.
@@ -1512,7 +1512,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
       try {
-        const results = await sendTestNotify("🎉 GOT 'EM — WON — Test account. This is a test from your SNKRS Bot dashboard. Notifications are working.");
+        const results = await sendTestNotify("🎉 GOT 'EM — WON — Test account. This is a test from your Reagan Bot dashboard. Notifications are working.");
         const failed = results.filter(r => !r.ok);
         if (!failed.length) sendResponse({ ok: true, channels: results.map(r => r.ch) });
         else sendResponse({ ok: false, error: failed.map(r => `${r.ch}: ${r.error}`).join(" · ") });

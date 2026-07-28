@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – gs.nike.com Boot + Drop-Time Gate (document_start)
+// Reagan Bot – gs.nike.com Boot + Drop-Time Gate (document_start)
 // ============================================================
 // When the dashboard launches an account straight to a DIRECT checkout URL
 // (https://gs.nike.com/?checkoutId=..&launchId=..&skuId=..), we skip the

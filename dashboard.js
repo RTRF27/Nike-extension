@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – Drop Dashboard
+// Reagan Bot – Drop Dashboard
 // ============================================================
 // Central control room for running ONE drop across MANY Chrome profiles
 // (= many Nike accounts). It:

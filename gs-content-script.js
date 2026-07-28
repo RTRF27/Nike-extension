@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – GS Checkout Content Script (adapter)
+// Reagan Bot – GS Checkout Content Script (adapter)
 // URL: gs.nike.com/?checkoutId=...
 // ============================================================
 // This is now a THIN ADAPTER. All the DOM detection + the explicit

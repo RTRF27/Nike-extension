@@ -1,5 +1,5 @@
 // ============================================================
-// Nike SNKRS Bot – Checkout Core (pure, testable)
+// Reagan Bot – Checkout Core (pure, testable)
 // ============================================================
 // The checkout DOM logic + an explicit state machine, with ZERO chrome.*
 // dependencies. This is what makes the flow:
