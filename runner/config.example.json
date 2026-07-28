@@ -1,0 +1,8 @@
+{
+  "placeOrder": true,
+  "headless": false,
+  "keepOpen": false,
+  "discordWebhook": "",
+  "telegramToken": "",
+  "telegramChatId": ""
+}

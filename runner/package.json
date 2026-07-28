@@ -1,0 +1,15 @@
+{
+  "name": "reagan-runner",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reagan Bot task runner — drives your real signed-in Chrome profiles.",
+  "main": "src/index.js",
+  "bin": { "reagan-runner": "src/index.js" },
+  "scripts": {
+    "start": "node src/index.js",
+    "dry": "node src/index.js --dry-run",
+    "profiles": "node src/index.js --list-profiles",
+    "test": "node test/worker-test.mjs",
+    "build:exe": "pkg . --targets node18-win-x64 --output dist/reagan-runner.exe"
+  }
+}

@@ -1,0 +1,4 @@
+id,sku,region,mode,sizes,chrome_profile,proxies,profile_group,delay,quantity,auto_checkout,enabled
+1,HQ4309-001,sg,flow,10;10.5;11,Profile 1,Vital,SG,3000,1,true,true
+2,HQ4309-001,sg,flow,9;9.5,Profile 2,Vital 2,SG,3000,1,true,true
+3,IO2047-001,sg,flow,,Profile 3,Vital,SG,3000,1,false,true

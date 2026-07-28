@@ -10,3 +10,17 @@ node_modules/
 package-lock.json
 snkrs-bot.zip
 pack-tmp.cjs
+
+# ── Reagan Runner: real operational data — NEVER commit ──
+# These hold card numbers/CVVs, proxy credentials and webhook URLs.
+runner/config.json
+runner/tasks.csv
+runner/workers.csv
+runner/proxies/
+runner/profiles/
+runner/orders/
+runner/checkouts/
+runner/dist/
+runner/node_modules/
+# The *.example.* files are safe and ARE tracked.
+!runner/*.example.*
