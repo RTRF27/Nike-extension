@@ -402,6 +402,9 @@ let randomMaxA = "XXL";
 let randomNoHalf = false;      // footwear: roll whole sizes only (slippers/sandals)
 let products = [];             // [{id,url,keyword,sizePool:[]}] for multi-product
 let multiProduct = false;
+// FLOW vs SNKRS. SNKRS is the tested launch/draw path and stays the default;
+// FLOW is the general nike.com catalogue path (product → Bag → Checkout).
+let botMode = "snkrs";
 let proxyAssignments = {};     // {profileDir: "host:port:user:pass"} manual overrides (swap)
 let currentRunId  = null;      // ID of the most recently launched history entry
 let countdownTimer = null;
@@ -794,6 +797,40 @@ async function randomAssign() {
     flashTemp(msg, `🎲 Dealt sizes to ${accounts.length} accounts from a pool of ${singleSizePool.length}.`, "#1db954", 4000);
     await assignCheckoutUrls(msg); // build direct checkout URLs for the new sizes
   }
+}
+
+// ── Bot mode (FLOW / SNKRS) ───────────────────────────────────
+// The two modes drive completely different pages and content scripts, so the
+// Setup UI swaps with them: cards tagged [data-mode] only show in their mode.
+function botModeValue() {
+  return ($("botModeFlow") && $("botModeFlow").checked) ? "flow" : "snkrs";
+}
+function applyBotModeUI() {
+  const m = botMode;
+  document.querySelectorAll(".mode-only").forEach(el => {
+    el.style.display = (el.dataset.mode === m) ? "" : "none";
+  });
+  const tag = $("botModeTag");
+  if (tag) tag.textContent = m === "flow" ? "FLOW" : "SNKRS";
+  const hs = $("botModeHintSnkrs"), hf = $("botModeHintFlow");
+  if (hs) hs.style.display = m === "snkrs" ? "" : "none";
+  if (hf) hf.style.display = m === "flow" ? "" : "none";
+  if ($("botModeSnkrs")) $("botModeSnkrs").checked = m === "snkrs";
+  if ($("botModeFlow")) $("botModeFlow").checked = m === "flow";
+  document.body.classList.toggle("mode-flow", m === "flow");
+  // Flow has no draw timing, so the LEO/DAN submit gate doesn't apply.
+  const st = $("scheduleStatus");
+  if (st && m === "flow") st.style.display = "none";
+}
+function flowCfg() {
+  const num = (id, def) => { const e = $(id); const v = e ? parseInt(e.value, 10) : NaN; return isNaN(v) ? def : v; };
+  return {
+    flowMaxRetries:    Math.max(0, num("flowMaxRetries", 5)),
+    flowRetryDelaySec: Math.max(0, num("flowRetryDelaySec", 5)),
+    flowTimeLimitMin:  Math.max(0, num("flowTimeLimitMin", 25)),
+    flowAutoCheckout:  $("flowAutoCheckout") ? !!$("flowAutoCheckout").checked : true,
+    flowAutoPlaceOrder: $("flowAutoPlaceOrder") ? !!$("flowAutoPlaceOrder").checked : false,
+  };
 }
 
 // ── Status badge metadata ─────────────────────────────────────
@@ -3236,6 +3273,8 @@ function buildConfig() {
     options: {
       enabled: $("optEnabled").checked,
       testMode: $("optTestMode").checked,
+      botMode,
+      ...flowCfg(),
       leoMode: isLeoModeSelected(),
       dropMode: isLeoModeSelected() ? "LEO" : "DAN",
       danJitterSec: $("danJitterSec") ? Math.max(0, parseInt($("danJitterSec").value, 10) || 0) : 0,
@@ -4100,6 +4139,13 @@ function applyConfigToUI(cfg) {
   if ($("tileH")) $("tileH").value = opts.tileH ?? 680;
   $("optEnabled").checked = opts.enabled ?? true;
   $("optTestMode").checked = opts.testMode ?? false;
+  botMode = opts.botMode === "flow" ? "flow" : "snkrs";
+  if ($("flowMaxRetries") && opts.flowMaxRetries != null) $("flowMaxRetries").value = opts.flowMaxRetries;
+  if ($("flowRetryDelaySec") && opts.flowRetryDelaySec != null) $("flowRetryDelaySec").value = opts.flowRetryDelaySec;
+  if ($("flowTimeLimitMin") && opts.flowTimeLimitMin != null) $("flowTimeLimitMin").value = opts.flowTimeLimitMin;
+  if ($("flowAutoCheckout")) $("flowAutoCheckout").checked = opts.flowAutoCheckout ?? true;
+  if ($("flowAutoPlaceOrder")) $("flowAutoPlaceOrder").checked = !!opts.flowAutoPlaceOrder;
+  applyBotModeUI();
   const isLeo = opts.dropMode ? opts.dropMode === "LEO" : !!opts.leoMode;
   if ($("dropModeLeo")) $("dropModeLeo").checked = isLeo;
   if ($("dropModeDan")) $("dropModeDan").checked = !isLeo;
@@ -4324,6 +4370,25 @@ document.addEventListener("DOMContentLoaded", async () => {
   syncDropModeUI();
 
   // ── Checkout method (Organic / Direct) selector ──
+  ["botModeSnkrs", "botModeFlow"].forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    el.addEventListener("change", () => {
+      botMode = botModeValue();
+      applyBotModeUI();
+      saveAll(true);
+      const m = $("assignMsg");
+      if (m) flashTemp(m, botMode === "flow"
+        ? "🛍️ FLOW mode — nike.com catalogue (product → Bag → Checkout). Reload the extension in each profile."
+        : "👟 SNKRS mode — launch/draw flow.", "#1db954", 6000);
+    });
+  });
+  ["flowMaxRetries", "flowRetryDelaySec", "flowTimeLimitMin"].forEach(id => {
+    const el = $(id); if (el) el.addEventListener("change", () => saveAll(true));
+  });
+  ["flowAutoCheckout", "flowAutoPlaceOrder"].forEach(id => {
+    const el = $(id); if (el) el.addEventListener("change", () => saveAll(true));
+  });
   ["checkoutModeOrganic", "checkoutModeDirect"].forEach(id => {
     const el = $(id);
     if (el) el.addEventListener("change", () => { syncCheckoutModeUI(); saveAll(true); });

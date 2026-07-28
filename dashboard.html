@@ -188,6 +188,31 @@
         </div>
       </div>
 
+          <section class="card mode-card">
+            <div class="card-head">
+              <h2>⚡ BOT MODE</h2>
+              <span class="card-tag" id="botModeTag">SNKRS</span>
+            </div>
+            <div class="modepick">
+              <label class="modepick-opt">
+                <input type="radio" name="botMode" id="botModeSnkrs" value="snkrs" checked>
+                <span class="modepick-pill">
+                  <strong>👟 SNKRS</strong>
+                  <span>Draws &amp; launches on <code>nike.com/launch</code> → gs.nike.com checkout</span>
+                </span>
+              </label>
+              <label class="modepick-opt">
+                <input type="radio" name="botMode" id="botModeFlow" value="flow">
+                <span class="modepick-pill">
+                  <strong>🛍️ FLOW</strong>
+                  <span>General catalogue on <code>nike.com/t/…</code> → Bag → Checkout</span>
+                </span>
+              </label>
+            </div>
+            <p class="hint" id="botModeHintSnkrs" style="margin:10px 0 0;">Raffle/launch flow: waits for the drop, picks the size on the launch page, then Buy / Join Draw. This is the tested path.</p>
+            <p class="hint" id="botModeHintFlow" style="margin:10px 0 0; display:none;">Normal store flow: opens the product by SKU, picks the size (radio grid), <strong>Add to Bag</strong>, then the bag → checkout. Use for general releases and restocks, not draws.</p>
+          </section>
+
           <section class="card">
             <div class="card-head">
               <h2>PRODUCT</h2>
@@ -380,7 +405,7 @@
         </div>
       </div>
 
-      <section class="card" style="margin-bottom:22px;">
+      <section class="card mode-only" data-mode="snkrs" style="margin-bottom:22px;">
         <div class="card-head">
           <h2>🛒 CHECKOUT METHOD</h2>
           <span class="card-tag">HOW EACH ACCOUNT COPS</span>
@@ -398,6 +423,42 @@
           </div>
           <p class="hint" id="checkoutHintOrganic" style="margin:8px 0 0;">Opens the SNKRS <strong>launch page</strong>, selects the size, and clicks <strong>Buy / Join Draw</strong> — letting Nike navigate to checkout the natural way. Slower by a moment, but avoids the <strong>“entry invalid”</strong> error you get from a pre-built checkout link. Recommended.</p>
           <p class="hint" id="checkoutHintDirect" style="margin:8px 0 0; display:none;">Jumps each account straight to its <strong>gs.nike.com</strong> checkout link (built below), skipping the launch page. Fastest, but Nike can reject the entry (<em>“entry invalid”</em>) if the link wasn’t established through the launch flow.</p>
+        </div>
+      </section>
+
+      <section class="card mode-only" data-mode="flow" style="margin-bottom:22px;">
+        <div class="card-head">
+          <h2>🛍️ FLOW BEHAVIOUR</h2>
+          <span class="card-tag">RETRY &amp; CHECKOUT</span>
+        </div>
+        <p class="hint">How hard each task tries on a general release. A Flow task keeps retrying while the size is out of stock, so a restock gets caught instead of failing once.</p>
+        <div class="row" style="gap:10px; flex-wrap:wrap; margin-top:10px;">
+          <div>
+            <label class="lbl" for="flowMaxRetries">Max retries</label>
+            <input type="number" id="flowMaxRetries" class="inp" value="5" min="0" max="200" style="width:90px;">
+          </div>
+          <div>
+            <label class="lbl" for="flowRetryDelaySec">Retry delay (s)</label>
+            <input type="number" id="flowRetryDelaySec" class="inp" value="5" min="0" max="600" style="width:100px;">
+          </div>
+          <div>
+            <label class="lbl" for="flowTimeLimitMin">Give up after (min)</label>
+            <input type="number" id="flowTimeLimitMin" class="inp" value="25" min="0" max="600" style="width:120px;">
+          </div>
+        </div>
+        <div class="toggle" style="margin-top:14px;">
+          <div>
+            <div class="t-label">🛒 Auto-checkout after Add to Bag</div>
+            <div class="t-hint">Go straight from the bag to checkout. Off = stop with the item sitting in the bag.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="flowAutoCheckout" checked><span class="track"></span></label>
+        </div>
+        <div class="toggle" style="margin-top:10px;">
+          <div>
+            <div class="t-label">🚀 Auto place order</div>
+            <div class="t-hint"><strong>Spends money.</strong> Clicks Place Order at checkout. Leave OFF to review each order yourself first.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="flowAutoPlaceOrder"><span class="track"></span></label>
         </div>
       </section>
 
@@ -432,7 +493,7 @@
           </section>
         </div>
         <div class="col">
-          <section class="card">
+          <section class="card mode-only" data-mode="snkrs">
             <div class="card-head">
               <h2>DROP TYPE</h2>
               <span class="card-tag">LEO / DAN</span>
@@ -571,7 +632,7 @@
       </section>
 
       <details class="adv-block">
-        <summary>Advanced — manual gs.nike.com checkout links</summary>
+        <summary>Advanced — manual gs.nike.com checkout links (SNKRS only)</summary>
           <section class="card">
             <div class="card-head">
               <h2>🔗 GS CHECKOUT LINKS</h2>

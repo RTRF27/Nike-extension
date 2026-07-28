@@ -1102,6 +1102,14 @@ function buildSettingsForProfile(config, profileDir) {
   return {
     enabled:             opts.enabled ?? true,
     testMode:            opts.testMode ?? false,
+    // FLOW (nike.com catalogue) vs SNKRS (launch/draw). Decides which content
+    // script actually runs — each one no-ops in the other mode.
+    botMode:             opts.botMode === "flow" ? "flow" : "snkrs",
+    flowMaxRetries:      opts.flowMaxRetries ?? 5,
+    flowRetryDelaySec:   opts.flowRetryDelaySec ?? 5,
+    flowTimeLimitMin:    opts.flowTimeLimitMin ?? 25,
+    flowAutoCheckout:    opts.flowAutoCheckout ?? true,
+    flowAutoPlaceOrder:  opts.flowAutoPlaceOrder ?? false,
     leoMode:             opts.leoMode ?? false,   // ⚡ LEO = FCFS speed checkout
     danJitterSec:        opts.danJitterSec ?? 0,  // DAN raffle human submit delay
     preferredSize:       account.size || "",
@@ -1728,6 +1736,21 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const when = Number(msg.dropAtMs) - (Number(msg.prepMs) || 30000);
       armTabReload(tabId, when, msg.bootUrl || (sender.tab && sender.tab.url) || "");
     }
+    return false;
+  }
+
+  // FLOW mode counters (carted / completed / declined) per profile, for the
+  // Void-style task stats on the dashboard.
+  if (msg.type === "flow_stat") {
+    const key = msg.profileDir || "unknown";
+    chrome.storage.local.get("flowStats", (d) => {
+      const all = d.flowStats || {};
+      const row = all[key] || { carted: 0, completed: 0, declined: 0 };
+      if (msg.stat in row) row[msg.stat]++;
+      row.updated = Date.now();
+      all[key] = row;
+      chrome.storage.local.set({ flowStats: all });
+    });
     return false;
   }
 

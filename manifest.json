@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reagan Bot",
-  "version": "4.45",
+  "version": "4.46",
   "description": "Auto-selects size and submits SNKRS raffle entries on nike.com/sg. Multi-account dashboard launches each Chrome profile for the same drop.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvWRR7bAtlpOWpEpfxtJp31FHtAgSCz7sVCl2cBwXpZ82SdKVsU1SIWsj0E6vGiGkBCYUZz2OqIWdlGT+XvxHhAcyU2AV2SZnbg/NfAZKl6bJPVTUG9DWJRcNvD3JbWFJdf9FGSIOxto20zxyK7GdJE5DYhT6nQiJzU5twYfIzKmOpCUMuzymdxRyrtrt3RcBN1Jcqy+9M0Nhz1BO2/p5HXSMSNTHVEBZpiUVPWVGJR6+2vmJ9WvVeoNONHfB2+nAUp0oNFkEKumEuKwkV/lenSKv71DYEX2cfENkYzMv3euANkIx7zjTHbRFUNn+t3r9+CIWTT7G8NqvRPzdUGGgfwIDAQAB",
   "icons": {
@@ -68,6 +68,22 @@
       ],
       "js": [
         "snkrs-content-script.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.nike.com/*/t/*",
+        "https://nike.com/*/t/*",
+        "https://www.nike.com/*/cart*",
+        "https://nike.com/*/cart*",
+        "https://www.nike.com/*/checkout*",
+        "https://nike.com/*/checkout*",
+        "https://www.nike.com/checkout*",
+        "https://nike.com/checkout*"
+      ],
+      "js": [
+        "flow-content-script.js"
       ],
       "run_at": "document_idle"
     },
