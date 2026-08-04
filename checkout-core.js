@@ -36,11 +36,32 @@
   }
 
   // CSS-computed visibility — works when minimized (unlike offsetParent).
+  //
+  // Must walk ANCESTORS. getComputedStyle on an element inside a display:none
+  // subtree returns that element's OWN display ("inline-block"), not "none" —
+  // the browser reports computed, not used, values. Checking only the element
+  // therefore says "visible" for anything hidden by a collapsed parent, which is
+  // exactly how gs.nike.com's Angular accordion hides the review step (and its
+  // Submit Order button) until payment commits. Same for opacity, which is not
+  // an inherited property. `visibility` does inherit, but walk it anyway so all
+  // three are handled uniformly.
+  //
+  // Purely CSS-computed, so it still works in a minimized window where no
+  // layout pass runs and offsetParent/getBoundingClientRect are useless.
   function isLogicallyVisible(el) {
     if (!el) return false;
     const view = (el.ownerDocument && el.ownerDocument.defaultView) || window;
-    const s = view.getComputedStyle(el);
-    return s.display !== "none" && s.visibility !== "hidden" && parseFloat(s.opacity || "1") > 0;
+    let node = el;
+    while (node && node.nodeType === 1) {
+      if (node.hasAttribute && node.hasAttribute("hidden")) return false;
+      const s = view.getComputedStyle(node);
+      if (!s) return false;
+      if (s.display === "none") return false;
+      if (s.visibility === "hidden" || s.visibility === "collapse") return false;
+      if (parseFloat(s.opacity || "1") === 0) return false;
+      node = node.parentElement;
+    }
+    return true;
   }
 
   // Element that anchors the top of the payment card form. Used for
@@ -181,12 +202,21 @@
   }
 
   // SUBMIT ORDER — confirmed class button-submit, text fallback.
+  //
+  // MUST require CSS visibility, exactly like the CONTINUE finders above.
+  // gs.nike.com is an Angular accordion: the review step (and its
+  // <button class="button-submit">Submit Order</button>) is in the DOM from the
+  // start but display:none until payment is committed. It carries no `disabled`
+  // attribute while hidden, so a disabled-only check finds it immediately,
+  // reports "SUBMIT ORDER found and enabled", clicks a hidden element that
+  // Angular ignores, and the order silently never submits.
   function findSubmitOrderButton(doc) {
     doc = doc || document;
-    const byClass = doc.querySelector("button.button-submit");
-    if (byClass && !byClass.disabled) return byClass;
+    const usable = (b) => b && !b.disabled && isLogicallyVisible(b);
+    const byClass = Array.from(doc.querySelectorAll("button.button-submit")).find(usable);
+    if (byClass) return byClass;
     return Array.from(doc.querySelectorAll("button")).find(b => {
-      if (b.disabled) return false;
+      if (!usable(b)) return false;
       return (b.textContent || "").trim().toUpperCase() === "SUBMIT ORDER";
     }) || null;
   }
@@ -651,12 +681,34 @@
       const heartbeat = this.leo ? null : setInterval(() => {
         hb++;
         const all = Array.from(doc.querySelectorAll("button.button-submit"));
+        // Report VISIBLE separately from enabled — a hidden-but-enabled submit
+        // is the exact state that used to look like success and wasn't.
         this._log(`💓${tag} [3/3] waiting for SUBMIT (${hb * 3}s) — submitBtns=${all.length} ` +
-          `enabled=${all.filter(b => !b.disabled).length} | paymentCont=${!!this.finder("paymentContinue")}`);
+          `enabled=${all.filter(b => !b.disabled).length} ` +
+          `visible=${all.filter(b => !b.disabled && isLogicallyVisible(b)).length} | ` +
+          `paymentCont=${!!this.finder("paymentContinue")}`);
       }, 3000);
-      // LEO polls the SUBMIT button every 25ms so it's clickable the instant it
-      // appears; the raffle path keeps its 100ms cadence.
-      let submitBtn = await waitFor(() => this.finder("submit"), 12000, this.leo ? 25 : 100);
+
+      // SUBMIT only appears once payment is COMMITTED. If a payment CONTINUE is
+      // still on screen the commit didn't take, so keep committing while we wait
+      // instead of timing out against a step that never opened.
+      let submitBtn = null;
+      {
+        const deadline = Date.now() + 12000;
+        const poll = this.leo ? 25 : 100;
+        let lastCommit = 0;
+        while (Date.now() < deadline) {
+          submitBtn = this.finder("submit");
+          if (submitBtn) break;
+          const pc = this.finder("paymentContinue");
+          if (pc && Date.now() - lastCommit > 1500) {
+            lastCommit = Date.now();
+            this._log(`↻${tag} [3/3] SUBMIT not revealed yet and CONTINUE (payment) is still up — committing again…`);
+            await nativeClick(pc, "CONTINUE (payment) re-commit", this.leo, (m) => this._dbg(m));
+          }
+          await wait(poll);
+        }
+      }
       if (heartbeat) clearInterval(heartbeat);
 
       if (!submitBtn) {
