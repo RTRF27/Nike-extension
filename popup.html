@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>SNKRS Bot</title>
   <link rel="stylesheet" href="popup.css" />
+  <link rel="stylesheet" href="icons.css" />
 </head>
 <body>
   <div class="shell">
@@ -31,7 +33,7 @@
     <section class="section">
       <div class="section-label">MULTI-ACCOUNT</div>
       <p class="section-hint">Run one drop across several Chrome profiles from a single control room — central drop, central card, one-click launch per profile.</p>
-      <button id="openDashboardBtn" class="save-btn" style="background:#fa5400; color:#fff;">⊞ OPEN DROP DASHBOARD</button>
+      <button id="openDashboardBtn" class="save-btn" style="background:var(--accent); color:#fff;"><i class="ico ico-dashboard" aria-hidden="true"></i>OPEN DROP DASHBOARD</button>
     </section>
 
     <!-- Profile -->
@@ -58,7 +60,7 @@
       <div class="section-label">TARGET PRODUCT <span style="font-weight:400; opacity:0.6;">(optional)</span></div>
       <p class="section-hint">Only needed on collection pages with several products. Type part of the product name or its SKU, and the bot will pick the size from that product only. Leave blank for single-product drops.</p>
       <input type="text" id="productKeyword" class="field-input" placeholder="e.g. Anthem Jacket  or  IM3219-100" autocomplete="off">
-      <button id="previewMainBtn" class="save-btn" style="margin-top:8px; background:#1db954;">🔍 PREVIEW TARGET ON PAGE</button>
+      <button id="previewMainBtn" class="save-btn" style="margin-top:8px; background:var(--accent);"><i class="ico ico-search" aria-hidden="true"></i>PREVIEW TARGET ON PAGE</button>
       <div id="previewMainMsg" class="save-msg"></div>
     </section>
 
@@ -96,7 +98,7 @@
           <div id="schedulerPanel" style="margin-top:10px; display:none;">
             <label class="field-label" for="dropTime">Drop time (your local time)</label>
             <input type="datetime-local" id="dropTime" class="field-input">
-            <button id="openNowBtn" class="save-btn" style="margin-top:10px; background:#222;">OPEN BOTH TABS NOW (TEST)</button>
+            <button id="openNowBtn" class="save-btn" style="margin-top:10px; background:var(--grey2);">OPEN BOTH TABS NOW (TEST)</button>
           </div>
         </div>
 
@@ -108,7 +110,7 @@
     <section class="section">
       <div class="section-label">
         PAYMENT CARD
-        <span class="lock-icon" title="Stored locally in this browser only">🔒</span>
+        <span class="lock-icon" title="Stored locally in this browser only"><i class="ico ico-lock" aria-hidden="true"></i></span>
       </div>
       <p class="section-hint">Bot will autofill these into the eShopWorld payment form on checkout.</p>
 
@@ -133,7 +135,7 @@
         </div>
       </div>
 
-      <p class="card-warning">⚠ Stored in chrome.storage.sync — do not use on shared computers.</p>
+      <p class="card-warning"><i class="ico ico-alert" aria-hidden="true"></i>Stored in chrome.storage.sync — do not use on shared computers.</p>
     </section>
 
     <!-- Status Poller -->

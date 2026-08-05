@@ -150,8 +150,11 @@ function buildSubnav(group, active) {
   nav.style.display = "flex";
   g.sections.forEach((sec, i) => {
     const b = document.createElement("button");
-    b.className = "subtab" + (sec === active ? " active" : "");
+    const on = sec === active;
+    b.className = "subtab" + (on ? " active" : "");
     b.textContent = (g.tabs && g.tabs[i]) || sec.toUpperCase();
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", on ? "true" : "false");
     b.addEventListener("click", () => navigateTo(group, sec));
     nav.appendChild(b);
   });
@@ -173,7 +176,13 @@ function navigateTo(name, subSection) {
     if (el) { el.classList.add("active"); _visibleSections.add(sec); }
   });
 
-  document.querySelectorAll(".side-item").forEach(t => t.classList.toggle("active", t.dataset.nav === group));
+  document.querySelectorAll(".side-item").forEach(t => {
+    const on = t.dataset.nav === group;
+    t.classList.toggle("active", on);
+    // The active state was carried by colour alone, which tells a screen
+    // reader nothing about where you are.
+    if (on) t.setAttribute("aria-current", "page"); else t.removeAttribute("aria-current");
+  });
   buildSubnav(group, active);
 
   _currentGroup = group;
@@ -265,7 +274,7 @@ function renderLastDrop(hist) {
   const wins = entries.filter(([, code]) => (code || "").toLowerCase().includes("win")).length;
 
   if (tag) tag.textContent =
-    `${wins > 0 ? "🏆 " + wins + " WIN" + (wins > 1 ? "S" : "") : "NO WINS"}${dateStr ? " · " + dateStr : ""}`;
+    `${wins > 0 ? "" + wins + " WIN" + (wins > 1 ? "S" : "") : "NO WINS"}${dateStr ? " · " + dateStr : ""}`;
 
   // Resolve a profileDir to its friendly label from this run's account list.
   const labelFor = (pd) => {
@@ -280,7 +289,7 @@ function renderLastDrop(hist) {
   } else {
     entries.slice(0, 8).forEach(([pd, code]) => {
       const meta = STATUS_META[code] || { text: code || "?", color: "var(--grey)" };
-      html += `<span class="home-drop-chip" style="color:${meta.color}">${labelFor(pd)}: ${meta.text}</span>`;
+      html += `<span class="home-drop-chip" style="color:${meta.color}">${labelFor(pd)}: ${statusHTML(meta)}</span>`;
     });
   }
   div.innerHTML = html;
@@ -326,7 +335,7 @@ function renderUpcoming(drops, note) {
     const name = el("div", { className: "upcoming-name" }, d.title || "Nike Drop");
     body.appendChild(name);
     if (d.subtitle) body.appendChild(el("div", { className: "upcoming-sub" }, d.subtitle));
-    body.appendChild(el("div", { className: "upcoming-date" }, "📅 " + fmtUpcomingDate(d.dateISO)));
+    body.appendChild(el("div", { className: "upcoming-date" }, "" + fmtUpcomingDate(d.dateISO)));
 
     const metaRow = document.createElement("div");
     metaRow.className = "upcoming-meta-row";
@@ -394,7 +403,7 @@ const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl
 
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
 let singleRandomSize = false;  // single-product: roll a size per task from a range
-let randomKind = "footwear";   // 🎲 roll from footwear (US) or apparel (XXS–XXL)
+let randomKind = "footwear";   // roll from footwear (US) or apparel (XXS–XXL)
 let randomMin = "9";           // footwear roll range (inclusive)
 let randomMax = "12";
 let randomMinA = "XXS";        // apparel roll range (inclusive)
@@ -644,13 +653,13 @@ function renderProductPreview(box, meta, pageUrl) {
   const info = el("div", { className: "product-preview-info" });
   info.appendChild(el("div", { className: "product-preview-name" }, (meta && meta.name) || (meta && meta.sku) || "Product"));
   if (meta && meta.sku) info.appendChild(el("div", { className: "product-preview-sku" }, meta.sku));
-  if (meta && meta.dropTimeISO) info.appendChild(el("div", { className: "product-preview-date" }, "📅 " + fmtUpcomingDate(meta.dropTimeISO)));
+  if (meta && meta.dropTimeISO) info.appendChild(el("div", { className: "product-preview-date" }, "" + fmtUpcomingDate(meta.dropTimeISO)));
   // DRAW = raffle: you can't direct-checkout, you enter the draw. Flag it so the
   // user doesn't expect BUILD DIRECT CHECKOUT URLS to work for this product.
   if (meta && meta.method) {
     const isDraw = /draw/i.test(meta.method);
     info.appendChild(el("div", { className: "product-preview-date" },
-      isDraw ? "🎟️ DRAW (raffle) — enter, don't direct-checkout" : `🛒 ${meta.method} (first-come buy)`));
+      isDraw ? "DRAW (raffle) — enter, don't direct-checkout" : `${meta.method} (first-come buy)`));
   }
   if (url) info.appendChild(el("div", { className: "product-preview-open" }, "▶ click image to open product page"));
   box.appendChild(info);
@@ -674,19 +683,19 @@ async function generateGsLinks() {
   const msg  = $("gsLinkMsg");
   const list = $("gsLinkList");
   list.innerHTML = "";
-  if (!sku) { msg.style.color = "#fa5400"; msg.textContent = "Enter a SKU first."; return; }
+  if (!sku) { msg.style.color = "var(--orange)"; msg.textContent = "Enter a SKU first."; return; }
   msg.style.color = "#888"; msg.textContent = `Resolving ${sku} from Nike…`;
 
   let d;
   try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
   if (!d || !d.ok) {
-    msg.style.color = "#fa5400";
+    msg.style.color = "var(--orange)";
     msg.textContent = `Couldn't resolve ${sku}: ${(d && d.error) || "not found"}. Sizes often publish closer to drop time.`;
     return;
   }
   const skus = d.skus || [];
   if (!skus.length) {
-    msg.style.color = "#fa5400";
+    msg.style.color = "var(--orange)";
     msg.textContent = `No sizes published for ${sku} yet — try again nearer the drop.`;
     return;
   }
@@ -751,13 +760,13 @@ function shortUrl(u) {
 
 async function randomAssign() {
   const msg = $("assignMsg");
-  if (!accounts.length) { flashTemp(msg, "Add at least one account first.", "#fa5400"); return; }
+  if (!accounts.length) { flashTemp(msg, "Add at least one account first.", "var(--orange)"); return; }
 
   if (multiProduct) {
     const prods = products.filter(p => (p.url || "").trim());
-    if (!prods.length) { flashTemp(msg, "Add at least one product with a URL.", "#fa5400"); return; }
+    if (!prods.length) { flashTemp(msg, "Add at least one product with a URL.", "var(--orange)"); return; }
     if (prods.some(p => !(p.sizePool || []).length)) {
-      flashTemp(msg, "Every product needs at least one size in its range.", "#fa5400"); return;
+      flashTemp(msg, "Every product needs at least one size in its range.", "var(--orange)"); return;
     }
     // EVERY account cops EVERY product — one checkout tab per product, each with
     // its own size dealt from that product's pool (no repeats across accounts).
@@ -774,7 +783,7 @@ async function randomAssign() {
     });
     renderAccounts();
     await saveAll(true);
-    flashTemp(msg, `🎲 Each account will cop all ${prods.length} products (${prods.length} tabs each).`, "#1db954", 4000);
+    flashTemp(msg, `Each account will cop all ${prods.length} products (${prods.length} tabs each).`, "var(--green)", 4000);
     await assignCheckoutUrls(msg); // build a direct checkout URL per product
   } else if (singleRandomSize) {
     // 🎲 Roll a concrete size per task from the range NOW (not at drop time), so
@@ -782,10 +791,10 @@ async function randomAssign() {
     rollRandomSizes();
     renderAccounts();
     await saveAll(true);
-    flashTemp(msg, `🎲 Rolled sizes for ${accounts.length} account(s) from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "#1db954", 7000);
+    flashTemp(msg, `Rolled sizes for ${accounts.length} account(s) from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "var(--green)", 7000);
     await assignCheckoutUrls(msg); // build direct checkout URLs for the rolled sizes
   } else {
-    if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above, or turn on 🎲 Random size.", "#fa5400"); return; }
+    if (!singleSizePool.length) { flashTemp(msg, "Pick at least one size in the pool above, or turn on Random size.", "var(--orange)"); return; }
     const sizes = dealFromPool(singleSizePool, accounts.length);
     accounts.forEach((acct, i) => {
       acct.url = ""; acct.keyword = ""; acct.targets = [];
@@ -794,7 +803,7 @@ async function randomAssign() {
     });
     renderAccounts();
     await saveAll(true);
-    flashTemp(msg, `🎲 Dealt sizes to ${accounts.length} accounts from a pool of ${singleSizePool.length}.`, "#1db954", 4000);
+    flashTemp(msg, `Dealt sizes to ${accounts.length} accounts from a pool of ${singleSizePool.length}.`, "var(--green)", 4000);
     await assignCheckoutUrls(msg); // build direct checkout URLs for the new sizes
   }
 }
@@ -847,7 +856,7 @@ function exportTasksCsv() {
   a.href = url; a.download = "reagan-tasks.csv";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  flashTemp($("statusMsg"), `⬇ Exported ${accounts.length} task(s) to reagan-tasks.csv`, "#1db954", 5000);
+  flashTemp($("statusMsg"), `Exported ${accounts.length} task(s) to reagan-tasks.csv`, "var(--green)", 5000);
 }
 
 // Import REPLACES the account list — that's the point of a task file. Unknown
@@ -855,11 +864,11 @@ function exportTasksCsv() {
 // that silently loses its card would fail at checkout.
 function importTasksCsv(text) {
   const rows = parseCsv(text);
-  if (rows.length < 2) { flashTemp($("statusMsg"), "CSV has no data rows.", "#fa5400", 5000); return; }
+  if (rows.length < 2) { flashTemp($("statusMsg"), "CSV has no data rows.", "var(--orange)", 5000); return; }
   const head = rows[0].map(h => String(h).trim().toLowerCase().replace(/\s+/g, "_"));
   const idx = (n) => head.indexOf(n);
   if (idx("profile") < 0 && idx("label") < 0) {
-    flashTemp($("statusMsg"), `CSV needs at least a "label" or "profile" column. Found: ${head.join(", ")}`, "#fa5400", 8000);
+    flashTemp($("statusMsg"), `CSV needs at least a "label" or "profile" column. Found: ${head.join(", ")}`, "var(--orange)", 8000);
     return;
   }
   const get = (r, n) => { const i = idx(n); return i >= 0 ? String(r[i] || "").trim() : ""; };
@@ -896,8 +905,8 @@ function importTasksCsv(text) {
   }
   renderAccounts();
   saveAll(true);
-  const msg = `⬆ Imported ${next.length} task(s).` + (warn.length ? ` ⚠ ${warn.length} issue(s): ${warn.slice(0, 2).join("; ")}` : "");
-  flashTemp($("statusMsg"), msg, warn.length ? "#f0c070" : "#1db954", warn.length ? 12000 : 6000);
+  const msg = `Imported ${next.length} task(s).` + (warn.length ? ` ${warn.length} issue(s): ${warn.slice(0, 2).join("; ")}` : "");
+  flashTemp($("statusMsg"), msg, warn.length ? "var(--orange)" : "var(--green)", warn.length ? 12000 : 6000);
 }
 
 // ── Bot mode (FLOW / SNKRS) ───────────────────────────────────
@@ -935,25 +944,38 @@ function flowCfg() {
 }
 
 // ── Status badge metadata ─────────────────────────────────────
+// Split out of a single `text` field that used to carry an emoji inline. The
+// emoji could not be recoloured to match the status, rendered differently per
+// OS, and — because this map feeds both innerHTML and textContent — there was
+// no way to swap it for real markup without breaking one of the two callers.
+// `ico` names an entry in icons.css; use statusHTML()/statusLabel() below.
 const STATUS_META = {
-  win:        { text: "🏆 WON",       color: "#1db954" },
-  success:    { text: "✅ SUBMITTED", color: "#1db954" },
-  loss:       { text: "😔 LOSS",      color: "#e03131" },
-  entered:    { text: "✓ ENTERED",    color: "#4a90e2" },
+  win:        { ico: "trophy",       label: "WON",        color: "var(--green)" },
+  success:    { ico: "check-circle", label: "SUBMITTED",  color: "var(--green)" },
+  loss:       { ico: "frown",        label: "LOSS",       color: "var(--red)" },
+  entered:    { ico: "check",        label: "ENTERED",    color: "var(--info)" },
   // Live checkout stages
-  waiting:    { text: "🕒 WAITING",   color: "#8b5cf6" },
-  checkout:   { text: "🛒 CHECKOUT",  color: "#8b5cf6" },
-  delivery:   { text: "📦 DELIVERY",  color: "#6366f1" },
-  payment:    { text: "💳 PAYMENT",   color: "#4a90e2" },
-  submitting: { text: "🚀 SUBMITTING",color: "#a855f7" },
+  waiting:    { ico: "clock",        label: "WAITING",    color: "var(--info)" },
+  checkout:   { ico: "cart",         label: "CHECKOUT",   color: "var(--info)" },
+  delivery:   { ico: "package",      label: "DELIVERY",   color: "var(--info)" },
+  payment:    { ico: "card",         label: "PAYMENT",    color: "var(--info)" },
+  submitting: { ico: "rocket",       label: "SUBMITTING", color: "var(--info)" },
   // Poller / draw
-  pending:    { text: "⏳ PENDING",   color: "#fa8c00" },
-  polling:    { text: "🔄 POLLING",   color: "#888888" },
-  closed:     { text: "⛔ CLOSED",    color: "#666666" },
-  limit:      { text: "⚠ LIMIT",     color: "#fa5400" },
+  pending:    { ico: "hourglass",    label: "PENDING",    color: "var(--orange)" },
+  polling:    { ico: "refresh",      label: "POLLING",    color: "var(--grey2)" },
+  closed:     { ico: "ban",          label: "CLOSED",     color: "var(--grey2)" },
+  limit:      { ico: "alert",        label: "LIMIT",      color: "var(--orange)" },
   // Needs manual attention — clickable
-  error:      { text: "❗ ERROR — CLICK TO FIX", color: "#e03131" },
+  error:      { ico: "alert",        label: "ERROR — CLICK TO FIX", color: "var(--red)" },
 };
+
+// Icon markup for a named icon. Only ever called with constants defined in this
+// file, so there is no user input reaching innerHTML through it.
+function icoHTML(name) {
+  return `<i class="ico ico-${name}" aria-hidden="true"></i>`;
+}
+// Status as markup (icon + label) for innerHTML callers.
+function statusHTML(meta) { return icoHTML(meta.ico) + " " + meta.label; }
 // Codes that mean "this account needs you" — the row becomes clickable to jump
 // straight to that Chrome profile.
 const ATTENTION_CODES = new Set(["error"]);
@@ -976,14 +998,16 @@ function updateStatusBadge(profileDir) {
   if (!entry) return;
   const s = bestStatusFor(profileDir);
   if (!s) { entry.rowEl.classList.add("hidden"); return; }
-  const meta = STATUS_META[s.code] || { text: s.code, color: "#888" };
+  const meta = STATUS_META[s.code] || { ico: "box", label: s.code, color: "var(--grey2)" };
   const attention = ATTENTION_CODES.has(s.code);
 
   entry.rowEl.classList.remove("hidden");
-  entry.badgeEl.textContent = meta.text;
+  entry.badgeEl.innerHTML = statusHTML(meta);
   entry.badgeEl.style.color = meta.color;
-  entry.badgeEl.style.borderColor = meta.color + "66";
-  entry.badgeEl.style.background  = meta.color + "1a";
+  // color-mix rather than string-concatenating a hex alpha ("#1db954" + "66"),
+  // which stopped being possible once these became design tokens.
+  entry.badgeEl.style.borderColor = `color-mix(in srgb, ${meta.color} 40%, transparent)`;
+  entry.badgeEl.style.background  = `color-mix(in srgb, ${meta.color} 10%, transparent)`;
   // Strip the **[label]** markup and step prefixes for a clean, readable line.
   entry.textEl.textContent  = (s.message || "").replace(/\*\*/g, "").slice(0, 110);
   entry.textEl.title        = s.message || "";
@@ -1005,10 +1029,10 @@ function updateStatusBadge(profileDir) {
 async function jumpToProfile(profileDir) {
   const acct = accounts.find(a => a.profileDir === profileDir);
   let url = acct && acct.checkoutUrl ? freshCheckoutId(acct.checkoutUrl) : "";
-  flashTemp($("statusMsg"), `Opening “${profileDir}”…`, "#8b5cf6", 3000);
+  flashTemp($("statusMsg"), `Opening “${profileDir}”…`, "var(--info)", 3000);
   const resp = await hostSend({ cmd: "launch", profileDir, url: url || undefined });
-  if (resp && resp.ok) flashTemp($("statusMsg"), `🡒 Opened “${profileDir}” — fix it there.`, "#1db954", 4000);
-  else flashTemp($("statusMsg"), `Couldn't open “${profileDir}”: ${resp && resp.error || "launcher offline"}`, "#e03131", 5000);
+  if (resp && resp.ok) flashTemp($("statusMsg"), `Opened “${profileDir}” — fix it there.`, "var(--green)", 4000);
+  else flashTemp($("statusMsg"), `Couldn't open “${profileDir}”: ${resp && resp.error || "launcher offline"}`, "var(--red)", 5000);
 }
 
 // Swap the checkoutId in a gs.nike.com URL for a new UUID (avoids reusing a
@@ -1177,14 +1201,14 @@ async function warmAll() {
   }
   if (isVisible("preflight")) renderPreflight();
   flashTemp(msg, ok === withProfile.length
-    ? `🔥 Warmed ${ok} profile(s) — cookies/Kasada refreshed. Re-run preflight to confirm.`
+    ? `Warmed ${ok} profile(s) — cookies/Kasada refreshed. Re-run preflight to confirm.`
     : `Warmed ${ok}/${withProfile.length}. Last error: ${lastErr}`,
     ok ? "var(--green)" : "var(--red)", 7000);
 }
 
 function pfIcon(ok) {
-  if (ok === true) return { ico: "✓", cls: "ok" };
-  if (ok === false) return { ico: "✕", cls: "bad" };
+  if (ok === true) return { ico: "", cls: "ok" };
+  if (ok === false) return { ico: "", cls: "bad" };
   return { ico: "!", cls: "warn" };
 }
 
@@ -1265,9 +1289,9 @@ function renderPreflight() {
         b.addEventListener("click", () => remediateProfile(acct.profileDir, kind));
         actions.appendChild(b);
       };
-      if (checks.login && checks.login.ok === false) addBtn("🔑 LOG IN", "login");
-      if (checks.version && checks.version.ok === false) addBtn("⬆ UPDATE", "version");
-      if (checks.cookies && checks.cookies.ok !== true) addBtn("🔥 WARM", "warm");
+      if (checks.login && checks.login.ok === false) addBtn("LOG IN", "login");
+      if (checks.version && checks.version.ok === false) addBtn("UPDATE", "version");
+      if (checks.cookies && checks.cookies.ok !== true) addBtn("WARM", "warm");
       // Always offer a plain re-check.
       const rc = el("button", { className: "btn btn-mini btn-dark" }, "↻ RE-CHECK");
       rc.addEventListener("click", () => { if (hostOk) launchPreflightFor(acct.profileDir); });
@@ -1296,7 +1320,7 @@ function renderPreflight() {
       `<div class="pf-chip-sep"></div>` +
       chip(rc.SG, "🇸🇬 SG", "var(--green)") +
       chip(rc.MY, "🇲🇾 MY", "var(--purple2)") +
-      (rc.unknown ? chip(rc.unknown, "? REGION", "#8a8a9e") : "");
+      (rc.unknown ? chip(rc.unknown, "? REGION", "var(--grey2)") : "");
   }
 
   // Open-by-region toolbar: open just the SG or just the MY profiles, now.
@@ -1366,7 +1390,7 @@ async function refreshVersionBanner() {
     cls = "ok";
     title = `All profiles on v${latestVersion}`;
     detail = withProfile.length
-      ? "Every profile with a version report is up to date. 🎉"
+      ? "Every profile with a version report is up to date. "
       : "No profiles configured yet.";
   }
 
@@ -1420,7 +1444,7 @@ async function runPreflight() {
     await new Promise(r => setTimeout(r, 400));
   }
   if (opened === withProfile.length) {
-    flashTemp(msg, `🩺 Checking ${opened} profile(s)… results appear below as each finishes (tabs close themselves).`, "var(--green)", 8000);
+    flashTemp(msg, `Checking ${opened} profile(s)… results appear below as each finishes (tabs close themselves).`, "var(--green)", 8000);
   } else if (opened > 0) {
     flashTemp(msg, `Started ${opened}/${withProfile.length}. Last error: ${lastErr}`, "var(--orange)", 7000);
   } else {
@@ -1547,14 +1571,14 @@ function renderLivePage() {
     } else {
       tabs.forEach(t => {
         counts[liveGroupOf(t.code)]++;
-        const meta = STATUS_META[t.code] || { text: (t.code || "IDLE").toUpperCase(), color: "#6b6b7b" };
+        const meta = STATUS_META[t.code] || { text: (t.code || "IDLE").toUpperCase(), color: "var(--grey2)" };
         const attn = ATTENTION_CODES.has(t.code);
         const prod = t.label || "Nike";
         const msg = (t.message || "").replace(/\*\*/g, "");
         tiles += `<div class="cy-tile${attn ? " attn" : ""}" style="--st:${meta.color}" data-dir="${escapeHtml(p.dir)}">
           <div class="cy-tile-top">
             <span class="cy-prod">${escapeHtml(prod)}</span>
-            <span class="cy-stage">${meta.text}</span>
+            <span class="cy-stage">${statusHTML(meta)}</span>
           </div>
           <div class="cy-tile-msg">${escapeHtml(msg)}</div>
           <div class="cy-tile-foot"><span class="cy-dot"></span>${fmtClock(t.time)}${attn ? " · CLICK TO FIX" : ""}</div>
@@ -1584,11 +1608,11 @@ function renderLivePage() {
     const chip = (n, label, color) => `<div class="live-chip" style="color:${color}"><span class="n">${n}</span><span class="l">${label}</span></div>`;
     sum.innerHTML =
       `<div class="live-chip live-pulse" style="color:#22d3ee"><span class="n">●</span><span class="l">LIVE · ${counts.tabs} TABS</span></div>` +
-      chip(counts.active, "RUNNING", "#8b5cf6") +
-      chip(counts.waiting, "WAITING", "#a855f7") +
-      chip(counts.done, "DONE", "#1db954") +
-      chip(counts.error, "NEEDS FIX", "#ff2d55") +
-      chip(counts.idle, "IDLE", "#6b6b7b");
+      chip(counts.active, "RUNNING", "var(--info)") +
+      chip(counts.waiting, "WAITING", "var(--info)") +
+      chip(counts.done, "DONE", "var(--green)") +
+      chip(counts.error, "NEEDS FIX", "var(--red)") +
+      chip(counts.idle, "IDLE", "var(--grey2)");
   }
 }
 
@@ -1659,7 +1683,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const profileDir = $("orderCheckerProfile") && $("orderCheckerProfile").value;
     if (profileDir && changes[ORDERS_KEY].newValue?.[profileDir]) {
       renderOrders(profileDir, changes[ORDERS_KEY].newValue[profileDir]);
-      flashTemp($("orderCheckerMsg"), "Orders updated.", "#1db954");
+      flashTemp($("orderCheckerMsg"), "Orders updated.", "var(--green)");
     }
   }
 });
@@ -1693,7 +1717,7 @@ async function createProfile() {
   const name = (inp && inp.value.trim()) || nextProfileName();
 
   if (accounts.some(a => a.profileDir === name) || discoveredProfiles.some(p => p.dir === name)) {
-    flashTemp(msg, `"${name}" already exists — pick another name.`, "#fa5400", 4000);
+    flashTemp(msg, `"${name}" already exists — pick another name.`, "var(--orange)", 4000);
     return;
   }
 
@@ -1706,13 +1730,13 @@ async function createProfile() {
     renderAccounts();
     await saveAll(true);
     if (inp) inp.value = nextProfileName();
-    flashTemp(msg, `✓ Created "${name}" — sign into your Nike account in the new window, then fill its size & card below.`, "#1db954", 9000);
+    flashTemp(msg, `Created "${name}" — sign into your Nike account in the new window, then fill its size & card below.`, "var(--green)", 9000);
     document.getElementById("accountsList").lastElementChild
       ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } else if (resp.hostMissing) {
-    flashTemp(msg, "Launcher offline — install the native host first (see the guide / setup below).", "#fa5400", 6000);
+    flashTemp(msg, "Launcher offline — install the native host first (see the guide / setup below).", "var(--orange)", 6000);
   } else {
-    flashTemp(msg, "Couldn't create profile: " + resp.error, "#e03131", 6000);
+    flashTemp(msg, "Couldn't create profile: " + resp.error, "var(--red)", 6000);
   }
 }
 
@@ -1751,7 +1775,7 @@ function fillCardSelect(sel, currentId) {
   cardProfiles.forEach(cp => {
     sel.appendChild(el("option", { value: cp.id }, `${cp.name || "Card"} · ${cardMask(cp.cardNumber)}`));
   });
-  sel.appendChild(el("option", { value: "__new__" }, "➕ New card profile…"));
+  sel.appendChild(el("option", { value: "__new__" }, "New card profile…"));
   // Keep the selection if it still exists, else fall back to none.
   sel.value = (currentId && cardProfiles.some(c => c.id === currentId)) ? currentId : "";
 }
@@ -1767,7 +1791,7 @@ function renderCardProfiles() {
   if (!list) return;
   list.innerHTML = "";
   if (!cardProfiles.length) {
-    list.appendChild(el("p", { className: "hint" }, "No cards yet. Add one below, then pick it from each account’s 💳 Card dropdown."));
+    list.appendChild(el("p", { className: "hint" }, "No cards yet. Add one below, then pick it from each account’s Card dropdown."));
     return;
   }
   cardProfiles.forEach(cp => list.appendChild(buildCardProfileRow(cp)));
@@ -1785,7 +1809,7 @@ function buildCardProfileRow(cp) {
   const btns = el("div", { className: "cardprofile-btns" });
   const editBtn = el("button", { className: "btn btn-mini btn-dark" }, "edit");
   editBtn.addEventListener("click", () => editCardProfile(cp.id));
-  const delBtn = el("button", { className: "btn btn-mini btn-danger" }, "✕");
+  const delBtn = el("button", { className: "btn btn-mini btn-danger" }, "");
   delBtn.title = "Delete this card";
   delBtn.addEventListener("click", () => deleteCardProfile(cp.id));
   btns.append(editBtn, delBtn);
@@ -1797,7 +1821,7 @@ function resetCardForm() {
   editingCardId = null;
   ["cpName", "cpCardName", "cpNumber", "cpExpiry", "cpCvv"].forEach(id => { const n = $(id); if (n) n.value = ""; });
   $("cardFormTitle").textContent = "ADD A CARD";
-  $("cpSaveBtn").textContent = "➕ SAVE CARD PROFILE";
+  $("cpSaveBtn").textContent = "SAVE CARD PROFILE";
   $("cpCancelBtn").style.display = "none";
 }
 
@@ -1811,7 +1835,7 @@ function editCardProfile(id) {
   $("cpExpiry").value   = cp.cardExpiry || "";
   $("cpCvv").value      = cp.cardCvv || "";
   $("cardFormTitle").textContent = "EDIT CARD";
-  $("cpSaveBtn").textContent = "✓ UPDATE CARD PROFILE";
+  $("cpSaveBtn").textContent = "UPDATE CARD PROFILE";
   $("cpCancelBtn").style.display = "";
   $("cardForm").scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
@@ -1819,8 +1843,8 @@ function editCardProfile(id) {
 async function saveCardProfile() {
   const name   = $("cpName").value.trim();
   const number = $("cpNumber").value.trim();
-  if (!name)   { flashTemp($("cpMsg"), "Give the card a nickname.", "#fa5400"); return; }
-  if (!number) { flashTemp($("cpMsg"), "Enter the card number.", "#fa5400"); return; }
+  if (!name)   { flashTemp($("cpMsg"), "Give the card a nickname.", "var(--orange)"); return; }
+  if (!number) { flashTemp($("cpMsg"), "Enter the card number.", "var(--orange)"); return; }
 
   const fields = {
     name,
@@ -1833,10 +1857,10 @@ async function saveCardProfile() {
   if (editingCardId) {
     const cp = cardProfiles.find(c => c.id === editingCardId);
     if (cp) Object.assign(cp, fields);
-    flashTemp($("cpMsg"), `✓ Updated "${name}".`, "#1db954");
+    flashTemp($("cpMsg"), `Updated "${name}".`, "var(--green)");
   } else {
     cardProfiles.push({ id: uid(), ...fields });
-    flashTemp($("cpMsg"), `✓ Saved "${name}". Pick it from an account’s 💳 Card dropdown.`, "#1db954", 5000);
+    flashTemp($("cpMsg"), `Saved "${name}". Pick it from an account’s Card dropdown.`, "var(--green)", 5000);
   }
   await persistCardProfiles();
   resetCardForm();
@@ -1954,11 +1978,11 @@ function isDropMatch(order) {
 
 function statusMeta(status) {
   const s = (status || "").toLowerCase();
-  if (s.includes("deliver") || s.includes("complete")) return { color: "#1db954" };
-  if (s.includes("ship") || s.includes("transit"))    return { color: "#4a90e2" };
-  if (s.includes("process") || s.includes("confirm")) return { color: "#fa8c00" };
-  if (s.includes("cancel"))                            return { color: "#e03131" };
-  return { color: "#8d8d8d" };
+  if (s.includes("deliver") || s.includes("complete")) return { color: "var(--green)" };
+  if (s.includes("ship") || s.includes("transit"))    return { color: "var(--info)" };
+  if (s.includes("process") || s.includes("confirm")) return { color: "var(--orange)" };
+  if (s.includes("cancel"))                            return { color: "var(--red)" };
+  return { color: "var(--grey2)" };
 }
 
 function buildOrderCard(order) {
@@ -1970,7 +1994,7 @@ function buildOrderCard(order) {
   if (match) {
     const win = document.createElement("div");
     win.className = "order-win-banner";
-    win.textContent = "🏆 WIN — matches this drop’s SKU";
+    win.textContent = "WIN — matches this drop’s SKU";
     card.appendChild(win);
   }
 
@@ -2099,7 +2123,7 @@ async function renderOrders(profileDir, entry) {
   const note = document.createElement("p");
   note.className = "hint";
   note.style.marginBottom = "10px";
-  note.textContent = `${orders.length} order(s)${wins ? ` · 🏆 ${wins} match this drop` : " · no drop match"}${ts ? " · " + ts : ""}.`;
+  note.textContent = `${orders.length} order(s)${wins ? ` · ${wins} match this drop` : " · no drop match"}${ts ? " · " + ts : ""}.`;
   display.appendChild(note);
 
   orders.forEach(o => display.appendChild(buildOrderCard(o)));
@@ -2157,12 +2181,12 @@ async function diagnoseOrderChecker() {
   // 1. Native host reachable?
   const ping = await hostSend({ cmd: "ping" });
   if (ping && ping.ok) {
-    lines.push("✅ Native host CONNECTED");
+    lines.push("Native host CONNECTED");
     lines.push(`   version: ${ping.version || "?"}   chrome: ${ping.chrome || "not found"}`);
     lines.push(`   config:  ${ping.configPath || "?"}`);
     if (ping.extensionDir) lines.push(`   ext dir: ${ping.extensionDir}`);
   } else {
-    lines.push("❌ Native host NOT CONNECTED");
+    lines.push("Native host NOT CONNECTED");
     lines.push(`   ${ping && ping.error ? ping.error : "no response"}`);
     lines.push("   → Cross-profile orders CANNOT work without the host.");
     lines.push("   → Reinstall: native-host/install-unix.sh (mac/linux)");
@@ -2178,14 +2202,14 @@ async function diagnoseOrderChecker() {
     const map = ord.orders || {};
     const keys = Object.keys(map);
     if (!keys.length) {
-      lines.push("⚠️  Shared orders file is EMPTY.");
+      lines.push(" Shared orders file is EMPTY.");
       lines.push("   No account has scraped + written orders yet.");
       lines.push("   → This means the account profile's browser hasn't opened");
       lines.push("     the orders page with the UPDATED extension code.");
       lines.push("   → Fully QUIT Chrome (all profiles), reopen, then click");
       lines.push("     'Open Orders Page' — it relaunches the profile fresh.");
     } else {
-      lines.push(`✅ Shared orders file has ${keys.length} profile(s):`);
+      lines.push(`Shared orders file has ${keys.length} profile(s):`);
       keys.forEach(k => {
         const e = map[k] || {};
         const dom = Array.isArray(e.domOrders) ? e.domOrders.length : 0;
@@ -2195,7 +2219,7 @@ async function diagnoseOrderChecker() {
       });
     }
   } else {
-    lines.push("❌ getOrders failed — host is too OLD (no getOrders command).");
+    lines.push("getOrders failed — host is too OLD (no getOrders command).");
     lines.push(`   ${ord && ord.error ? ord.error : ""}`);
     lines.push("   → git pull, then reinstall the native host.");
   }
@@ -2215,7 +2239,7 @@ async function diagnoseOrderChecker() {
       lines.push("     and confirm a Chrome window for THIS account opens.");
     }
   } else {
-    lines.push("⚠️  No account selected in the dropdown.");
+    lines.push(" No account selected in the dropdown.");
   }
 
   box.textContent = lines.join("\n");
@@ -2225,7 +2249,7 @@ async function openOrdersPage() {
   const sel     = $("orderCheckerProfile");
   const profileDir = sel && sel.value;
   if (!profileDir) {
-    flashTemp($("orderCheckerMsg"), "Pick an account first.", "#fa5400"); return;
+    flashTemp($("orderCheckerMsg"), "Pick an account first.", "var(--orange)"); return;
   }
 
   flash($("orderCheckerMsg"), "Opening orders page…", "#888");
@@ -2257,17 +2281,17 @@ async function openOrdersPage() {
   const resp = await hostSend({ cmd: "launch", profileDir, url });
 
   if (foundOpenTab && (resp.ok || resp.hostMissing)) {
-    flashTemp($("orderCheckerMsg"), "Orders loading from open tab — also launching profile window…", "#1db954", 8000);
+    flashTemp($("orderCheckerMsg"), "Orders loading from open tab — also launching profile window…", "var(--green)", 8000);
   } else if (resp.ok) {
-    flashTemp($("orderCheckerMsg"), `Opened "${profileDir}" — orders will appear here once the page loads.`, "#1db954", 8000);
+    flashTemp($("orderCheckerMsg"), `Opened "${profileDir}" — orders will appear here once the page loads.`, "var(--green)", 8000);
   } else if (resp.hostMissing) {
     if (foundOpenTab) {
       flashTemp($("orderCheckerMsg"), "Launcher offline — reading from open tab instead.", "#888", 6000);
     } else {
-      flashTemp($("orderCheckerMsg"), "Launcher offline — open the orders page manually in that profile, then click here again.", "#fa5400", 8000);
+      flashTemp($("orderCheckerMsg"), "Launcher offline — open the orders page manually in that profile, then click here again.", "var(--orange)", 8000);
     }
   } else {
-    flashTemp($("orderCheckerMsg"), "Launch failed: " + resp.error, "#e03131", 5000);
+    flashTemp($("orderCheckerMsg"), "Launch failed: " + resp.error, "var(--red)", 5000);
   }
 
   // Kick the poll immediately so results appear as soon as data is written.
@@ -2328,9 +2352,9 @@ function importConfig(file) {
       renderDropUI();
       startCountdown();
       await saveAll(false);
-      flashTemp($("statusMsg"), "✓ Config imported and saved.", "#1db954");
+      flashTemp($("statusMsg"), "Config imported and saved.", "var(--green)");
     } catch (err) {
-      flashTemp($("statusMsg"), "Import failed: " + err.message, "#e03131", 5000);
+      flashTemp($("statusMsg"), "Import failed: " + err.message, "var(--red)", 5000);
     }
   };
   reader.readAsText(file);
@@ -2428,10 +2452,10 @@ function buildHistoryEntry(entry) {
     resultsDiv.appendChild(s);
   };
   chip(`${total} accounts`, "#888");
-  if (wins)    chip(`🏆 ${wins} won`, "#1db954");
-  if (losses)  chip(`😔 ${losses} lost`, "#e03131");
-  if (entered) chip(`✓ ${entered} entered`, "#4a90e2");
-  if (limits)  chip(`⚠ ${limits} limit`, "#fa5400");
+  if (wins)    chip(`${wins} won`, "var(--green)");
+  if (losses)  chip(`${losses} lost`, "var(--red)");
+  if (entered) chip(`${entered} entered`, "var(--info)");
+  if (limits)  chip(`${limits} limit`, "var(--orange)");
 
   div.append(dateEl, urlEl, resultsDiv);
 
@@ -2444,7 +2468,7 @@ function buildHistoryEntry(entry) {
       const name = (acct && (acct.label || acct.profileDir)) || s.profileDir;
       const parts = [];
       if (s.loadedT && s.filledT) parts.push(`fill ${fmtDelta(s.filledT - s.loadedT)}`);
-      if (s.error) parts.push(`✕ ${String(s.error).replace(/_/g, " ")}`);
+      if (s.error) parts.push(`${String(s.error).replace(/_/g, " ")}`);
       else if (s.offsetMs != null) parts.push(`${s.offsetMs >= 0 ? "+" : "−"}${fmtDelta(Math.abs(s.offsetMs))} vs go-live`);
       else if (s.submittedT) parts.push("submitted");
       const row = el("div", { className: "history-replay-row" });
@@ -2495,16 +2519,16 @@ async function runLiveDiagnostic() {
   // 1) Can THIS (dashboard) profile reach the launcher?
   const ping = await hostSend({ cmd: "ping" });
   if (ping.ok) {
-    L.push(`✓ This dashboard profile reaches the launcher (host v${ping.version} · ${ping.platform}).`);
+    L.push(`This dashboard profile reaches the launcher (host v${ping.version} · ${ping.platform}).`);
     // Show how launched profiles get the extension (the "no extension on Launch
     // All" fix). Requires host v1.3.0+.
     if (ping.extensionDir) {
-      L.push(`  Extension folder: ${ping.extensionDir}${ping.extensionDirValid === false ? "  (⚠ no manifest.json here!)" : ""}`);
+      L.push(`  Extension folder: ${ping.extensionDir}${ping.extensionDirValid === false ? "  (no manifest.json here!)" : ""}`);
       if (ping.loadExtensionOnLaunch)
         L.push(`  (opt-in --load-extension is ON — only affects the first fresh profile; not reliable for many profiles.)`);
     }
   } else {
-    L.push(`✗ This dashboard CANNOT reach the launcher: ${ping.error || "no response"}.`);
+    L.push(`This dashboard CANNOT reach the launcher: ${ping.error || "no response"}.`);
     L.push(`  → Cross-profile status can't be read until the native host is installed for this profile.`);
     out.textContent = L.join("\n");
     return;
@@ -2519,7 +2543,7 @@ async function runLiveDiagnostic() {
   L.push("");
   L.push(`SHARED STATUS FOLDER — ${entries.length} tab entr${entries.length === 1 ? "y" : "ies"} from ${profs.length} profile(s):`);
   if (!entries.length) {
-    L.push(`  ⚠ EMPTY. The launched profiles are NOT writing any status. Almost always one of:`);
+    L.push(`  EMPTY. The launched profiles are NOT writing any status. Almost always one of:`);
     L.push(`     1. Those profiles run a STALE loaded copy of the extension. Unpacked extensions`);
     L.push(`        do NOT hot-reload when files change — each profile keeps the old code until you`);
     L.push(`        reload it (chrome://extensions → ↻) or fully restart that Chrome. The fix that`);
@@ -2535,7 +2559,7 @@ async function runLiveDiagnostic() {
     const missing = accounts.filter(a => a.profileDir && !byProfile[a.profileDir]);
     if (missing.length) {
       L.push("");
-      L.push(`  ✗ NO status from: ${missing.map(a => a.label || a.profileDir).join(", ")}.`);
+      L.push(`  NO status from: ${missing.map(a => a.label || a.profileDir).join(", ")}.`);
       L.push(`    Those profiles didn't report — likely running stale code, not launched, or their`);
       L.push(`    account's "Chrome profile" doesn't match the real profile directory.`);
     }
@@ -2547,7 +2571,7 @@ async function runLiveDiagnostic() {
     const vs = Object.entries(vr.versions || {});
     L.push("");
     L.push(`REPORTED VERSIONS (latest is v${vr.latestVersion || "?"}):`);
-    if (!vs.length) L.push(`  ⚠ No profile has reported a version — none have booted with current code yet.`);
+    if (!vs.length) L.push(`  No profile has reported a version — none have booted with current code yet.`);
     let anyUnpacked = false;
     vs.sort().forEach(([p, v]) => {
       const age = Math.round((Date.now() - (v.ts || 0)) / 1000);
@@ -2588,18 +2612,18 @@ async function refreshPanicBanner() {
     banner.className = "panic-banner active";
     const when = resp.abort.ts ? new Date(resp.abort.ts).toLocaleTimeString() : "";
     banner.innerHTML =
-      `<span>🛑 <strong>ABORT ACTIVE</strong> — every profile is holding / not submitting${when ? " (since " + when + ")" : ""}.</span>` +
-      `<button id="panicClearBtn" class="btn btn-mini btn-light">✓ CLEAR ABORT</button>`;
+      `<span>${icoHTML("panic")} <strong>ABORT ACTIVE</strong> — every profile is holding / not submitting${when ? " (since " + when + ")" : ""}.</span>` +
+      `<button id="panicClearBtn" class="btn btn-mini btn-light">${icoHTML("check")} CLEAR ABORT</button>`;
     const clr = $("panicClearBtn");
     if (clr) clr.addEventListener("click", async () => {
       await setAbort(false);
       await refreshPanicBanner();
       flashTemp($("statusMsg"), "Abort cleared — profiles may submit again on the next drive.", "#888");
     });
-    if (btn) { btn.textContent = "🛑 ABORT ACTIVE"; btn.disabled = true; }
+    if (btn) { btn.textContent = "ABORT ACTIVE"; btn.disabled = true; }
   } else {
     banner.style.display = "none";
-    if (btn) { btn.textContent = "🛑 PANIC — STOP ALL SUBMITS"; btn.disabled = false; }
+    if (btn) { btn.textContent = "PANIC — STOP ALL SUBMITS"; btn.disabled = false; }
   }
 }
 async function raisePanic() {
@@ -2609,7 +2633,7 @@ async function raisePanic() {
     return;
   }
   await refreshPanicBanner();
-  flashTemp($("statusMsg"), "🛑 ABORT raised — all holding profiles will cancel their SUBMIT.", "var(--red)", 8000);
+  flashTemp($("statusMsg"), "ABORT raised — all holding profiles will cancel their SUBMIT.", "var(--red)", 8000);
 }
 
 // CLOSE ALL: raise a shared close flag every profile's content scripts poll,
@@ -2622,7 +2646,7 @@ async function closeAllProfiles() {
     flashTemp($("statusMsg"), "Couldn't send close — is the launcher connected?", "var(--red)", 6000);
     return;
   }
-  flashTemp($("statusMsg"), "✖ Closing all profile windows… (takes a couple of seconds per profile)", "var(--red)", 8000);
+  flashTemp($("statusMsg"), "Closing all profile windows… (takes a couple of seconds per profile)", "var(--red)", 8000);
   // Clear the flag after the pollers have had time to act, so a later launch
   // isn't immediately closed.
   setTimeout(() => { hostSend({ cmd: "setClose", on: false }); }, 8000);
@@ -2749,7 +2773,7 @@ async function renderSelfLearningForDrop() {
     if (ins.recommendedLeadSec != null) {
       const cur = _prepLeadSec || 30;
       box.style.display = "flex";
-      txt.innerHTML = `🧠 Recommended open-lead <strong>${ins.recommendedLeadSec}s</strong> ` +
+      txt.innerHTML = `${icoHTML("cpu")} Recommended open-lead <strong>${ins.recommendedLeadSec}s</strong> ` +
         `<span class="muted">(from your ${(ins.maxFill / 1000).toFixed(1)}s slowest fill · currently ${cur}s)</span>`;
       const btn = $("autoTuneApplyBtn");
       if (btn) btn.style.display = (ins.recommendedLeadSec !== cur) ? "" : "none";
@@ -2765,7 +2789,7 @@ async function renderSelfLearningForDrop() {
       const top = ins.topSizes.slice(0, 4).filter(s => s.total >= 1)
         .map(s => `<span class="size-hint-chip">${escapeHtml(s.size)} · ${Math.round(s.rate * 100)}%</span>`).join("");
       sh.style.display = "";
-      sh.innerHTML = `<span class="muted">🧠 Best historical sizes:</span> ${top}`;
+      sh.innerHTML = `<span class="muted">${icoHTML("cpu")} Best historical sizes:</span> ${top}`;
     } else {
       sh.style.display = "none";
     }
@@ -2778,7 +2802,7 @@ async function applyAutoTune() {
   _prepLeadSec = ins.recommendedLeadSec;
   await saveAll(true);           // persists options.prepLeadSec + re-arms
   renderSelfLearningForDrop();
-  flashTemp($("statusMsg"), `🧠 Open-lead set to ${_prepLeadSec}s — accounts will open that early before the drop.`, "var(--green)", 6000);
+  flashTemp($("statusMsg"), `Open-lead set to ${_prepLeadSec}s — accounts will open that early before the drop.`, "var(--green)", 6000);
 }
 
 // Poll the shared timeline folder (accounts run in OTHER Chrome profiles).
@@ -2832,7 +2856,7 @@ function uid() { return "a" + Math.random().toString(36).slice(2, 9); }
 
 function flash(node, msg, color) {
   if (!node) return;
-  node.style.color = color || "#1db954";
+  node.style.color = color || "var(--green)";
   node.textContent = msg;
 }
 function flashTemp(node, msg, color, ms = 3000) {
@@ -2920,7 +2944,7 @@ function updateSelectedCount() {
   if (el) el.textContent = String(n);
   const btn = $("openSelectedBtn");
   if (btn) {
-    btn.textContent = `🎯 OPEN SELECTED (${n})`;
+    btn.textContent = `OPEN SELECTED (${n})`;
     btn.disabled = n === 0;
     btn.style.opacity = n === 0 ? "0.5" : "";
   }
@@ -2968,10 +2992,10 @@ function buildAccountRow(acct) {
     const parts = acct.targets.map(t => `${t.keyword || shortUrl(t.url)}${t.size ? " " + t.size : ""}`);
     assignedEl.style.display = "";
     assignedEl.textContent = `→ ${acct.targets.length} tab(s): ${parts.join(", ")}` +
-      (built ? `  ·  ⚡ ${built} direct` : "");
+      (built ? `  ·  ${built} direct` : "");
   } else if (acct.checkoutUrl) {
     assignedEl.style.display = "";
-    assignedEl.textContent = "⚡ direct checkout";
+    assignedEl.textContent = "direct checkout";
   } else {
     assignedEl.style.display = "none";
   }
@@ -3021,7 +3045,7 @@ function buildAccountRow(acct) {
 
   autoEl.addEventListener("change", () => {
     acct.autoLaunch = autoEl.checked;
-    saveAll(true); // re-arm the alarm immediately so ⏰ state is always in sync
+    saveAll(true); // re-arm the alarm immediately so state is always in sync
   });
   cardSel.addEventListener("change", () => {
     if (cardSel.value === "__new__") {
@@ -3051,13 +3075,13 @@ function updateProfileSourceNote() {
   if (!note) return;
   if (hostOk && discoveredProfiles.length) {
     note.textContent = `Found ${discoveredProfiles.length} Chrome profiles on this machine.`;
-    note.style.color = "#1db954";
+    note.style.color = "var(--green)";
   } else if (hostOk) {
     note.textContent = "Launcher connected, but no profiles detected — type the directory manually.";
-    note.style.color = "#f0c070";
+    note.style.color = "var(--orange)";
   } else {
     note.textContent = "Launcher offline — type each profile directory manually for now.";
-    note.style.color = "#8d8d8d";
+    note.style.color = "var(--grey2)";
   }
 }
 
@@ -3246,22 +3270,25 @@ async function rotateAllProxies() {
 // toggleable. `code` MUST match a code in background.js parseStatusFromLog() +
 // NOTIFY_META. `def` is the default when the user hasn't customised it. `ex` is
 // a sample of the exact message that fires, so the user knows what they'll get.
+// Two glyph fields on purpose: `emoji` is what Discord/Telegram receive, where
+// an emoji is the correct and expected glyph; `ico` is what this dashboard
+// draws, where an icon that inherits the row's colour is.
 const NOTIFY_EVENTS = [
-  { code: "win",        emoji: "🎉", label: "Won / Got 'em",        def: true,  ex: "You won the draw — check your email" },
-  { code: "success",    emoji: "✅", label: "Order submitted",       def: true,  ex: "Order submitted / entry complete / you're in" },
-  { code: "carted",     emoji: "🛒", label: "Added to bag",          def: true,  ex: "Instant-buy drop: item added to bag (US 6Y)" },
-  { code: "entered",    emoji: "📋", label: "Draw entered",          def: true,  ex: "Draw entry confirmed" },
-  { code: "pending",    emoji: "⏳", label: "Entry pending / in line",def: true,  ex: "You're in line — Nike is processing" },
-  { code: "closed",     emoji: "🚫", label: "Draw closed / sold out", def: true,  ex: "Draw ended, closed, or sold out" },
-  { code: "limit",      emoji: "⚠️", label: "Entry limit hit",        def: true,  ex: "Entry limit exceeded for this account" },
-  { code: "error",      emoji: "❌", label: "Error / needs attention",def: true,  ex: "Something went wrong — needs a look" },
-  { code: "submitting", emoji: "🛒", label: "Submitting order",       def: false, ex: "Clicking Submit Order at checkout" },
-  { code: "payment",    emoji: "💳", label: "Payment step",           def: false, ex: "Filling / confirming card at checkout" },
-  { code: "delivery",   emoji: "📦", label: "Delivery step",          def: false, ex: "Delivery / address checkout step" },
-  { code: "checkout",   emoji: "🧾", label: "Checkout started",       def: false, ex: "Direct checkout script kicked off" },
-  { code: "polling",    emoji: "🔁", label: "Polling for result",     def: false, ex: "Poller checking the draw result" },
-  { code: "waiting",    emoji: "🕒", label: "Holding for drop",       def: false, ex: "Holding until the drop window opens" },
-  { code: "loss",       emoji: "💔", label: "Not selected",           def: false, ex: "Draw result: not selected" },
+  { code: "win",        ico: "sparkles", emoji: "🎉", label: "Won / Got 'em",        def: true,  ex: "You won the draw — check your email" },
+  { code: "success",    ico: "check-circle", emoji: "✅", label: "Order submitted",       def: true,  ex: "Order submitted / entry complete / you're in" },
+  { code: "carted",     ico: "cart", emoji: "🛒", label: "Added to bag",          def: true,  ex: "Instant-buy drop: item added to bag (US 6Y)" },
+  { code: "entered",    ico: "clipboard", emoji: "📋", label: "Draw entered",          def: true,  ex: "Draw entry confirmed" },
+  { code: "pending",    ico: "hourglass", emoji: "⏳", label: "Entry pending / in line",def: true,  ex: "You're in line — Nike is processing" },
+  { code: "closed",     ico: "ban", emoji: "🚫", label: "Draw closed / sold out", def: true,  ex: "Draw ended, closed, or sold out" },
+  { code: "limit",      ico: "alert", emoji: "⚠️", label: "Entry limit hit",        def: true,  ex: "Entry limit exceeded for this account" },
+  { code: "error",      ico: "ban", emoji: "❌", label: "Error / needs attention",def: true,  ex: "Something went wrong — needs a look" },
+  { code: "submitting", ico: "cart", emoji: "🛒", label: "Submitting order",       def: false, ex: "Clicking Submit Order at checkout" },
+  { code: "payment",    ico: "card", emoji: "💳", label: "Payment step",           def: false, ex: "Filling / confirming card at checkout" },
+  { code: "delivery",   ico: "package", emoji: "📦", label: "Delivery step",          def: false, ex: "Delivery / address checkout step" },
+  { code: "checkout",   ico: "receipt", emoji: "🧾", label: "Checkout started",       def: false, ex: "Direct checkout script kicked off" },
+  { code: "polling",    ico: "refresh", emoji: "🔁", label: "Polling for result",     def: false, ex: "Poller checking the draw result" },
+  { code: "waiting",    ico: "clock", emoji: "🕒", label: "Holding for drop",       def: false, ex: "Holding until the drop window opens" },
+  { code: "loss",       ico: "frown", emoji: "💔", label: "Not selected",           def: false, ex: "Draw result: not selected" },
 ];
 
 // Which events @here-PING in Discord by default. Separate from whether they
@@ -3287,7 +3314,9 @@ function renderNotifyEvents(events, pings) {
     const on = (e.code in ev) ? !!ev[e.code] : e.def;
     const ping = (e.code in pg) ? !!pg[e.code] : !!NOTIFY_PING_DEFAULTS[e.code];
     const row = el("div", { className: "alert-row", title: e.ex });
-    row.appendChild(el("span", { className: "ar-label" }, `${e.emoji} ${e.label}`));
+    const lab = el("span", { className: "ar-label" });
+    lab.innerHTML = `${icoHTML(e.ico)} ${e.label}`;
+    row.appendChild(lab);
 
     const sendWrap = el("span", { className: "ar-col" });
     const sendBox = el("input", { type: "checkbox", id: "notifyEvt_" + e.code });
@@ -3378,7 +3407,7 @@ function renderProxyAssignments() {
              `<span class="muted">→ ${escapeHtml(maskProxy(cur))}${swapped ? ' <em>(swapped)</em>' : ''} ${swapBtn}</span></div>`;
     }).join("");
     if (withDir.length > list.length) {
-      rows += `<div class="pa-row muted" style="margin-top:4px;">⚠ ${withDir.length} accounts share ${list.length} proxies — some reuse the same IP. Add spare lines so ⟳ Swap has fresh IPs.</div>`;
+      rows += `<div class="pa-row muted" style="margin-top:4px;">${icoHTML("alert")} ${withDir.length} accounts share ${list.length} proxies — some reuse the same IP. Add spare lines so ⟳ Swap has fresh IPs.</div>`;
     }
   }
   el.innerHTML = rows;
@@ -3476,11 +3505,11 @@ async function saveAll(silent) {
   const resp = await hostSend({ cmd: "setConfig", config });
   if (!silent) {
     if (resp.ok) {
-      flashTemp($("statusMsg"), `✓ Saved. Shared config written to ${resp.configPath || "~/.snkrs-bot/config.json"}.`);
+      flashTemp($("statusMsg"), `Saved. Shared config written to ${resp.configPath || "~/.snkrs-bot/config.json"}.`);
     } else if (resp.hostMissing) {
-      flashTemp($("statusMsg"), "✓ Saved locally. (Launcher offline — shared file not written yet.)", "#f0c070", 4000);
+      flashTemp($("statusMsg"), "Saved locally. (Launcher offline — shared file not written yet.)", "var(--orange)", 4000);
     } else {
-      flashTemp($("statusMsg"), "Saved locally, but launcher error: " + resp.error, "#f0c070", 4000);
+      flashTemp($("statusMsg"), "Saved locally, but launcher error: " + resp.error, "var(--orange)", 4000);
     }
   }
   return config;
@@ -3498,21 +3527,21 @@ function updateScheduleStatus(armResp) {
       const date = d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
       el.className = "schedule-status armed";
       el.style.display = "";
-      el.textContent = `⏰ Scheduled — ${armResp.count} account(s) will auto-open on ${date} at ${hm}`;
+      el.textContent = `Scheduled — ${armResp.count} account(s) will auto-open on ${date} at ${hm}`;
     } else if (armResp.reason === "time already passed — launching now") {
       el.className = "schedule-status armed";
       el.style.display = "";
-      el.textContent = "⏰ Time already passed — launching now…";
+      el.textContent = "Time already passed — launching now…";
     } else if (armResp.reason === "drop time already passed — not auto-opening") {
       el.className = "schedule-status disarmed";
       el.style.display = "";
-      el.textContent = "⏰ Drop time has passed — accounts will NOT auto-open. Set a new time to re-arm.";
+      el.textContent = "Drop time has passed — accounts will NOT auto-open. Set a new time to re-arm.";
     } else {
       el.className = "schedule-status disarmed";
       el.style.display = "";
       el.textContent = armResp.reason
         ? `Not scheduled (${armResp.reason})`
-        : "Not scheduled — set a time and toggle ⏰ auto on at least one account to arm.";
+        : "Not scheduled — set a time and toggle auto on at least one account to arm.";
     }
   }
 
@@ -3528,22 +3557,22 @@ function updateScheduleStatus(armResp) {
     banner.className  = "sched-banner armed";
     banner.style.display = "flex";
     banner.innerHTML  = `<span class="sched-banner-dot"></span>` +
-      `<span>⏰ SCHEDULER ARMED &mdash; <strong>${armResp.count} account(s)</strong> will auto-open on <strong>${date} at ${hm}</strong></span>`;
+      `<span>${icoHTML("alarm")} SCHEDULER ARMED &mdash; <strong>${armResp.count} account(s)</strong> will auto-open on <strong>${date} at ${hm}</strong></span>`;
   } else if (armResp.reason === "time already passed — launching now") {
     banner.className  = "sched-banner armed";
     banner.style.display = "flex";
-    banner.innerHTML  = `<span class="sched-banner-dot"></span><span>⏰ Time reached &mdash; launching now…</span>`;
+    banner.innerHTML  = `<span class="sched-banner-dot"></span><span>${icoHTML("alarm")} Time reached &mdash; launching now…</span>`;
   } else if (armResp.reason === "drop time already passed — not auto-opening") {
     banner.className  = "sched-banner disarmed";
     banner.style.display = "flex";
     banner.innerHTML  = `<span class="sched-banner-dot"></span>` +
-      `<span>⏰ Drop time has passed &mdash; accounts will <strong>not</strong> auto-open. Set a new time to re-arm.</span>`;
+      `<span>${icoHTML("alarm")} Drop time has passed &mdash; accounts will <strong>not</strong> auto-open. Set a new time to re-arm.</span>`;
   } else {
     // Only show disarmed hint if scheduler toggle is on (user is actively configuring it)
     if (scheduleIsEnabled()) {
       banner.className  = "sched-banner disarmed";
       banner.style.display = "flex";
-      const reason = armResp.reason || "enable schedule and toggle ⏰ on at least one account";
+      const reason = armResp.reason || "enable schedule and toggle on at least one account";
       banner.innerHTML = `<span class="sched-banner-dot"></span><span>Not armed — ${reason}</span>`;
     } else {
       banner.style.display = "none";
@@ -3592,14 +3621,14 @@ async function fetchDropTimeFromNike() {
   const msg = $("dropTimeMsg");
   const sku = ($("dropKeyword").value || "").trim().toUpperCase() ||
               (accounts.map(skuForAccount).find(Boolean) || "");
-  if (!sku) { if (msg) { msg.style.color = "#fa5400"; msg.textContent = "Set the SKU first."; } return; }
+  if (!sku) { if (msg) { msg.style.color = "var(--orange)"; msg.textContent = "Set the SKU first."; } return; }
   if (msg) { msg.style.color = "#888"; msg.textContent = "Fetching drop time from Nike…"; }
   let d;
   try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
-  if (!d || !d.ok) { if (msg) { msg.style.color = "#fa5400"; msg.textContent = `Couldn't fetch: ${(d && d.error) || "unknown"}`; } return; }
-  if (!d.dropTimeISO) { if (msg) { msg.style.color = "#fa5400"; msg.textContent = "Nike didn't return a drop time for this SKU."; } return; }
+  if (!d || !d.ok) { if (msg) { msg.style.color = "var(--orange)"; msg.textContent = `Couldn't fetch: ${(d && d.error) || "unknown"}`; } return; }
+  if (!d.dropTimeISO) { if (msg) { msg.style.color = "var(--orange)"; msg.textContent = "Nike didn't return a drop time for this SKU."; } return; }
   if (setDropTimeField(d.dropTimeISO)) {
-    if (msg) { msg.style.color = "var(--green)"; msg.textContent = `⏱ Drop time set: ${new Date(d.dropTimeISO).toLocaleString()}`; }
+    if (msg) { msg.style.color = "var(--green)"; msg.textContent = `Drop time set: ${new Date(d.dropTimeISO).toLocaleString()}`; }
     saveAll(true);
   }
 }
@@ -3665,22 +3694,22 @@ async function assignCheckoutUrls(msgEl) {
   // Auto-fill the DROP TIME from Nike so SUBMIT fires exactly when the site says.
   if (nikeDropISO && setDropTimeField(nikeDropISO)) {
     const dtEl = $("dropTimeMsg");
-    if (dtEl) { dtEl.style.color = "var(--green)"; dtEl.textContent = `⏱ Drop time set from Nike: ${new Date(nikeDropISO).toLocaleString()}`; }
+    if (dtEl) { dtEl.style.color = "var(--green)"; dtEl.textContent = `Drop time set from Nike: ${new Date(nikeDropISO).toLocaleString()}`; }
   }
   renderAccounts();
   await saveAll(true);
   if (msgEl) {
-    const randNote = randomCount ? ` 🎲 ${randomCount} on RANDOM size use the launch-page flow.` : "";
+    const randNote = randomCount ? ` ${randomCount} on RANDOM size use the launch-page flow.` : "";
     if (!ok && !fail && randomCount) {
-      flashTemp(msgEl, `🎲 ${randomCount} account(s) set to RANDOM size — they'll wait on the launch page and cop any size that loads. No direct URL needed.`, "#1db954", 8000);
+      flashTemp(msgEl, `${randomCount} account(s) set to RANDOM size — they'll wait on the launch page and cop any size that loads. No direct URL needed.`, "var(--green)", 8000);
     } else if (ok && !fail) {
-      flashTemp(msgEl, `⚡ Built ${ok} direct checkout URL(s) — LAUNCH ALL opens straight onto them, skipping the size screen. (They only resolve at go-live; opening early shows Nike's error page — that's normal.)${randNote}`, "#1db954", 8000);
+      flashTemp(msgEl, `Built ${ok} direct checkout URL(s) — LAUNCH ALL opens straight onto them, skipping the size screen. (They only resolve at go-live; opening early shows Nike's error page — that's normal.)${randNote}`, "var(--green)", 8000);
     } else if (ok) {
-      flashTemp(msgEl, `⚡ Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "#f0c070", 7000);
+      flashTemp(msgEl, `Built ${ok}; ${fail} will use the normal launch-page flow. (${[...errs][0] || ""})`, "var(--orange)", 7000);
     } else if (notLaunch) {
-      flashTemp(msgEl, `Sizes assigned ✓ — direct checkout skipped: not a SNKRS draw/launch product, so the normal launch page + size selection is used.`, "#f0c070", 9000);
+      flashTemp(msgEl, `Sizes assigned — direct checkout skipped: not a SNKRS draw/launch product, so the normal launch page + size selection is used.`, "var(--orange)", 9000);
     } else {
-      flashTemp(msgEl, `Sizes assigned ✓ — couldn't build direct URLs, using launch-page fallback. (${[...errs][0] || ""})`, "#fa5400", 9000);
+      flashTemp(msgEl, `Sizes assigned — couldn't build direct URLs, using launch-page fallback. (${[...errs][0] || ""})`, "var(--orange)", 9000);
     }
   }
 }
@@ -3781,11 +3810,11 @@ function renderTilePreview() {
   const mon = plan.monitors > 1 ? ` across ${plan.monitors} monitors` : "";
   let cap;
   if (n > per) {
-    cap = `<span class="tile-warn">⚠ ${n} profiles — only ${per} fit without overlapping${mon}.</span> ` +
+    cap = `<span class="tile-warn">${icoHTML("alert")} ${n} profiles — only ${per} fit without overlapping${mon}.</span> ` +
           `The other ${n - per} open at Chrome's default size (not tiled). ` +
           `Max is <strong>${plan.capacity}</strong>${mon}.`;
   } else {
-    cap = `✓ ${n} window(s), no overlap${mon} · ${layout}` +
+    cap = `${icoHTML("check")} ${n} window(s), no overlap${mon} · ${layout}` +
           `${plan.auto ? " · auto-fit" : ""} · max <strong>${plan.capacity}</strong>`;
   }
   box.innerHTML = html + `<div class="tile-cap">${cap}</div>`;
@@ -4009,13 +4038,13 @@ function bootUrlForTarget(acct, target) {
 
 function validateForLaunch(acct, msgEl) {
   if (!acct.profileDir) {
-    flashTemp(msgEl, "Pick a Chrome profile for this account.", "#fa5400");
+    flashTemp(msgEl, "Pick a Chrome profile for this account.", "var(--orange)");
     return false;
   }
   if (!launchTargetsFor(acct).length) {
     flashTemp(msgEl, multiProduct
-      ? "No products assigned — run 🎲 RANDOMLY ASSIGN then ⚡ BUILD DIRECT URLS."
-      : "Set the Drop URL / size first.", "#fa5400");
+      ? "No products assigned — run RANDOMLY ASSIGN then BUILD DIRECT URLS."
+      : "Set the Drop URL / size first.", "var(--orange)");
     return false;
   }
   return true;
@@ -4031,11 +4060,11 @@ async function launchAccount(acct, msgEl) {
   const idx = Math.max(0, accounts.findIndex(a => a.id === acct.id));
   const resp = await hostSend({ cmd: "launch", profileDir: acct.profileDir, urls, window: windowFor(idx), loadExtension: loadExtOnLaunch() });
   if (resp.ok) {
-    flashTemp(msgEl, `🚀 Launched “${acct.profileDir}” — ${urls.length} tab(s).`, "#1db954");
+    flashTemp(msgEl, `Launched “${acct.profileDir}” — ${urls.length} tab(s).`, "var(--green)");
   } else if (resp.hostMissing) {
-    flashTemp(msgEl, "Launcher offline — use ⌘ copy cmd, or install the host.", "#fa5400", 5000);
+    flashTemp(msgEl, "Launcher offline — use copy cmd, or install the host.", "var(--orange)", 5000);
   } else {
-    flashTemp(msgEl, "Launch failed: " + (resp.error || "unknown"), "#e03131", 5000);
+    flashTemp(msgEl, "Launch failed: " + (resp.error || "unknown"), "var(--red)", 5000);
   }
 }
 
@@ -4047,7 +4076,7 @@ async function launchAll() {
   // Launch EVERY account that has a Chrome profile — not just configured ones.
   const all = accounts.filter(a => a.profileDir);
   if (!all.length) {
-    flashTemp($("statusMsg"), "No accounts have a Chrome profile set yet.", "#fa5400");
+    flashTemp($("statusMsg"), "No accounts have a Chrome profile set yet.", "var(--orange)");
     return;
   }
   // Know the real monitor layout BEFORE computing tile positions, so windows
@@ -4061,11 +4090,11 @@ async function launchAll() {
   if (blockers.length) {
     const names = blockers.map(a => a.label || a.profileDir).join(", ");
     const proceed = confirm(
-      `⚠️ Preflight flagged ${blockers.length} profile(s) as BLOCKED:\n\n${names}\n\n` +
+      `Preflight flagged ${blockers.length} profile(s) as BLOCKED:\n\n${names}\n\n` +
       `These may fail at the drop (not logged in, no target, etc.). ` +
       `Open the PREFLIGHT tab to see why.\n\nLaunch anyway?`);
     if (!proceed) {
-      flashTemp($("statusMsg"), `Launch cancelled — fix ${blockers.length} blocked profile(s) on PREFLIGHT first.`, "#fa5400", 6000);
+      flashTemp($("statusMsg"), `Launch cancelled — fix ${blockers.length} blocked profile(s) on PREFLIGHT first.`, "var(--orange)", 6000);
       navigateTo("preflight");
       return;
     }
@@ -4110,11 +4139,11 @@ async function launchAll() {
 
   if (profOk === all.length) {
     const tail = warmCount ? ` (${warmCount} warm-up)` : "";
-    flashTemp($("statusMsg"), `🚀 Launched ${profOk} profiles · ${tabOk} product tab(s)${tail}. Auto-open disarmed. Each holds SUBMIT until drop.`, "#1db954", 8000);
+    flashTemp($("statusMsg"), `Launched ${profOk} profiles · ${tabOk} product tab(s)${tail}. Auto-open disarmed. Each holds SUBMIT until drop.`, "var(--green)", 8000);
   } else if (profOk > 0) {
-    flashTemp($("statusMsg"), `Launched ${profOk}/${all.length}. Last error: ${lastErr}`, "#f0c070", 6000);
+    flashTemp($("statusMsg"), `Launched ${profOk}/${all.length}. Last error: ${lastErr}`, "var(--orange)", 6000);
   } else {
-    flashTemp($("statusMsg"), `Couldn't launch. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
+    flashTemp($("statusMsg"), `Couldn't launch. ${lastErr || "Is the launcher installed?"}`, "var(--red)", 6000);
   }
 }
 
@@ -4137,7 +4166,7 @@ async function launchSelected() {
   const msgEl = $("statusMsg");
   const list = accounts.filter(a => a.profileDir && a.selected);
   if (!list.length) {
-    flashTemp(msgEl, "No profiles selected — tick the ☑ boxes on the Profiles page first.", "var(--orange)", 6000);
+    flashTemp(msgEl, "No profiles selected — tick the boxes on the Profiles page first.", "var(--orange)", 6000);
     return;
   }
   await openProfileSet(list, "selected", msgEl);
@@ -4153,7 +4182,7 @@ async function openProfileSet(list, labelText, msgEl) {
   });
   if (blockers.length) {
     const names = blockers.map(a => a.label || a.profileDir).join(", ");
-    if (!confirm(`⚠️ Preflight flagged ${blockers.length} ${labelText} profile(s) as BLOCKED:\n\n${names}\n\nOpen anyway?`)) {
+    if (!confirm(`Preflight flagged ${blockers.length} ${labelText} profile(s) as BLOCKED:\n\n${names}\n\nOpen anyway?`)) {
       flashTemp(msgEl, `Cancelled — fix ${blockers.length} blocked profile(s) first.`, "var(--orange)", 6000);
       return;
     }
@@ -4185,25 +4214,25 @@ async function openProfileSet(list, labelText, msgEl) {
 
   if (profOk === list.length) {
     const tail = warmCount ? ` (${warmCount} warm-up)` : "";
-    flashTemp(msgEl, `🚀 Opened ${profOk} ${labelText} profile(s) · ${tabOk} tab(s)${tail}. Each holds SUBMIT until drop.`, "var(--green)", 8000);
+    flashTemp(msgEl, `Opened ${profOk} ${labelText} profile(s) · ${tabOk} tab(s)${tail}. Each holds SUBMIT until drop.`, "var(--green)", 8000);
   } else if (profOk > 0) {
-    flashTemp(msgEl, `Opened ${profOk}/${list.length} ${labelText}. Last error: ${lastErr}`, "#f0c070", 6000);
+    flashTemp(msgEl, `Opened ${profOk}/${list.length} ${labelText}. Last error: ${lastErr}`, "var(--orange)", 6000);
   } else {
-    flashTemp(msgEl, `Couldn't open ${labelText}. ${lastErr || "Is the launcher installed?"}`, "#e03131", 6000);
+    flashTemp(msgEl, `Couldn't open ${labelText}. ${lastErr || "Is the launcher installed?"}`, "var(--red)", 6000);
   }
 }
 
 // Fallback when the host isn't installed: copy a paste-ready command.
 function copyLaunchCommand(acct, msgEl) {
-  if (!acct.profileDir) { flashTemp(msgEl, "Pick a profile first.", "#fa5400"); return; }
+  if (!acct.profileDir) { flashTemp(msgEl, "Pick a profile first.", "var(--orange)"); return; }
   const targets = launchTargetsFor(acct);
   const urls = targets.length
     ? targets.map(t => bootUrlForTarget(acct, t)).filter(Boolean)
     : ["https://www.nike.com/sg/launch/"];
   const cmd = urls.map(u => `chrome --profile-directory="${acct.profileDir}" "${u}"`).join(" && ");
   navigator.clipboard.writeText(cmd).then(
-    () => flashTemp(msgEl, `📋 ${urls.length} command(s) copied — paste into a terminal.`, "#1db954"),
-    () => flashTemp(msgEl, "Copy failed.", "#e03131")
+    () => flashTemp(msgEl, `${urls.length} command(s) copied — paste into a terminal.`, "var(--green)"),
+    () => flashTemp(msgEl, "Copy failed.", "var(--red)")
   );
 }
 
@@ -4403,20 +4432,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Show reason if there was a bad/expired key
     if (licCheck.reason && licCheck.reason !== "no-key") {
       const msg = $("licenseMsg");
-      if (msg) { msg.style.color = "#e03131"; msg.textContent = licCheck.reason; }
+      if (msg) { msg.style.color = "var(--red)"; msg.textContent = licCheck.reason; }
     }
-    const flashActivate = (msg, color) => { const n = $("licenseMsg"); if (n) { n.style.color = color || "#1db954"; n.textContent = msg; } };
+    const flashActivate = (msg, color) => { const n = $("licenseMsg"); if (n) { n.style.color = color || "var(--green)"; n.textContent = msg; } };
   $("activateBtn").addEventListener("click", async () => {
       const ks = $("licenseKeyInput").value.trim();
-      if (!ks) { flashActivate("Enter your license key.", "#fa5400"); return; }
+      if (!ks) { flashActivate("Enter your license key.", "var(--orange)"); return; }
       $("activateBtn").disabled = true;
       flashActivate("Validating…", "#888");
       const result = await activateLicense(ks);
       if (result.ok) {
-        flashActivate(`✓ Activated for ${result.payload.user || "user"}. Loading…`, "#1db954");
+        flashActivate(`Activated for ${result.payload.user || "user"}. Loading…`, "var(--green)");
         setTimeout(() => location.reload(), 800);
       } else {
-        flashActivate(result.err || "Invalid key.", "#e03131");
+        flashActivate(result.err || "Invalid key.", "var(--red)");
         $("activateBtn").disabled = false;
       }
     });
@@ -4530,8 +4559,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       saveAll(true);
       const m = $("assignMsg");
       if (m) flashTemp(m, botMode === "flow"
-        ? "🛍️ FLOW mode — nike.com catalogue (product → Bag → Checkout). Reload the extension in each profile."
-        : "👟 SNKRS mode — launch/draw flow.", "#1db954", 6000);
+        ? "FLOW mode — nike.com catalogue (product → Bag → Checkout). Reload the extension in each profile."
+        : "SNKRS mode — launch/draw flow.", "var(--green)", 6000);
     });
   });
   ["flowMaxRetries", "flowRetryDelaySec", "flowTimeLimitMin"].forEach(id => {
@@ -4560,7 +4589,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     accounts.forEach(a => { a.autoLaunch = true; });
     renderAccounts();
     saveAll(true).then(cfg => flashTemp($("statusMsg"),
-      `⏰ Armed ${accounts.length} account(s) — save confirms the scheduler.`, "#1db954", 4000));
+      `Armed ${accounts.length} account(s) — save confirms the scheduler.`, "var(--green)", 4000));
   });
   $("unarmAllBtn").addEventListener("click", () => {
     accounts.forEach(a => { a.autoLaunch = false; });
@@ -4678,20 +4707,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     saveAll(true);
     const m = $("assignMsg");
     if (m) flashTemp(m, singleRandomSize
-      ? `🎲 Rolled sizes from ${rollRangeLabel()}. ${sizeSpreadSummary()}`
-      : "Random size off — pick sizes below.", singleRandomSize ? "#1db954" : "#888", 7000);
+      ? `Rolled sizes from ${rollRangeLabel()}. ${sizeSpreadSummary()}`
+      : "Random size off — pick sizes below.", singleRandomSize ? "var(--green)" : "#888", 7000);
   });
   // Shared: re-roll now and report the spread (only when random is on + accounts).
   const reRoll = (verb) => {
     if (!singleRandomSize || !accounts.length) { saveAll(true); return; }
     rollRandomSizes(); renderAccounts(); saveAll(true);
     const m = $("assignMsg");
-    if (m) flashTemp(m, `🎲 ${verb} from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "#1db954", 6000);
+    if (m) flashTemp(m, `${verb} from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "var(--green)", 6000);
   };
   if ($("rerollBtn")) $("rerollBtn").addEventListener("click", () => {
-    if (!accounts.length) { flashTemp($("assignMsg"), "Add accounts first.", "#fa5400"); return; }
+    if (!accounts.length) { flashTemp($("assignMsg"), "Add accounts first.", "var(--orange)"); return; }
     rollRandomSizes(); renderAccounts(); saveAll(true);
-    flashTemp($("assignMsg"), `🎲 Re-rolled from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "#1db954", 6000);
+    flashTemp($("assignMsg"), `Re-rolled from ${rollRangeLabel()}. ${sizeSpreadSummary()}`, "var(--green)", 6000);
   });
   // Category switch (footwear ↔ apparel): repopulate the range, then re-roll.
   if ($("randomKind")) $("randomKind").addEventListener("change", () => {
@@ -4739,12 +4768,12 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("testHostBtn").addEventListener("click", async () => {
     flash($("statusMsg"), "Pinging launcher…", "#888");
     const up = await pingHost();
-    if (up) { await loadProfiles(); flashTemp($("statusMsg"), "✓ Launcher connected.", "#1db954"); }
-    else flashTemp($("statusMsg"), "Launcher not reachable — see setup below.", "#fa5400", 5000);
+    if (up) { await loadProfiles(); flashTemp($("statusMsg"), "Launcher connected.", "var(--green)"); }
+    else flashTemp($("statusMsg"), "Launcher not reachable — see setup below.", "var(--orange)", 5000);
   });
   $("refreshProfilesBtn").addEventListener("click", async () => {
     await loadProfiles();
-    flashTemp($("statusMsg"), hostOk ? `Reloaded ${discoveredProfiles.length} profiles.` : "Launcher offline.", hostOk ? "#1db954" : "#fa5400");
+    flashTemp($("statusMsg"), hostOk ? `Reloaded ${discoveredProfiles.length} profiles.` : "Launcher offline.", hostOk ? "var(--green)" : "var(--orange)");
   });
   $("clearStatusBtn").addEventListener("click", async () => {
     liveStatuses = {};
@@ -4817,7 +4846,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         return;
       }
       chrome.runtime.sendMessage({ type: "set_upcoming_cfg", cfg }, () => {
-        if (msgEl) flashTemp(msgEl, cfg.enabled ? "✓ Monitoring armed — you'll be pinged on new drops." : "Saved (monitoring off).", "var(--green)", 5000);
+        if (msgEl) flashTemp(msgEl, cfg.enabled ? "Monitoring armed — you'll be pinged on new drops." : "Saved (monitoring off).", "var(--green)", 5000);
       });
     });
   }
@@ -4829,7 +4858,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (msgEl) flash(msgEl, "Checking Nike feed + webhook…", "#888");
       chrome.runtime.sendMessage({ type: "test_upcoming_now", webhook }, (resp) => {
         if (resp && resp.ok) {
-          if (msgEl) flashTemp(msgEl, "✓ Test posted — check your Discord channel.", "var(--green)", 6000);
+          if (msgEl) flashTemp(msgEl, "Test posted — check your Discord channel.", "var(--green)", 6000);
         } else {
           if (msgEl) flashTemp(msgEl, "Failed: " + ((resp && resp.error) || "no response"), "var(--red)", 6000);
         }
@@ -4859,7 +4888,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       // Apply immediately in THIS profile so the change takes effect now; other
       // profiles pick it up when they next boot / on their next restart.
       chrome.runtime.sendMessage({ type: "apply_proxy_now" }, () => {
-        if (msgEl) flashTemp(msgEl, px.enabled ? "✓ Saved & applied. Launched profiles use their IP on next boot." : "✓ Saved. Proxies OFF — profiles use your normal IP on next boot.", "var(--green)", 6000);
+        if (msgEl) flashTemp(msgEl, px.enabled ? "Saved & applied. Launched profiles use their IP on next boot." : "Saved. Proxies OFF — profiles use your normal IP on next boot.", "var(--green)", 6000);
       });
     });
   }
@@ -4873,9 +4902,9 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (msgEl) flash(msgEl, "Testing egress IP through the proxy… (a few seconds)", "#888");
       chrome.runtime.sendMessage({ type: "test_proxy", proxy }, (resp) => {
         if (resp && resp.ok) {
-          const changed = resp.changed ? "✓ different from your real IP" : "⚠ same as your real IP — proxy may be bypassed";
+          const changed = resp.changed ? "different from your real IP" : "same as your real IP — proxy may be bypassed";
           const col = resp.changed ? "var(--green)" : "var(--orange)";
-          if (msgEl) flashTemp(msgEl, `✓ Proxy live — egress IP ${resp.ip} (${changed}).`, col, 9000);
+          if (msgEl) flashTemp(msgEl, `Proxy live — egress IP ${resp.ip} (${changed}).`, col, 9000);
         } else {
           if (msgEl) flashTemp(msgEl, "Proxy test failed: " + ((resp && resp.error) || "no response"), "var(--red)", 9000);
         }
@@ -4913,7 +4942,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       }
       if (msgEl) flash(msgEl, "Saving…", "#888");
       await saveAll(true);
-      if (msgEl) flashTemp(msgEl, nt.enabled ? "✓ Saved — every launched account will ping on these events." : "✓ Saved (notifications off).", "var(--green)", 5000);
+      if (msgEl) flashTemp(msgEl, nt.enabled ? "Saved — every launched account will ping on these events." : "Saved (notifications off).", "var(--green)", 5000);
     });
   }
   if ($("testNotifyBtn")) {
@@ -4923,7 +4952,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (!cfg.webhook && !(cfg.telegramToken && cfg.telegramChatId)) { if (msgEl) flashTemp(msgEl, "Add a Discord webhook or Telegram token+chat first.", "var(--orange)", 5000); return; }
       if (msgEl) flash(msgEl, "Sending test notification…", "#888");
       chrome.runtime.sendMessage({ type: "test_outcome_notify", cfg }, (resp) => {
-        if (resp && resp.ok) { if (msgEl) flashTemp(msgEl, "✓ Sent — check Discord/Telegram.", "var(--green)", 6000); }
+        if (resp && resp.ok) { if (msgEl) flashTemp(msgEl, "Sent — check Discord/Telegram.", "var(--green)", 6000); }
         else { if (msgEl) flashTemp(msgEl, "Failed: " + ((resp && resp.error) || "no response"), "var(--red)", 6000); }
       });
     });
@@ -4938,7 +4967,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const msgEl = $("settingsStatusMsg");
       if (msgEl) flash(msgEl, "Pinging launcher…", "#888");
       const up = await pingHost();
-      if (up) { await loadProfiles(); if (msgEl) flashTemp(msgEl, "✓ Launcher connected.", "var(--green)"); }
+      if (up) { await loadProfiles(); if (msgEl) flashTemp(msgEl, "Launcher connected.", "var(--green)"); }
       else if (msgEl) flashTemp(msgEl, "Launcher not reachable — see setup instructions above.", "var(--orange)", 5000);
     });
   }

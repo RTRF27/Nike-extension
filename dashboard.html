@@ -2,8 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reagan Bot · Drop Dashboard</title>
   <link rel="stylesheet" href="dashboard.css" />
+  <link rel="stylesheet" href="icons.css" />
 </head>
 <body>
 
@@ -17,7 +19,7 @@
       <p class="license-sub">Enter your license key to access the dashboard.</p>
       <textarea id="licenseKeyInput" class="inp mono license-input" rows="3" placeholder="SNKRS-..."></textarea>
       <button id="activateBtn" class="btn btn-accent" style="width:100%; margin-top:10px;">ACTIVATE</button>
-      <div id="licenseMsg" class="status-msg" style="min-height:18px;"></div>
+      <div id="licenseMsg" class="status-msg" role="status" aria-live="polite" style="min-height:18px;"></div>
     </div>
   </div>
 
@@ -25,7 +27,7 @@
   <div class="app-shell">
 
     <!-- ░░ SIDEBAR ░░ -->
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="Sidebar">
       <div class="brand">
         <div class="nike-swoosh">
           <svg viewBox="0 0 24 24" fill="none"><path d="M13.5 2 4 13.2h5.4L8.8 22 20 10.2h-5.6L15.4 2z" fill="white"/></svg>
@@ -37,23 +39,23 @@
         </div>
       </div>
 
-      <nav class="side-nav" id="sideNav">
-        <button class="side-item active" data-nav="dashboard"><span class="si-ico">▦</span><span class="si-label">Dashboard</span></button>
-        <button class="side-item" data-nav="setup"><span class="si-ico">⚙</span><span class="si-label">Setup</span></button>
-        <button class="side-item" data-nav="orders"><span class="si-ico">📦</span><span class="si-label">Orders</span></button>
-        <button class="side-item" data-nav="settings"><span class="si-ico">☰</span><span class="si-label">Settings</span></button>
+      <nav class="side-nav" id="sideNav" aria-label="Main sections">
+        <button class="side-item active" data-nav="dashboard" aria-label="Dashboard" aria-current="page"><span class="si-ico"><i class="ico ico-dashboard" aria-hidden="true"></i></span><span class="si-label">Dashboard</span></button>
+        <button class="side-item" data-nav="setup" aria-label="Setup"><span class="si-ico"><i class="ico ico-settings" aria-hidden="true"></i></span><span class="si-label">Setup</span></button>
+        <button class="side-item" data-nav="orders" aria-label="Orders"><span class="si-ico"><i class="ico ico-package" aria-hidden="true"></i></span><span class="si-label">Orders</span></button>
+        <button class="side-item" data-nav="settings" aria-label="Settings"><span class="si-ico"><i class="ico ico-sliders" aria-hidden="true"></i></span><span class="si-label">Settings</span></button>
       </nav>
 
       <div class="side-foot">
-        <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;">⚙ ADMIN</a>
+        <a href="admin.html" id="adminLink" class="btn btn-dark btn-mini" style="display:none; text-decoration:none;"><i class="ico ico-settings" aria-hidden="true"></i>ADMIN</a>
         <div class="host-pill" id="hostPill">
           <span class="host-dot" id="hostDot"></span>
           <span id="hostText">CHECKING…</span>
         </div>
-        <button id="sideLaunchBtn" class="btn btn-accent side-launch">🚀 LAUNCH ALL</button>
+        <button id="sideLaunchBtn" class="btn btn-accent side-launch"><i class="ico ico-rocket" aria-hidden="true"></i>LAUNCH ALL</button>
         <div class="side-foot-row">
-          <button id="sidePanicBtn" class="btn btn-danger side-panic" title="Stop all held submits">🛑 PANIC</button>
-          <button id="sideCloseBtn" class="btn btn-dark side-close" title="Close every profile's bot windows">✖ CLOSE</button>
+          <button id="sidePanicBtn" class="btn btn-danger side-panic" title="Stop all held submits"><i class="ico ico-panic" aria-hidden="true"></i>PANIC</button>
+          <button id="sideCloseBtn" class="btn btn-dark side-close" title="Close every profile's bot windows"><i class="ico ico-x" aria-hidden="true"></i>CLOSE</button>
         </div>
       </div>
     </aside>
@@ -62,13 +64,13 @@
     <div class="content">
 
       <!-- Launcher-missing banner -->
-      <div class="banner banner-warn" id="hostMissingBanner" style="display:none;">
+      <div class="banner banner-warn" role="status" aria-live="polite" id="hostMissingBanner" style="display:none;">
         <strong>Launcher not connected.</strong> Launch buttons need the one-time native host install.
         <a href="#" id="setupLink">How to install →</a>
       </div>
 
       <!-- Secondary tabs (populated by JS for multi-view sections) -->
-      <div class="subnav" id="subNav"></div>
+      <div class="subnav" id="subNav" role="tablist" aria-label="Setup steps"></div>
 
       <!-- ░░░░░░░░░░░░░░░░░░░░░░░░░ PAGES ░░░░░░░░░░░░░░░░░░░░░░░░░ -->
       <main class="main">
@@ -99,10 +101,10 @@
       <!-- Upcoming drops preview -->
       <section class="card" style="margin-bottom:20px;">
         <div class="card-head">
-          <h2>🔥 UPCOMING SNKRS DROPS</h2>
+          <h2><i class="ico ico-flame" aria-hidden="true"></i>UPCOMING SNKRS DROPS</h2>
           <div style="display:flex; align-items:center; gap:8px;">
             <span class="card-tag" id="upcomingTag">SG · LIVE FEED</span>
-            <button id="refreshUpcomingBtn" class="btn btn-mini btn-dark">↻ Refresh</button>
+            <button id="refreshUpcomingBtn" class="btn btn-mini btn-dark"><i class="ico ico-refresh" aria-hidden="true"></i>Refresh</button>
           </div>
         </div>
         <p class="hint" id="upcomingMsg">Loading upcoming drops from Nike…</p>
@@ -139,9 +141,9 @@
             <p class="hint">Save config first, then launch all profiles straight onto the drop. Pre-warming Kasada? Click launch a few minutes early.</p>
             <div class="actions" style="margin-bottom:10px;">
               <button id="saveBtnHome" class="btn btn-light">SAVE CONFIG</button>
-              <button id="launchAllBtnHome" class="btn btn-accent">🚀 LAUNCH ALL</button>
+              <button id="launchAllBtnHome" class="btn btn-accent"><i class="ico ico-rocket" aria-hidden="true"></i>LAUNCH ALL</button>
             </div>
-            <div id="homeActionMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+            <div id="homeActionMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left; min-height:14px;"></div>
           </section>
 
           <section class="card">
@@ -153,7 +155,7 @@
 
           <section class="card" style="display:none;">
             <div class="card-head">
-              <h2>🚀 GETTING STARTED</h2>
+              <h2><i class="ico ico-rocket" aria-hidden="true"></i>GETTING STARTED</h2>
               <span class="card-tag" id="guideToggle" style="cursor:pointer;">SHOW</span>
             </div>
             <div id="guideBody" style="display:none;">
@@ -187,21 +189,21 @@
 
           <section class="card mode-card">
             <div class="card-head">
-              <h2>⚡ BOT MODE</h2>
+              <h2><i class="ico ico-zap" aria-hidden="true"></i>BOT MODE</h2>
               <span class="card-tag" id="botModeTag">SNKRS</span>
             </div>
             <div class="modepick">
               <label class="modepick-opt">
                 <input type="radio" name="botMode" id="botModeSnkrs" value="snkrs" checked>
                 <span class="modepick-pill">
-                  <strong>👟 SNKRS</strong>
+                  <strong><i class="ico ico-shoe" aria-hidden="true"></i>SNKRS</strong>
                   <span>Draws &amp; launches on <code>nike.com/launch</code> → gs.nike.com checkout</span>
                 </span>
               </label>
               <label class="modepick-opt">
                 <input type="radio" name="botMode" id="botModeFlow" value="flow">
                 <span class="modepick-pill">
-                  <strong>🛍️ FLOW</strong>
+                  <strong><i class="ico ico-cart" aria-hidden="true"></i>FLOW</strong>
                   <span>General catalogue on <code>nike.com/t/…</code> → Bag → Checkout</span>
                 </span>
               </label>
@@ -229,11 +231,11 @@
               <input type="text" id="dropUrl" class="inp" placeholder="https://www.nike.com/sg/launch/t/...">
               <label class="lbl" for="dropKeyword" style="margin-top:10px;">Keyword / SKU <span class="muted">(targets ONE exact item on a collection page)</span></label>
               <input type="text" id="dropKeyword" class="inp" placeholder="e.g. IH1610-052">
-              <button id="fetchSingleMetaBtn" type="button" class="btn btn-mini btn-dark" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
+              <button id="fetchSingleMetaBtn" type="button" class="btn btn-mini btn-dark" style="margin-top:8px;"><i class="ico ico-search" aria-hidden="true"></i>FETCH PRODUCT</button>
               <div id="singleProductPreview" class="product-preview" style="display:none;"></div>
               <div class="toggle" style="margin-top:14px;">
                 <div>
-                  <div class="t-label">🎲 Random size (roll from a range)</div>
+                  <div class="t-label"><i class="ico ico-dice" aria-hidden="true"></i>Random size (roll from a range)</div>
                   <div class="t-hint">Rolls a size for each account NOW from the range below, so every tab targets a fixed size you can see up front. No live guessing at the drop.</div>
                 </div>
                 <label class="switch"><input type="checkbox" id="singleRandomSize"><span class="track"></span></label>
@@ -242,8 +244,8 @@
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                   <label class="lbl" style="margin:0;">Category</label>
                   <select id="randomKind" class="inp" style="width:170px;">
-                    <option value="footwear">👟 Footwear (US)</option>
-                    <option value="apparel">👕 Apparel (XXS–XXL)</option>
+                    <option value="footwear"><i class="ico ico-shoe" aria-hidden="true"></i>Footwear (US)</option>
+                    <option value="apparel"><i class="ico ico-shirt" aria-hidden="true"></i>Apparel (XXS–XXL)</option>
                   </select>
                 </div>
                 <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
@@ -252,12 +254,12 @@
                   <span class="muted">and</span>
                   <select id="randomMax" class="inp" style="width:92px;"></select>
                   <label class="chk" id="noHalfWrap" style="margin-left:4px;"><input type="checkbox" id="randomNoHalf"> No half sizes</label>
-                  <button id="rerollBtn" type="button" class="btn btn-mini btn-dark">🎲 Re-roll</button>
+                  <button id="rerollBtn" type="button" class="btn btn-mini btn-dark"><i class="ico ico-dice" aria-hidden="true"></i>Re-roll</button>
                 </div>
               </div>
               <label class="lbl" style="margin-top:14px;">Size pool <span class="muted">(randomly assigned to accounts)</span></label>
               <div class="size-pool" id="singleSizePool"></div>
-              <button id="toMultiBtn" type="button" class="btn btn-ghost" style="margin-top:14px; width:100%;">➕ ADD A SECOND PRODUCT (JACKET + SHIRT…)</button>
+              <button id="toMultiBtn" type="button" class="btn btn-ghost" style="margin-top:14px; width:100%;"><i class="ico ico-plus" aria-hidden="true"></i>ADD A SECOND PRODUCT (JACKET + SHIRT…)</button>
             </div>
 
             <div id="multiProductPanel" style="margin-top:14px; display:none;">
@@ -290,9 +292,9 @@
                 <label class="lbl" for="newProfileName">Profile name</label>
                 <input type="text" id="newProfileName" class="inp" placeholder="Profile 5">
               </div>
-              <button id="createProfileBtn" class="btn btn-purple" style="flex:none; white-space:nowrap;">➕ CREATE &amp; LOGIN</button>
+              <button id="createProfileBtn" class="btn btn-purple" style="flex:none; white-space:nowrap;"><i class="ico ico-plus" aria-hidden="true"></i>CREATE &amp; LOGIN</button>
             </div>
-            <div id="profileCreatorMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+            <div id="profileCreatorMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left; min-height:14px;"></div>
           </section>
         </div>
 
@@ -316,12 +318,12 @@
         <div class="card-head">
           <h2>ACCOUNTS</h2>
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-            <button id="selectAllBtn"  class="btn btn-mini btn-dark">☑ SELECT ALL</button>
-            <button id="selectNoneBtn" class="btn btn-mini btn-dark">☐ NONE</button>
-            <button id="armAllBtn"   class="btn btn-mini btn-dark">⏰ ARM ALL</button>
-            <button id="unarmAllBtn" class="btn btn-mini btn-danger">✕ UNARM ALL</button>
-            <button id="exportTasksBtn" class="btn btn-mini btn-dark" title="Download every account as tasks.csv">⬇ CSV</button>
-            <button id="importTasksBtn" class="btn btn-mini btn-purple" title="Bulk-load accounts from a tasks.csv">⬆ IMPORT CSV</button>
+            <button id="selectAllBtn"  class="btn btn-mini btn-dark"><i class="ico ico-check-box" aria-hidden="true"></i>SELECT ALL</button>
+            <button id="selectNoneBtn" class="btn btn-mini btn-dark"><i class="ico ico-box" aria-hidden="true"></i>NONE</button>
+            <button id="armAllBtn"   class="btn btn-mini btn-dark"><i class="ico ico-alarm" aria-hidden="true"></i>ARM ALL</button>
+            <button id="unarmAllBtn" class="btn btn-mini btn-danger"><i class="ico ico-x" aria-hidden="true"></i>UNARM ALL</button>
+            <button id="exportTasksBtn" class="btn btn-mini btn-dark" title="Download every account as tasks.csv"><i class="ico ico-download" aria-hidden="true"></i>CSV</button>
+            <button id="importTasksBtn" class="btn btn-mini btn-purple" title="Bulk-load accounts from a tasks.csv"><i class="ico ico-upload" aria-hidden="true"></i>IMPORT CSV</button>
             <input type="file" id="importTasksFile" accept=".csv,text/csv" style="display:none;">
             <span class="card-tag">ONE ROW = ONE CHROME PROFILE</span>
           </div>
@@ -329,8 +331,8 @@
         <p class="hint">
           Each account maps to one Chrome profile.
           Pick the profile, set size, assign a card, then launch.
-          Tick <strong>☑ select</strong> on the profiles you want, then use
-          <strong>🎯 OPEN SELECTED</strong> on the Drop page. (<span id="selectedCount">0</span> selected)
+          Tick <strong><i class="ico ico-check-box" aria-hidden="true"></i>select</strong> on the profiles you want, then use
+          <strong><i class="ico ico-target" aria-hidden="true"></i>OPEN SELECTED</strong> on the Drop page. (<span id="selectedCount">0</span> selected)
           <span id="profileSourceNote"></span>
         </p>
 
@@ -355,10 +357,10 @@
         <div class="col">
           <section class="card" id="cardProfilesCard">
             <div class="card-head">
-              <h2>SAVED CARDS 🔒</h2>
+              <h2>SAVED CARDS <i class="ico ico-lock" aria-hidden="true"></i></h2>
               <span class="card-tag">REUSABLE</span>
             </div>
-            <p class="hint">Assign a card to accounts from their <strong>💳 Card</strong> dropdown. Multiple accounts can share one card.</p>
+            <p class="hint">Assign a card to accounts from their <strong><i class="ico ico-card" aria-hidden="true"></i>Card</strong> dropdown. Multiple accounts can share one card.</p>
             <div id="cardProfilesList"></div>
           </section>
         </div>
@@ -386,10 +388,10 @@
                   <input type="password" id="cpCvv" class="inp" placeholder="•••" maxlength="4" autocomplete="off" inputmode="numeric">
                 </div>
               </div>
-              <button id="cpSaveBtn" class="btn btn-purple" style="margin-top:14px; width:100%;">➕ SAVE CARD</button>
-              <div id="cpMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
+              <button id="cpSaveBtn" class="btn btn-purple" style="margin-top:14px; width:100%;"><i class="ico ico-plus" aria-hidden="true"></i>SAVE CARD</button>
+              <div id="cpMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left; min-height:14px;"></div>
             </div>
-            <p class="warn" style="margin-top:12px;">⚠ Card data stored unencrypted on this machine. Don't use on shared computers.</p>
+            <p class="warn" style="margin-top:12px;"><i class="ico ico-alert" aria-hidden="true"></i>Card data stored unencrypted on this machine. Don't use on shared computers.</p>
           </section>
         </div>
       </div>
@@ -407,18 +409,18 @@
 
       <section class="card mode-only" data-mode="snkrs" style="margin-bottom:22px;">
         <div class="card-head">
-          <h2>🛒 CHECKOUT METHOD</h2>
+          <h2><i class="ico ico-cart" aria-hidden="true"></i>CHECKOUT METHOD</h2>
           <span class="card-tag">HOW EACH ACCOUNT COPS</span>
         </div>
         <div class="dropmode">
           <div class="dropmode-opts">
             <label class="dropmode-opt">
               <input type="radio" name="checkoutMode" id="checkoutModeOrganic" value="organic" checked>
-              <span class="dropmode-pill"><strong>🌱 Organic</strong> — launch page → size → Buy</span>
+              <span class="dropmode-pill"><strong><i class="ico ico-sprout" aria-hidden="true"></i>Organic</strong> — launch page → size → Buy</span>
             </label>
             <label class="dropmode-opt">
               <input type="radio" name="checkoutMode" id="checkoutModeDirect" value="direct">
-              <span class="dropmode-pill"><strong>⚡ Direct link</strong> — jump to gs checkout</span>
+              <span class="dropmode-pill"><strong><i class="ico ico-zap" aria-hidden="true"></i>Direct link</strong> — jump to gs checkout</span>
             </label>
           </div>
           <p class="hint" id="checkoutHintOrganic" style="margin:8px 0 0;">Opens the SNKRS <strong>launch page</strong>, selects the size, and clicks <strong>Buy / Join Draw</strong> — letting Nike navigate to checkout the natural way. Slower by a moment, but avoids the <strong>“entry invalid”</strong> error you get from a pre-built checkout link. Recommended.</p>
@@ -428,7 +430,7 @@
 
       <section class="card mode-only" data-mode="flow" style="margin-bottom:22px;">
         <div class="card-head">
-          <h2>🛍️ FLOW BEHAVIOUR</h2>
+          <h2><i class="ico ico-cart" aria-hidden="true"></i>FLOW BEHAVIOUR</h2>
           <span class="card-tag">RETRY &amp; CHECKOUT</span>
         </div>
         <p class="hint">How hard each task tries on a general release. A Flow task keeps retrying while the size is out of stock, so a restock gets caught instead of failing once.</p>
@@ -448,14 +450,14 @@
         </div>
         <div class="toggle" style="margin-top:14px;">
           <div>
-            <div class="t-label">🛒 Auto-checkout after Add to Bag</div>
+            <div class="t-label"><i class="ico ico-cart" aria-hidden="true"></i>Auto-checkout after Add to Bag</div>
             <div class="t-hint">Go straight from the bag to checkout. Off = stop with the item sitting in the bag.</div>
           </div>
           <label class="switch"><input type="checkbox" id="flowAutoCheckout" checked><span class="track"></span></label>
         </div>
         <div class="toggle" style="margin-top:10px;">
           <div>
-            <div class="t-label">🚀 Auto place order</div>
+            <div class="t-label"><i class="ico ico-rocket" aria-hidden="true"></i>Auto place order</div>
             <div class="t-hint"><strong>Spends money.</strong> Clicks Place Order at checkout. Leave OFF to review each order yourself first.</div>
           </div>
           <label class="switch"><input type="checkbox" id="flowAutoPlaceOrder"><span class="track"></span></label>
@@ -471,15 +473,15 @@
             </div>
             <label class="lbl" for="dropTime">Release time <span class="muted">— accounts SUBMIT exactly at this moment</span></label>
             <input type="datetime-local" id="dropTime" class="inp" step="1">
-            <button id="fetchDropTimeBtn" class="btn btn-dark" style="width:100%; margin-top:8px;">🔄 GET DROP TIME FROM NIKE</button>
+            <button id="fetchDropTimeBtn" class="btn btn-dark" style="width:100%; margin-top:8px;"><i class="ico ico-refresh" aria-hidden="true"></i>GET DROP TIME FROM NIKE</button>
             <p class="hint" style="margin:6px 0 0;">Open the pages yourself early (LAUNCH ALL) and let them sit — each account waits and clicks SUBMIT ORDER right on this time. Times auto-fill when you build direct URLs.</p>
             <div id="dropTimeMsg" class="hint" style="margin-top:6px;"></div>
             <div id="dropCountdown" class="drop-countdown" style="display:none; margin-top:8px;"></div>
 
             <div id="schedulePanel" class="toggle" style="margin-top:14px;">
               <div>
-                <div class="t-label">⏰ Also auto-open accounts</div>
-                <div class="t-hint">Optional. Auto-opens ⏰-armed accounts ~30s before drop. Leave OFF to open them yourself.</div>
+                <div class="t-label"><i class="ico ico-alarm" aria-hidden="true"></i>Also auto-open accounts</div>
+                <div class="t-hint">Optional. Auto-opens <i class="ico ico-alarm" aria-hidden="true"></i>-armed accounts ~30s before drop. Leave OFF to open them yourself.</div>
               </div>
               <label class="switch"><input type="checkbox" id="scheduleEnabled"><span class="track"></span></label>
             </div>
@@ -503,11 +505,11 @@
               <div class="dropmode-opts">
                 <label class="dropmode-opt">
                   <input type="radio" name="dropMode" id="dropModeDan" value="DAN" checked>
-                  <span class="dropmode-pill"><strong>🎟️ DAN</strong> — Raffle (relaxed)</span>
+                  <span class="dropmode-pill"><strong><i class="ico ico-ticket" aria-hidden="true"></i>DAN</strong> — Raffle (relaxed)</span>
                 </label>
                 <label class="dropmode-opt">
                   <input type="radio" name="dropMode" id="dropModeLeo" value="LEO">
-                  <span class="dropmode-pill"><strong>⚡ LEO</strong> — FCFS (speed)</span>
+                  <span class="dropmode-pill"><strong><i class="ico ico-zap" aria-hidden="true"></i>LEO</strong> — FCFS (speed)</span>
                 </label>
               </div>
               <p class="hint" id="dropModeHintDan" style="margin:8px 0 0;">Raffle drops stay open ~20 min and aren't won on speed — the bot fills carefully and adds a small random human delay before submitting (spreads accounts, looks less bot-like).</p>
@@ -530,10 +532,10 @@
           <h1 class="section-title">PREFLIGHT</h1>
           <span class="section-sub">Verify every profile is logged in, warm and on the current build</span>
         </div>
-        <button id="preflightRunBtn" class="btn btn-accent" style="margin-left:auto;">🩺 RUN PREFLIGHT</button>
+        <button id="preflightRunBtn" class="btn btn-accent" style="margin-left:auto;"><i class="ico ico-pulse" aria-hidden="true"></i>RUN PREFLIGHT</button>
         <button id="updateAllBtn" class="btn btn-purple" title="Hot-reload the extension in every profile from the folder (after a git pull) — no Chrome restart">⟳ UPDATE ALL</button>
-        <button id="warmAllBtn" class="btn btn-dark" title="Open the SNKRS feed in every profile to warm Kasada/cookies (bot stays idle)">🔥 WARM ALL</button>
-        <button id="preflightClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
+        <button id="warmAllBtn" class="btn btn-dark" title="Open the SNKRS feed in every profile to warm Kasada/cookies (bot stays idle)"><i class="ico ico-flame" aria-hidden="true"></i>WARM ALL</button>
+        <button id="preflightClearBtn" class="btn btn-mini btn-dark"><i class="ico ico-trash" aria-hidden="true"></i>CLEAR</button>
       </div>
 
       <!-- Version / update-server banner -->
@@ -564,17 +566,17 @@
 
       <section class="card">
         <div class="card-head">
-          <h2>🚀 GO</h2>
+          <h2><i class="ico ico-rocket" aria-hidden="true"></i>GO</h2>
           <span class="card-tag">ASSIGN &amp; LAUNCH</span>
         </div>
             <div id="sizeHints" class="size-hints" style="display:none;"></div>
-            <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;">🎲 RANDOMLY ASSIGN SIZES</button>
-            <button id="directUrlsBtn" class="btn btn-dark" style="width:100%; margin-bottom:10px;">⚡ BUILD DIRECT CHECKOUT URLS</button>
+            <button id="randomAssignBtn" class="btn btn-purple" style="width:100%; margin-bottom:10px;"><i class="ico ico-dice" aria-hidden="true"></i>RANDOMLY ASSIGN SIZES</button>
+            <button id="directUrlsBtn" class="btn btn-dark" style="width:100%; margin-bottom:10px;"><i class="ico ico-zap" aria-hidden="true"></i>BUILD DIRECT CHECKOUT URLS</button>
             <p class="hint" style="margin:-2px 0 10px;">Generates a unique gs.nike.com checkout link per account from the SKU + assigned size — skips the launch page and size picker. Falls back to the normal flow if it can't resolve.</p>
 
             <div class="toggle" style="margin-bottom:10px;">
               <div>
-                <div class="t-label">🔥 Warm page, then flip to checkout</div>
+                <div class="t-label"><i class="ico ico-flame" aria-hidden="true"></i>Warm page, then flip to checkout</div>
                 <div class="t-hint">LAUNCH ALL opens the launch page first (warms Kasada), then auto-switches every tab to its gs.nike.com checkout link shortly before the drop — so checkout loads fresh and never hits the Oops page.</div>
               </div>
               <label class="switch"><input type="checkbox" id="warmFlipToggle" checked><span class="track"></span></label>
@@ -587,14 +589,14 @@
 
             <div class="toggle" style="margin-bottom:10px;">
               <div>
-                <div class="t-label">🪟 Small tiled windows</div>
+                <div class="t-label"><i class="ico ico-window" aria-hidden="true"></i>Small tiled windows</div>
                 <div class="t-hint">Open each profile as a small window, tiled across your screen, instead of full-size. The extension resizes each window itself, so it works even for profiles that are already running.</div>
               </div>
               <label class="switch"><input type="checkbox" id="tileWindowsToggle" checked><span class="track"></span></label>
             </div>
             <div class="toggle" style="margin-bottom:10px;">
               <div>
-                <div class="t-label">📐 Auto-fit to screen (no overlap)</div>
+                <div class="t-label"><i class="ico ico-ruler" aria-hidden="true"></i>Auto-fit to screen (no overlap)</div>
                 <div class="t-hint">Sizes every window so they all fit side by side with nothing hidden behind anything. Turn OFF to set the size yourself.</div>
               </div>
               <label class="switch"><input type="checkbox" id="tileAutoFit" checked><span class="track"></span></label>
@@ -607,7 +609,7 @@
               <span class="muted">px</span>
             </div>
             <div style="display:flex; align-items:center; gap:8px; margin:2px 0 8px;">
-              <button id="tilePreviewBtn" class="btn btn-mini btn-dark">👁 Preview layout</button>
+              <button id="tilePreviewBtn" class="btn btn-mini btn-dark"><i class="ico ico-eye" aria-hidden="true"></i>Preview layout</button>
               <span class="muted">See how the windows will tile on your screen.</span>
             </div>
             <div id="tilePreview" class="tile-preview" style="display:none;"></div>
@@ -615,33 +617,33 @@
 
             <div class="toggle" style="margin-bottom:6px;">
               <div>
-                <div class="t-label">🧩 Load extension at launch</div>
+                <div class="t-label"><i class="ico ico-blocks" aria-hidden="true"></i>Load extension at launch</div>
                 <div class="t-hint">For profiles that keep losing the extension: load it fresh each launch. NOTE: Chrome only applies this to the profile that <em>cold-starts</em> the browser — if Chrome is already open, other profiles ignore it. Test whether it reaches all your profiles.</div>
               </div>
               <label class="switch"><input type="checkbox" id="loadExtToggle"><span class="track"></span></label>
             </div>
 
-            <div id="assignMsg" class="status-msg" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
+            <div id="assignMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left; min-height:14px; margin-bottom:10px;"></div>
             <div class="actions">
               <button id="saveBtn" class="btn btn-light">SAVE CONFIG</button>
-              <button id="openSelectedBtn" class="btn btn-purple">🎯 OPEN SELECTED (0)</button>
-              <button id="launchAllBtn" class="btn btn-accent">🚀 LAUNCH ALL</button>
+              <button id="openSelectedBtn" class="btn btn-purple"><i class="ico ico-target" aria-hidden="true"></i>OPEN SELECTED (0)</button>
+              <button id="launchAllBtn" class="btn btn-accent"><i class="ico ico-rocket" aria-hidden="true"></i>LAUNCH ALL</button>
             </div>
-            <p class="hint" style="margin:6px 0 0;">OPEN SELECTED launches only the profiles you ticked ☑ on the Profiles page. LAUNCH ALL opens every configured profile.</p>
-            <div id="statusMsg" class="status-msg"></div>
+            <p class="hint" style="margin:6px 0 0;">OPEN SELECTED launches only the profiles you ticked <i class="ico ico-check-box" aria-hidden="true"></i>on the Profiles page. LAUNCH ALL opens every configured profile.</p>
+            <div id="statusMsg" class="status-msg" role="status" aria-live="polite"></div>
       </section>
 
       <details class="adv-block">
         <summary>Advanced — manual gs.nike.com checkout links (SNKRS only)</summary>
           <section class="card">
             <div class="card-head">
-              <h2>🔗 GS CHECKOUT LINKS</h2>
+              <h2><i class="ico ico-link" aria-hidden="true"></i>GS CHECKOUT LINKS</h2>
               <span class="card-tag">MANUAL PASTE</span>
             </div>
             <p class="hint">Generate ready-to-paste <code>gs.nike.com</code> checkout links for a SKU — one per size. Each COPY mints a fresh <code>checkoutId</code>, so paste straight into a logged-in tab at go-live.</p>
             <label class="lbl" for="gsLinkSku">SKU</label>
             <input type="text" id="gsLinkSku" class="inp" placeholder="e.g. IH1610-052">
-            <button id="gsLinkGenBtn" class="btn btn-purple" style="width:100%; margin-top:10px;">🔗 GENERATE LINKS</button>
+            <button id="gsLinkGenBtn" class="btn btn-purple" style="width:100%; margin-top:10px;"><i class="ico ico-link" aria-hidden="true"></i>GENERATE LINKS</button>
             <div id="gsLinkMsg" class="hint" style="margin-top:6px;"></div>
             <div id="gsLinkList" class="gs-link-list"></div>
           </section>
@@ -652,10 +654,10 @@
       <div class="section-header">
         <h1 class="section-title">LIVE MONITOR</h1>
         <span class="section-sub">Real-time status of every tab in every browser</span>
-        <button id="panicBtn" class="btn btn-danger" style="margin-left:auto;">🛑 PANIC — STOP ALL SUBMITS</button>
-        <button id="closeAllBtn" class="btn btn-danger" title="Close every profile's bot windows (e.g. wrong sizes)">✖ CLOSE ALL PROFILES</button>
-        <button id="liveDiagBtn" class="btn btn-dark btn-mini" title="Diagnose why other profiles aren't showing">🔍 DIAGNOSE</button>
-        <button id="liveClearBtn" class="btn btn-mini btn-dark">🗑 CLEAR</button>
+        <button id="panicBtn" class="btn btn-danger" style="margin-left:auto;"><i class="ico ico-panic" aria-hidden="true"></i>PANIC — STOP ALL SUBMITS</button>
+        <button id="closeAllBtn" class="btn btn-danger" title="Close every profile's bot windows (e.g. wrong sizes)"><i class="ico ico-x" aria-hidden="true"></i>CLOSE ALL PROFILES</button>
+        <button id="liveDiagBtn" class="btn btn-dark btn-mini" title="Diagnose why other profiles aren't showing"><i class="ico ico-search" aria-hidden="true"></i>DIAGNOSE</button>
+        <button id="liveClearBtn" class="btn btn-mini btn-dark"><i class="ico ico-trash" aria-hidden="true"></i>CLEAR</button>
       </div>
       <div id="panicBanner" class="panic-banner" style="display:none;"></div>
       <pre id="liveDiag" class="live-diag" style="display:none;"></pre>
@@ -689,15 +691,15 @@
             <select class="inp" id="orderCheckerProfile"></select>
           </div>
           <button id="openOrdersBtn" class="btn btn-purple" style="flex:none; white-space:nowrap;">Open Orders Page</button>
-          <button id="clearOrdersBtn" class="btn btn-danger btn-mini" style="flex:none;" title="Clear cached orders">✕</button>
+          <button id="clearOrdersBtn" class="btn btn-danger btn-mini" style="flex:none;" title="Clear cached orders" aria-label="Clear cached orders"><i class="ico ico-x" aria-hidden="true"></i></button>
         </div>
 
         <div class="row" style="gap:10px; margin-bottom:12px;">
-          <button id="diagnoseOrdersBtn" class="btn btn-dark" style="flex:none; font-size:11px;">🔍 Diagnose</button>
+          <button id="diagnoseOrdersBtn" class="btn btn-dark" style="flex:none; font-size:11px;"><i class="ico ico-search" aria-hidden="true"></i>Diagnose</button>
         </div>
         <pre id="ordersDiag" style="display:none; white-space:pre-wrap; font-family:'Courier New',monospace; font-size:11px; color:#c4b5fd; background:#0d0a18; border:1px solid #3b2a6a; padding:12px; margin:0 0 12px; border-radius:8px; max-height:240px; overflow:auto;"></pre>
 
-        <div id="orderCheckerMsg" class="status-msg" style="text-align:left; min-height:14px; margin:0 0 8px;"></div>
+        <div id="orderCheckerMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left; min-height:14px; margin:0 0 8px;"></div>
         <div id="ordersDisplay"></div>
       </section>
     </div>
@@ -750,7 +752,7 @@
 
           <section class="card">
             <div class="card-head">
-              <h2>🌐 PROXIES</h2>
+              <h2><i class="ico ico-globe" aria-hidden="true"></i>PROXIES</h2>
               <span class="card-tag">ONE IP PER ACCOUNT</span>
             </div>
             <p class="hint">Nike de-dupes raffle entries by IP. Give each account its own residential IP so every profile enters from a different address. Proxies are <strong>rented from a provider</strong> (IPRoyal, Smartproxy, Oxylabs…) — this applies them; it can't create them. Use SG IPs for SNKRS SG.</p>
@@ -787,12 +789,12 @@
               <button id="saveProxyBtn" class="btn btn-purple">SAVE PROXIES</button>
               <button id="testProxyBtn" class="btn btn-dark">Test first proxy</button>
             </div>
-            <div id="proxyTestMsg" class="status-msg" style="text-align:left;"></div>
+            <div id="proxyTestMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left;"></div>
           </section>
 
           <section class="card">
             <div class="card-head">
-              <h2>🔔 OUTCOME NOTIFICATIONS</h2>
+              <h2><i class="ico ico-bell" aria-hidden="true"></i>OUTCOME NOTIFICATIONS</h2>
               <span class="card-tag">WIN / CART / ERROR</span>
             </div>
             <p class="hint">Get pushed the moment any account wins, enters, or hits a problem — so you're not babysitting every window. Works with a Discord webhook and/or a Telegram bot.</p>
@@ -830,12 +832,12 @@
               <button id="saveNotifyBtn" class="btn btn-purple">SAVE</button>
               <button id="testNotifyBtn" class="btn btn-dark">Send test</button>
             </div>
-            <div id="notifyTestMsg" class="status-msg" style="text-align:left;"></div>
+            <div id="notifyTestMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left;"></div>
           </section>
 
           <section class="card">
             <div class="card-head">
-              <h2>🔔 NEW-DROP ALERTS</h2>
+              <h2><i class="ico ico-bell" aria-hidden="true"></i>NEW-DROP ALERTS</h2>
               <span class="card-tag">SNKRS MONITOR</span>
             </div>
             <p class="hint">Pings this Discord webhook the moment a new SNKRS SG release appears on Nike's upcoming feed.</p>
@@ -857,7 +859,7 @@
               <button id="saveUpcomingBtn" class="btn btn-purple">SAVE &amp; ARM</button>
               <button id="testUpcomingBtn" class="btn btn-dark">Test now</button>
             </div>
-            <div id="upcomingCfgMsg" class="status-msg" style="text-align:left;"></div>
+            <div id="upcomingCfgMsg" class="status-msg" role="status" aria-live="polite" style="text-align:left;"></div>
           </section>
         </div>
 
@@ -866,9 +868,9 @@
             <div class="card-head"><h2>CONFIG BACKUP</h2></div>
             <p class="hint">Export your full config (accounts, cards, drop settings) to a JSON file. Import to restore on a different machine.</p>
             <div class="actions" style="margin-bottom:8px;">
-              <button id="exportConfigBtn" class="btn btn-dark">⬇ Export config</button>
+              <button id="exportConfigBtn" class="btn btn-dark"><i class="ico ico-download" aria-hidden="true"></i>Export config</button>
               <label class="btn btn-dark" style="text-align:center; cursor:pointer; flex:1;">
-                ⬆ Import config
+                <i class="ico ico-upload" aria-hidden="true"></i>Import config
                 <input type="file" id="importFileInput" accept=".json" style="display:none;">
               </label>
             </div>
@@ -892,7 +894,7 @@
               <button id="testHostBtnSettings" class="btn btn-purple">Test connection</button>
               <button id="refreshProfilesBtnSettings" class="btn btn-dark">Reload profiles</button>
             </div>
-            <div id="settingsStatusMsg" class="status-msg"></div>
+            <div id="settingsStatusMsg" class="status-msg" role="status" aria-live="polite"></div>
           </section>
         </div>
       </div>
@@ -921,19 +923,19 @@
         </div>
       </div>
       <div class="acct-card-row">
-        <label class="lbl">💳 Card</label>
+        <label class="lbl"><i class="ico ico-card" aria-hidden="true"></i>Card</label>
         <select class="inp f-card-select"></select>
       </div>
       <div class="acct-foot">
         <div class="acct-toggles">
           <label class="chk f-select-label" title="Include this profile when you click OPEN SELECTED on the Drop page">
-            <input type="checkbox" class="f-select"> ☑ select
+            <input type="checkbox" class="f-select"> <i class="ico ico-check-box" aria-hidden="true"></i>select
           </label>
           <label class="chk f-auto-label" title="Open this profile automatically at the scheduled drop time">
-            <input type="checkbox" class="f-autolaunch"> ⏰ auto
+            <input type="checkbox" class="f-autolaunch"> <i class="ico ico-alarm" aria-hidden="true"></i>auto
           </label>
           <label class="chk f-region-label" title="Region for SG/MY drops. Auto = detected from the account's phone number during Preflight.">
-            🌏
+            <i class="ico ico-globe" aria-hidden="true"></i>
             <select class="f-region">
               <option value="auto">Auto</option>
               <option value="SG">🇸🇬 SG</option>
@@ -942,9 +944,9 @@
           </label>
         </div>
         <div class="acct-actions">
-          <button class="btn btn-mini btn-dark f-copycmd" title="Copy terminal command">⌘ copy cmd</button>
-          <button class="btn btn-mini btn-accent f-launch">🚀 launch</button>
-          <button class="btn btn-mini btn-danger f-remove" title="Remove account">✕</button>
+          <button class="btn btn-mini btn-dark f-copycmd" title="Copy terminal command"><i class="ico ico-command" aria-hidden="true"></i>copy cmd</button>
+          <button class="btn btn-mini btn-accent f-launch"><i class="ico ico-rocket" aria-hidden="true"></i>launch</button>
+          <button class="btn btn-mini btn-danger f-remove" title="Remove account" aria-label="Remove account"><i class="ico ico-x" aria-hidden="true"></i></button>
         </div>
       </div>
       <div class="acct-assigned f-assigned" style="display:none;"></div>
@@ -961,13 +963,13 @@
     <div class="product">
       <div class="product-head">
         <span class="product-idx">PRODUCT</span>
-        <button class="btn btn-mini btn-danger p-remove" title="Remove product">✕</button>
+        <button class="btn btn-mini btn-danger p-remove" title="Remove product" aria-label="Remove product"><i class="ico ico-x" aria-hidden="true"></i></button>
       </div>
       <label class="lbl">Product URL</label>
       <input type="text" class="inp p-url" placeholder="https://www.nike.com/sg/launch/t/...">
       <label class="lbl" style="margin-top:8px;">SKU / keyword <span class="muted">(targets ONE exact item)</span></label>
       <input type="text" class="inp p-keyword" placeholder="e.g. IH1610-052">
-      <button type="button" class="btn btn-mini btn-dark p-fetch" style="margin-top:8px;">🔍 FETCH PRODUCT</button>
+      <button type="button" class="btn btn-mini btn-dark p-fetch" style="margin-top:8px;"><i class="ico ico-search" aria-hidden="true"></i>FETCH PRODUCT</button>
       <div class="product-preview p-preview" style="display:none;"></div>
       <label class="lbl" style="margin-top:8px;">Size range</label>
       <div class="size-pool p-sizepool"></div>

@@ -2,9 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Reagan Bot · Admin Panel</title>
   <link rel="stylesheet" href="dashboard.css" />
   <link rel="stylesheet" href="admin.css" />
+  <link rel="stylesheet" href="icons.css" />
 </head>
 <body>
   <div class="page">
@@ -80,7 +82,7 @@
             <div id="genResult" style="display:none; margin-top:14px;">
               <label class="lbl">Generated Key — copy and send to user</label>
               <textarea id="genKeyOut" class="inp mono" rows="4" readonly style="word-break:break-all; font-size:11px; resize:none;"></textarea>
-              <button id="copyGenBtn" class="btn btn-light" style="width:100%; margin-top:8px;">📋 COPY KEY</button>
+              <button id="copyGenBtn" class="btn btn-light" style="width:100%; margin-top:8px;"><i class="ico ico-clipboard" aria-hidden="true"></i>COPY KEY</button>
             </div>
             <div id="genMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
           </section>
@@ -104,8 +106,8 @@
             </p>
 
             <div class="actions" style="margin-top:14px;">
-              <button id="exportLicenseBtn" class="btn btn-light">⬇ Download license.json</button>
-              <button id="dangerRegenBtn" class="btn btn-danger">⚠ Regen key pair</button>
+              <button id="exportLicenseBtn" class="btn btn-light"><i class="ico ico-download" aria-hidden="true"></i>Download license.json</button>
+              <button id="dangerRegenBtn" class="btn btn-danger"><i class="ico ico-alert" aria-hidden="true"></i>Regen key pair</button>
             </div>
             <div id="distMsg" class="status-msg" style="text-align:left; min-height:14px;"></div>
           </section>
@@ -162,7 +164,7 @@
         <span class="key-status-badge"></span>
       </div>
       <div class="key-row-actions">
-        <button class="btn btn-mini btn-dark k-copy" title="Copy key string">📋 copy</button>
+        <button class="btn btn-mini btn-dark k-copy" title="Copy key string"><i class="ico ico-clipboard" aria-hidden="true"></i>copy</button>
         <button class="btn btn-mini k-toggle"></button>
       </div>
     </div>
@@ -173,7 +175,7 @@
     <div class="modal-box card">
       <div class="card-head"><h2>REGENERATE KEY PAIR?</h2></div>
       <p class="hint" style="color:#f0c070; margin-bottom:14px;">
-        ⚠ This <strong>invalidates every key you have ever issued</strong>. All users will be locked out
+        <i class="ico ico-alert" aria-hidden="true"></i>This <strong>invalidates every key you have ever issued</strong>. All users will be locked out
         until you distribute a new key to each of them. This cannot be undone.
       </p>
       <label class="lbl" for="regenPin">Confirm with current PIN</label>

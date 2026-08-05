@@ -63,3 +63,15 @@
 .modal-box {
   width: 100%; max-width: 420px; margin: 20px;
 }
+
+/* ── Focus + icon alignment ──────────────────────────────────────
+   admin.css had no focus styles at all and inherits dashboard.css, so this
+   only needs the pieces specific to the admin shell. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+  position: relative; z-index: 2;
+}
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .5em; min-height: 40px; }
+.k-copy { min-height: 32px; }

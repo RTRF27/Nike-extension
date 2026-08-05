@@ -21,7 +21,7 @@ async function ss(obj) { await chrome.storage.local.set(obj); }
 const $ = id => document.getElementById(id);
 function flash(id, msg, color) {
   const n = $(id); if (!n) return;
-  n.style.color = color || "#1db954";
+  n.style.color = color || "var(--green)";
   n.textContent = msg;
 }
 function flashTemp(id, msg, color, ms = 3000) {
@@ -56,16 +56,16 @@ document.addEventListener("DOMContentLoaded", async () => {
 async function doSetup() {
   const pin  = $("setupPin").value;
   const pin2 = $("setupPin2").value;
-  if (pin.length < 6)    { flash("gateMsg", "PIN must be at least 6 characters.", "#fa5400"); return; }
-  if (pin !== pin2)      { flash("gateMsg", "PINs don't match.", "#fa5400"); return; }
+  if (pin.length < 6)    { flash("gateMsg", "PIN must be at least 6 characters.", "var(--orange)"); return; }
+  if (pin !== pin2)      { flash("gateMsg", "PINs don't match.", "var(--orange)"); return; }
   flash("gateMsg", "Generating RSA-2048 key pair…", "#888");
   $("setupBtn").disabled = true;
   try {
     await initKeyPair(pin);
-    flashTemp("gateMsg", "Setup complete! Loading admin panel…", "#1db954");
+    flashTemp("gateMsg", "Setup complete! Loading admin panel…", "var(--green)");
     setTimeout(() => showAdminPanel(), 800);
   } catch (e) {
-    flash("gateMsg", "Setup failed: " + e.message, "#e03131");
+    flash("gateMsg", "Setup failed: " + e.message, "var(--red)");
     $("setupBtn").disabled = false;
   }
 }
@@ -91,15 +91,15 @@ async function initKeyPair(pin) {
 // ── Login ─────────────────────────────────────────────────────
 async function doLogin() {
   const pin = $("loginPin").value;
-  if (!pin) { flash("gateMsg", "Enter your PIN.", "#fa5400"); return; }
+  if (!pin) { flash("gateMsg", "Enter your PIN.", "var(--orange)"); return; }
   flash("gateMsg", "Verifying…", "#888");
   $("loginBtn").disabled = true;
   try {
     const stored = await sg(S_PINHASH);
-    if (!stored) { flash("gateMsg", "No PIN set — run setup.", "#fa5400"); $("loginBtn").disabled = false; return; }
+    if (!stored) { flash("gateMsg", "No PIN set — run setup.", "var(--orange)"); $("loginBtn").disabled = false; return; }
     const entered = await hashPin(pin);
     if (entered !== stored) {
-      flash("gateMsg", "Incorrect PIN.", "#e03131");
+      flash("gateMsg", "Incorrect PIN.", "var(--red)");
       $("loginBtn").disabled = false;
       $("loginPin").value = "";
       $("loginPin").focus();
@@ -109,10 +109,10 @@ async function doLogin() {
     const enc = await sg(S_PRIV);
     _privJwk  = await decryptPrivKey(enc, pin);
     _pubJwk   = await sg(S_PUB);
-    flashTemp("gateMsg", "Unlocked.", "#1db954");
+    flashTemp("gateMsg", "Unlocked.", "var(--green)");
     setTimeout(() => showAdminPanel(), 400);
   } catch (e) {
-    flash("gateMsg", "Error: " + e.message, "#e03131");
+    flash("gateMsg", "Error: " + e.message, "var(--red)");
     $("loginBtn").disabled = false;
   }
 }
@@ -132,7 +132,7 @@ async function showAdminPanel() {
   $("genBtn").addEventListener("click", doGenerateKey);
   $("copyGenBtn").addEventListener("click", () => {
     navigator.clipboard.writeText($("genKeyOut").value)
-      .then(() => flashTemp("genMsg", "Copied!", "#1db954"))
+      .then(() => flashTemp("genMsg", "Copied!", "var(--green)"))
       .catch(() => {});
   });
   $("exportLicenseBtn").addEventListener("click", doExportLicense);
@@ -147,7 +147,7 @@ async function doGenerateKey() {
   const user   = $("genUser").value.trim();
   const expiry = $("genExpiry").value;
   const note   = $("genNote").value.trim();
-  if (!user) { flashTemp("genMsg", "Enter a user/label.", "#fa5400"); return; }
+  if (!user) { flashTemp("genMsg", "Enter a user/label.", "var(--orange)"); return; }
   $("genBtn").disabled = true;
   try {
     const now = Math.floor(Date.now() / 1000);
@@ -163,10 +163,10 @@ async function doGenerateKey() {
 
     $("genKeyOut").value   = ks;
     $("genResult").style.display = "";
-    flashTemp("genMsg", `Key for "${user}" generated.`, "#1db954");
+    flashTemp("genMsg", `Key for "${user}" generated.`, "var(--green)");
     renderKeyList();
   } catch (e) {
-    flashTemp("genMsg", "Error: " + e.message, "#e03131");
+    flashTemp("genMsg", "Error: " + e.message, "var(--red)");
   } finally {
     $("genBtn").disabled = false;
   }
@@ -203,7 +203,7 @@ function buildKeyRow(k) {
   const toggle = row.querySelector(".k-toggle");
 
   if (k.revoked) {
-    badge.textContent = "REVOKED"; badge.style.color = "#e03131";
+    badge.textContent = "REVOKED"; badge.style.color = "var(--red)";
     toggle.textContent = "Reinstate"; toggle.className = "btn btn-mini btn-dark";
     toggle.addEventListener("click", () => setRevoked(k.id, false));
   } else if (k.exp && now > k.exp) {
@@ -211,7 +211,7 @@ function buildKeyRow(k) {
     toggle.textContent = "Revoke"; toggle.className = "btn btn-mini btn-danger";
     toggle.addEventListener("click", () => setRevoked(k.id, true));
   } else {
-    badge.textContent = "ACTIVE"; badge.style.color = "#1db954";
+    badge.textContent = "ACTIVE"; badge.style.color = "var(--green)";
     toggle.textContent = "Revoke"; toggle.className = "btn btn-mini btn-danger";
     toggle.addEventListener("click", () => setRevoked(k.id, true));
   }
@@ -222,8 +222,8 @@ function buildKeyRow(k) {
       const ks = await signLicenseKey(
         { v: 1, id: k.id, user: k.user, exp: k.exp, iat: k.iat, tier: "full" }, _privJwk);
       await navigator.clipboard.writeText(ks);
-      flashTemp("distMsg", `Copied key for "${k.user}".`, "#1db954");
-    } catch (e) { flashTemp("distMsg", "Copy failed: " + e.message, "#e03131"); }
+      flashTemp("distMsg", `Copied key for "${k.user}".`, "var(--green)");
+    } catch (e) { flashTemp("distMsg", "Copy failed: " + e.message, "var(--red)"); }
   });
 
   return row;
@@ -236,7 +236,7 @@ async function setRevoked(id, revoked) {
   const revokedIds = keys.filter(x => x.revoked).map(x => x.id);
   await ss({ [S_KEYS]: keys, [S_REVOKED]: revokedIds });
   renderKeyList();
-  flashTemp("distMsg", revoked ? "Key revoked." : "Key reinstated.", "#1db954");
+  flashTemp("distMsg", revoked ? "Key revoked." : "Key reinstated.", "var(--green)");
 }
 
 // ── Export license.json ───────────────────────────────────────
@@ -249,16 +249,16 @@ async function doExportLicense() {
   const a    = document.createElement("a");
   a.href = url; a.download = "license.json"; a.click();
   URL.revokeObjectURL(url);
-  flashTemp("distMsg", "Downloaded license.json — replace the copy in your extension folder and reload.", "#1db954", 6000);
+  flashTemp("distMsg", "Downloaded license.json — replace the copy in your extension folder and reload.", "var(--green)", 6000);
 }
 
 // ── Regenerate key pair ───────────────────────────────────────
 async function doRegen() {
   const pin = $("regenPin").value;
-  if (!pin) { flash("regenMsg", "Enter current PIN.", "#fa5400"); return; }
+  if (!pin) { flash("regenMsg", "Enter current PIN.", "var(--orange)"); return; }
   const stored  = await sg(S_PINHASH);
   const entered = await hashPin(pin);
-  if (entered !== stored) { flash("regenMsg", "Incorrect PIN.", "#e03131"); return; }
+  if (entered !== stored) { flash("regenMsg", "Incorrect PIN.", "var(--red)"); return; }
   flash("regenMsg", "Regenerating…", "#888");
   $("regenConfirmBtn").disabled = true;
   try {
@@ -270,10 +270,10 @@ async function doRegen() {
     await ss({ [S_KEYS]: [...newKeys, ...oldKeys] });
     $("regenModal").style.display = "none";
     $("regenPin").value = "";
-    flashTemp("distMsg", "New key pair generated. Download and redistribute license.json.", "#f0c070", 6000);
+    flashTemp("distMsg", "New key pair generated. Download and redistribute license.json.", "var(--orange)", 6000);
     renderKeyList();
   } catch (e) {
-    flash("regenMsg", "Error: " + e.message, "#e03131");
+    flash("regenMsg", "Error: " + e.message, "var(--red)");
   } finally {
     $("regenConfirmBtn").disabled = false;
   }
@@ -283,15 +283,15 @@ async function doRegen() {
 async function doChangePin() {
   const np  = $("newPin").value;
   const np2 = $("newPin2").value;
-  if (np.length < 6)  { flashTemp("pinMsg", "PIN must be at least 6 characters.", "#fa5400"); return; }
-  if (np !== np2)     { flashTemp("pinMsg", "PINs don't match.", "#fa5400"); return; }
+  if (np.length < 6)  { flashTemp("pinMsg", "PIN must be at least 6 characters.", "var(--orange)"); return; }
+  if (np !== np2)     { flashTemp("pinMsg", "PINs don't match.", "var(--orange)"); return; }
   try {
     const enc     = await encryptPrivKey(_privJwk, np);
     const pinHash = await hashPin(np);
     await ss({ [S_PRIV]: enc, [S_PINHASH]: pinHash });
     $("newPin").value = $("newPin2").value = "";
-    flashTemp("pinMsg", "PIN changed.", "#1db954");
+    flashTemp("pinMsg", "PIN changed.", "var(--green)");
   } catch (e) {
-    flashTemp("pinMsg", "Error: " + e.message, "#e03131");
+    flashTemp("pinMsg", "Error: " + e.message, "var(--red)");
   }
 }

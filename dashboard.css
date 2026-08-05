@@ -54,19 +54,33 @@
   --indigo:    #f43f5e;
   --pink:      #fb7185;
 
-  /* Lines / text — warm-tinted neutrals to sit with crimson */
+  /* Lines / text — warm-tinted neutrals to sit with crimson.
+     --grey2 was #7a656e, which measured 2.9:1 on --panel2 and so failed WCAG AA
+     for the hint text it was used on. Lightened until it clears 4.5:1. */
   --line:      #33222b;
   --line2:     #281c23;
   --white:     #fdf3f5;
   --grey:      #b6a2ab;
-  --grey2:     #7a656e;
+  --grey2:     #9c8892;
+  --muted:     #9c8892;   /* was used by .alert-head but never defined */
+  --placeholder: #948089; /* was a violet leftover (#5b5677) at 2.6:1 */
 
-  /* States (error uses a distinct hotter red so it reads apart from the accent) */
+  /* States. Error uses a hotter red so it reads apart from the crimson accent;
+     --info replaces the assorted blues/violets the JS used to inline. */
   --orange:    #fbaf5c;
   --orange2:   #f9971d;
   --green:     #45d68f;
   --green-dim: rgba(69, 214, 143, .15);
   --red:       #ff5470;
+  --info:      #7cc5ff;
+
+  /* Focus. One ring, one token — see the global :focus-visible rule below. */
+  --focus:     #ffd166;
+  --focus-ring: 0 0 0 3px rgba(18, 16, 15, .9), 0 0 0 5px var(--focus);
+
+  /* Spacing scale — dashboard density (8px base) rather than ad-hoc values. */
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px;
 
   /* Bigger, softer bubbles */
   --radius:    22px;
@@ -77,6 +91,25 @@
   --grad-violet: linear-gradient(135deg, #fb7185 0%, #e11d48 100%);
   --grad-text:   linear-gradient(120deg, #fff 0%, #fb7185 60%, #f43f5e 100%);
 }
+
+/* ── FOCUS ───────────────────────────────────────────────────────
+   The stylesheet previously defined exactly one focus style (.inp), which
+   left every button, tab, toggle and chip invisible to keyboard users.
+   :focus-visible keeps the ring off mouse clicks, so this costs the
+   pointer experience nothing. Amber is used deliberately: it is the one
+   hue not already carrying meaning in this palette, so a focus ring can
+   never be mistaken for an accent, a warning or an error state. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-sm);
+  position: relative;
+  z-index: 2;
+}
+/* Pills keep their own silhouette when focused. */
+.btn:focus-visible, .side-item:focus-visible, .subtab:focus-visible { border-radius: 999px; }
+.side-item:focus-visible { border-radius: 16px; }
+.card:focus-visible, .inp:focus-visible { border-radius: var(--radius-sm); }
 
 /* ── Base ── */
 html { scroll-behavior: smooth; }
@@ -124,7 +157,7 @@ body::before {
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 28px; height: 64px;
-  background: rgba(13, 10, 24, .72);
+  background: rgba(25, 21, 19, .72);
   backdrop-filter: blur(18px) saturate(140%);
   -webkit-backdrop-filter: blur(18px) saturate(140%);
   border-bottom: 1px solid var(--glass-brd);
@@ -239,11 +272,11 @@ body::before {
   border: 1px solid var(--line);
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 11px; font-weight: 700; letter-spacing: .7px; color: var(--grey);
-  background: rgba(22, 18, 40, .6); cursor: default;
+  background: rgba(40, 34, 32, .6); cursor: default;
   transition: border-color .25s;
 }
 .host-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: #45405f;
+  width: 8px; height: 8px; border-radius: 50%; background: var(--panel3);
   transition: all .3s;
 }
 .host-dot.on {
@@ -273,18 +306,27 @@ body::before {
 .page-section.active { display: block; animation: page-fade .35s ease both; }
 @keyframes page-fade { from { opacity: 0; } to { opacity: 1; } }
 
-/* Cards rise + fade in with a stagger every time a page opens. */
-.page-section.active .card { animation: card-rise .5s cubic-bezier(.2, .7, .3, 1) both; }
+/* Cards rise into place when a page opens.
+   This deliberately does NOT animate opacity. It used to start at opacity 0,
+   which meant that while dashboard.js was doing its (heavy) first render the
+   animation clock had not advanced and the entire page sat blank — measured at
+   roughly 800ms of empty screen on load. Animating transform alone keeps the
+   content painted and readable even if the main thread stalls; the worst case
+   is text that is 14px low rather than text that is not there. Transform is
+   also compositor-only, so this no longer costs a paint on a page whose whole
+   value proposition is being fast at drop time. */
+.page-section.active .card { animation: card-rise .34s cubic-bezier(.2, .7, .3, 1) both; }
 .page-section.active .col > .card:nth-child(2),
-.page-section.active > .card:nth-child(3) { animation-delay: .07s; }
-.page-section.active .col > .card:nth-child(3) { animation-delay: .14s; }
-.page-section.active .col > .card:nth-child(4) { animation-delay: .2s; }
+.page-section.active > .card:nth-child(3) { animation-delay: .05s; }
+.page-section.active .col > .card:nth-child(3) { animation-delay: .1s; }
+.page-section.active .col > .card:nth-child(4) { animation-delay: .15s; }
 @keyframes card-rise {
-  from { opacity: 0; transform: translateY(18px) scale(.985); }
-  to   { opacity: 1; transform: none; }
+  from { transform: translateY(14px); }
+  to   { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .page-section.active .card { animation: none; }
+  .page-section.active { animation: none; }
 }
 
 .section-header { margin-bottom: 28px; }
@@ -330,7 +372,7 @@ body::before {
   font-size: 10.5px; font-weight: 700; letter-spacing: .4px; color: var(--purple2);
   border: 1px solid var(--purple-dim); border-radius: 999px;
   padding: 5px 13px; white-space: nowrap;
-  background: rgba(139, 123, 247, .1);
+  background: rgba(244, 63, 94, .1);
 }
 
 .hint { font-size: 12px; color: var(--grey); line-height: 1.65; margin-bottom: 12px; }
@@ -370,18 +412,19 @@ code {
   border-color: rgba(52, 211, 153, .3);
   background: linear-gradient(180deg, rgba(52, 211, 153, .08), var(--glass));
 }
-.stat-value { letter-spacing: -1px;
+/* Solid, not gradient-clipped. These are figures you read at a glance under
+   time pressure: a white→crimson ramp gave the same digit a different colour
+   depending on how wide the glyph was, and clipped text cannot be recoloured
+   by state. tabular-nums stops the row jittering as counts tick over. */
+.stat-value {
   position: relative;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  font-size: 46px; font-weight: 900; letter-spacing: .4px;
-  background: var(--grad-text);
-  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  font-size: 40px; font-weight: 900; letter-spacing: -1px;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
   line-height: 1;
 }
-.stat-card.win .stat-value {
-  background: linear-gradient(120deg, #fff, #34d399);
-  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-}
+.stat-card.win .stat-value { color: var(--green); }
 .stat-label {
   position: relative;
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -435,7 +478,7 @@ code {
   padding: 13px 15px; width: 100%; outline: none;
   transition: border-color .18s, box-shadow .18s, background .18s;
 }
-.inp::placeholder { color: #5b5677; }
+.inp::placeholder { color: var(--placeholder); }
 .inp:focus {
   border-color: var(--purple);
   box-shadow: 0 0 0 3px var(--purple-glow);
@@ -466,7 +509,15 @@ select.inp { cursor: pointer; }
 }
 .t-hint { font-size: 11px; color: var(--grey); margin-top: 3px; }
 .switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; cursor: pointer; }
-.switch input { display: none; }
+/* display:none took the real checkbox out of the accessibility tree AND out of
+   the tab order, so every toggle in the product was unreachable by keyboard and
+   invisible to a screen reader. Hiding it visually while leaving it focusable
+   restores both, and the ring is drawn on the track the user can actually see. */
+.switch input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; opacity: 0; cursor: pointer; z-index: 1;
+}
+.switch input:focus-visible + .track { box-shadow: var(--focus-ring); }
 .track {
   position: absolute; inset: 0;
   background: var(--panel3); border: 1px solid var(--line);
@@ -475,7 +526,7 @@ select.inp { cursor: pointer; }
 .track::after {
   content: ''; position: absolute; left: 3px; top: 3px;
   width: 16px; height: 16px; border-radius: 50%;
-  background: #6b6690; transition: transform .25s cubic-bezier(.4,1.4,.6,1), background .25s;
+  background: var(--grey); transition: transform .25s cubic-bezier(.4,1.4,.6,1), background .25s;
 }
 .switch input:checked + .track {
   background: var(--grad-violet); border-color: transparent;
@@ -493,44 +544,55 @@ select.inp { cursor: pointer; }
 .btn:active { transform: scale(.97); }
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
-/* Shine sweep across the primary action buttons */
+/* Shine sweep — on hover only.
+   This used to run on a 4.5s infinite loop on every primary button, forever,
+   whether or not anyone was looking at it. That is decorative motion with no
+   meaning attached, it kept the compositor busy permanently, and a control
+   that glints at you constantly stops reading as "this one matters". Tied to
+   hover it becomes what it was presumably meant to be: a response to you. */
 .btn-accent, .btn-purple, .btn-light { position: relative; overflow: hidden; }
 .btn-accent::after, .btn-purple::after, .btn-light::after {
   content: ''; position: absolute; top: 0; left: -80%;
   width: 55%; height: 100%; pointer-events: none;
   background: linear-gradient(105deg, transparent, rgba(255,255,255,.35), transparent);
   transform: skewX(-20deg);
-  animation: btn-shine 4.5s ease-in-out infinite;
+}
+.btn-accent:hover::after, .btn-purple:hover::after, .btn-light:hover::after {
+  animation: btn-shine .7s ease-out;
 }
 @keyframes btn-shine {
-  0%   { left: -80%; }
-  40%  { left: 160%; }
-  100% { left: 160%; }
+  from { left: -80%; }
+  to   { left: 160%; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .btn-accent::after, .btn-purple::after, .btn-light::after { animation: none; }
+  .btn-accent:hover::after, .btn-purple:hover::after, .btn-light:hover::after { animation: none; }
 }
 
-.btn-light { background: var(--white); color: #0a0712; }
-.btn-light:hover { background: #fff; box-shadow: 0 6px 20px -6px rgba(243, 240, 255, .5); }
+.btn-light { background: var(--white); color: #1a1412; }
+.btn-light:hover { background: #fff; box-shadow: 0 6px 20px -6px rgba(255, 255, 255, .5); }
 
+/* ONE primary accent.
+   .btn-accent was an orange gradient while the entire rest of the product —
+   brand mark, active nav, toggles, focus of every card — was crimson. Two
+   unrelated hues both claiming "this is the important control" is why the
+   dashboard read as assembled rather than designed, and white on that orange
+   measured 2.8:1, below the 4.5:1 floor. Hierarchy now comes from weight, not
+   from a second hue: .btn-accent is the loud primary (gradient + glow),
+   .btn-purple the quiet one (flat, no glow). Orange is reserved for warnings,
+   where it now means one thing only. */
 .btn-accent {
-  background: linear-gradient(135deg, #fb923c, #f97316);
-  color: #fff; box-shadow: 0 6px 18px -8px rgba(249, 115, 22, .8);
+  background: var(--grad-violet);
+  color: #fff; box-shadow: 0 6px 18px -8px rgba(244, 63, 94, .85);
 }
 .btn-accent:hover {
-  box-shadow: 0 8px 26px -6px rgba(249, 115, 22, .75), 0 0 0 1px rgba(251, 146, 60, .4);
-  filter: brightness(1.07);
+  filter: brightness(1.08);
+  box-shadow: 0 8px 28px -6px var(--purple-glow), 0 0 0 1px rgba(244, 63, 94, .5);
 }
 
 .btn-purple {
-  background: var(--grad-violet); color: #fff;
-  box-shadow: 0 6px 18px -8px rgba(244, 63, 94, .85);
+  background: var(--purple3); color: #fff;
 }
-.btn-purple:hover {
-  filter: brightness(1.1);
-  box-shadow: 0 8px 28px -6px var(--purple-glow), 0 0 0 1px rgba(244, 63, 94, .5);
-}
+.btn-purple:hover { background: var(--purple); }
 
 .btn-dark {
   background: var(--panel2); color: var(--white);
@@ -542,7 +604,7 @@ select.inp { cursor: pointer; }
   background: transparent; color: var(--grey);
   border: 1.5px dashed var(--line); width: 100%; border-radius: var(--radius-sm);
 }
-.btn-ghost:hover { color: var(--white); border-color: var(--purple); background: rgba(139, 123, 247, .06); }
+.btn-ghost:hover { color: var(--white); border-color: var(--purple); background: rgba(244, 63, 94, .06); }
 
 .btn-danger {
   background: rgba(251, 113, 133, .12); color: #ff9aa8;
@@ -574,7 +636,7 @@ select.inp { cursor: pointer; }
 }
 .tile-cell.overlap { border-style: dashed; border-color: var(--orange); background: rgba(251,146,60,.20); }
 .tile-cap {
-  position: absolute; left: 0; bottom: -18px; font-size: 11px; color: #9a9ab0; white-space: nowrap;
+  position: absolute; left: 0; bottom: -18px; font-size: 11px; color: var(--grey); white-space: nowrap;
 }
 
 /* ── Drop mode (DAN raffle / LEO FCFS) selector ── */
@@ -582,7 +644,7 @@ select.inp { cursor: pointer; }
   border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px;
   background: rgba(244, 63, 94,.05);
 }
-.dropmode-label { font-size: 11px; font-weight: 800; letter-spacing: .4px; color: var(--muted, #9a9ab0); margin-bottom: 8px; }
+.dropmode-label { font-size: 11px; font-weight: 800; letter-spacing: .4px; color: var(--muted, var(--grey)); margin-bottom: 8px; }
 .dropmode-opts { display: flex; gap: 8px; flex-wrap: wrap; }
 .dropmode-opt { flex: 1; min-width: 150px; cursor: pointer; }
 .dropmode-opt input { position: absolute; opacity: 0; pointer-events: none; }
@@ -599,7 +661,7 @@ select.inp { cursor: pointer; }
 
 /* ── Proxy assignment preview + notification checkboxes ── */
 .assign-preview {
-  background: rgba(16, 13, 29, .55); border: 1px solid var(--line);
+  background: rgba(25, 21, 19, .55); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 10px 12px; max-height: 168px; overflow-y: auto;
   font-size: 12.5px;
 }
@@ -664,7 +726,7 @@ select.inp { cursor: pointer; }
 .cardprofile-btns { display: flex; gap: 6px; flex-shrink: 0; }
 .cardform {
   margin-top: 14px; padding: 16px;
-  background: rgba(16, 13, 29, .55); border: 1px solid var(--line); border-radius: var(--radius);
+  background: rgba(25, 21, 19, .55); border: 1px solid var(--line); border-radius: var(--radius);
 }
 .acct-msg {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 12px; font-weight: 700;
@@ -683,7 +745,7 @@ select.inp { cursor: pointer; }
 .size-chip {
   padding: 6px 11px; border: 1px solid var(--line); border-radius: 8px;
   font-size: 12px; font-weight: 600; cursor: pointer; user-select: none;
-  background: rgba(16, 13, 29, .6); color: var(--grey); transition: all .15s;
+  background: rgba(25, 21, 19, .6); color: var(--grey); transition: all .15s;
 }
 .size-chip:hover { border-color: var(--purple); color: var(--white); transform: translateY(-1px); }
 .size-chip.on {
@@ -693,7 +755,7 @@ select.inp { cursor: pointer; }
 
 /* ── PRODUCT ROWS ── */
 .product {
-  background: rgba(16, 13, 29, .55); border: 1px solid var(--line);
+  background: rgba(25, 21, 19, .55); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 16px; margin-bottom: 10px;
 }
 .product-head {
@@ -708,7 +770,7 @@ select.inp { cursor: pointer; }
 .product-preview {
   display: flex; align-items: center; gap: 12px; margin-top: 10px;
   padding: 10px; border: 1px solid var(--line); border-radius: var(--radius);
-  background: rgba(16, 13, 29, .55);
+  background: rgba(25, 21, 19, .55);
 }
 .product-thumb {
   width: 56px; height: 56px; flex: 0 0 56px; object-fit: cover;
@@ -819,11 +881,11 @@ select.inp { cursor: pointer; }
   border: 1px solid rgba(34, 211, 238, .22);
   border-radius: 14px;
   background:
-    linear-gradient(180deg, rgba(34,211,238,.05), rgba(10,10,20,.15)),
+    linear-gradient(180deg, rgba(244,63,94,.05), rgba(18,16,15,.15)),
     var(--glass);
   backdrop-filter: blur(14px);
   overflow: hidden;
-  box-shadow: 0 0 0 1px rgba(34,211,238,.05), 0 8px 26px -12px rgba(34,211,238,.35);
+  box-shadow: 0 0 0 1px rgba(244,63,94,.05), 0 8px 26px -12px rgba(244,63,94,.35);
 }
 .cy-panel.err {
   border-color: rgba(255, 45, 85, .5);
@@ -831,15 +893,15 @@ select.inp { cursor: pointer; }
 }
 .cy-panel-head {
   display: flex; align-items: center; gap: 9px;
-  padding: 10px 13px; border-bottom: 1px solid rgba(34,211,238,.18);
-  background: rgba(34,211,238,.06);
+  padding: 10px 13px; border-bottom: 1px solid rgba(244,63,94,.18);
+  background: rgba(244,63,94,.06);
 }
 .cy-led {
   width: 9px; height: 9px; border-radius: 50%;
   background: #22d3ee; box-shadow: 0 0 8px #22d3ee; flex-shrink: 0;
   animation: cy-blink 1.4s steps(2, start) infinite;
 }
-.cy-panel.err .cy-led { background: #ff2d55; box-shadow: 0 0 8px #ff2d55; }
+.cy-panel.err .cy-led { background: var(--red); box-shadow: 0 0 8px var(--red); }
 .cy-browser {
   font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; font-weight: 800; letter-spacing: .7px;
   font-size: 15px; color: #e6faff; text-transform: uppercase;
@@ -852,16 +914,16 @@ select.inp { cursor: pointer; }
 .cy-tiles { display: flex; flex-direction: column; gap: 1px; background: rgba(255,255,255,.04); }
 .cy-tile {
   position: relative; padding: 9px 12px 9px 15px;
-  background: rgba(12, 14, 24, .55);
-  border-left: 3px solid var(--st, #6b6b7b);
+  background: rgba(25, 21, 19, .55);
+  border-left: 3px solid var(--st, var(--grey2));
   transition: background .15s;
 }
-.cy-tile.idle { color: #6b6b7b; }
+.cy-tile.idle { color: var(--grey2); }
 .cy-tile.attn { cursor: pointer; animation: attn-pulse 1.4s ease-in-out infinite; }
 .cy-tile.attn:hover { background: rgba(255,45,85,.12); }
 .cy-tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .cy-prod {
-  font-size: 12px; font-weight: 600; color: #dfe7ff;
+  font-size: 12px; font-weight: 600; color: var(--white);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cy-stage {
@@ -870,16 +932,16 @@ select.inp { cursor: pointer; }
 }
 .cy-tile-msg {
   margin-top: 4px; font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 10px; color: #9aa4c4; line-height: 1.35;
+  font-size: 10px; color: var(--grey); line-height: 1.35;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cy-tile-foot {
   margin-top: 5px; display: flex; align-items: center; gap: 6px;
   font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 9px;
-  color: #5f6b8c; letter-spacing: .2px;
+  color: var(--grey2); letter-spacing: .2px;
 }
 .cy-tile-stage { font-family:'Inter',system-ui,sans-serif; font-weight:800; letter-spacing: .4px; font-size:11px; }
-.cy-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--st, #6b6b7b); box-shadow: 0 0 6px var(--st, #6b6b7b); }
+.cy-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--st, var(--grey2)); box-shadow: 0 0 6px var(--st, var(--grey2)); }
 
 /* Account needs manual attention (error) — red glow + clickable */
 .acct-status-row.status-attention {
@@ -934,7 +996,7 @@ select.inp { cursor: pointer; }
 
 /* ── ORDER CHECKER ── */
 .order-card {
-  background: rgba(16, 13, 29, .55); border: 1px solid var(--line);
+  background: rgba(25, 21, 19, .55); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 14px; margin-bottom: 10px;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -967,7 +1029,7 @@ select.inp { cursor: pointer; }
 .order-items { display: flex; flex-direction: column; gap: 7px; }
 .order-item {
   display: flex; align-items: center; gap: 11px;
-  padding: 8px 9px; background: rgba(7, 6, 14, .6); border-radius: 9px;
+  padding: 8px 9px; background: rgba(18, 16, 15, .6); border-radius: 9px;
 }
 .order-item.match { background: rgba(52, 211, 153, .07); border: 1px solid rgba(52, 211, 153, .3); }
 .order-thumb { width: 60px; height: 60px; border-radius: 7px; object-fit: cover; background: var(--panel3); flex-shrink: 0; }
@@ -988,17 +1050,19 @@ select.inp { cursor: pointer; }
   font-size: 13px; font-weight: 700; letter-spacing: .2px; line-height: 1.5;
 }
 .schedule-status.armed   { background: rgba(52, 211, 153, .08); border: 1px solid rgba(52, 211, 153, .25); color: #6ee7b7; }
-.schedule-status.disarmed{ background: rgba(16, 13, 29, .55); border: 1px solid var(--line2); color: var(--grey2); }
+.schedule-status.disarmed{ background: rgba(25, 21, 19, .55); border: 1px solid var(--line2); color: var(--grey2); }
 
+/* The most time-critical number in the product — kept solid and tabular so the
+   digits sit in fixed columns and the clock does not wobble as it counts down. */
 .drop-countdown {
   text-align: center;
   font-family: 'Inter', ui-monospace, monospace;
-  font-size: 34px; font-weight: 900; letter-spacing: 1px;
-  background: var(--grad-text);
-  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
+  font-size: 38px; font-weight: 900; letter-spacing: 1px;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
   margin-top: 14px; padding: 12px 0;
 }
-.drop-countdown.passed { font-size: 13px; letter-spacing: .4px; -webkit-text-fill-color: var(--grey2); }
+.drop-countdown.passed { font-size: 13px; letter-spacing: .4px; color: var(--grey2); }
 
 /* ── DROP HISTORY ── */
 .history-entry { padding: 12px 0; border-bottom: 1px solid var(--line2); }
@@ -1025,7 +1089,7 @@ select.inp { cursor: pointer; }
   gap: 16px;
 }
 .upcoming-card {
-  background: rgba(16, 13, 29, .55); border: 1px solid var(--line);
+  background: rgba(25, 21, 19, .55); border: 1px solid var(--line);
   border-radius: var(--radius); overflow: hidden;
   display: flex; flex-direction: column;
   transition: border-color .25s, transform .2s, box-shadow .25s;
@@ -1087,7 +1151,7 @@ select.inp { cursor: pointer; }
   color: var(--green);
 }
 .sched-banner.disarmed {
-  background: rgba(22, 18, 40, .5);
+  background: rgba(40, 34, 32, .5);
   border: 1px solid var(--line2);
   color: var(--grey2);
 }
@@ -1142,14 +1206,14 @@ select.inp { cursor: pointer; }
 }
 .pf-region.sg { color: var(--green);  background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.3); }
 .pf-region.my { color: var(--purple2); background: rgba(244, 63, 94,.14); border-color: rgba(244, 63, 94,.32); }
-.pf-region.unknown { color: #9a9ab0; background: rgba(255,255,255,.04); }
+.pf-region.unknown { color: var(--grey); background: rgba(255,255,255,.04); }
 .pf-region-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
   margin: 0 0 16px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: var(--radius);
   background: rgba(244, 63, 94,.05);
 }
 .pf-bar-lbl { font-size: 12px; font-weight: 700; letter-spacing: .2px; color: var(--white); }
-.pf-bar-hint { font-size: 11px; color: #9a9ab0; }
+.pf-bar-hint { font-size: 11px; color: var(--grey); }
 .f-region-label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
 .f-region { background: var(--panel2); color: var(--white); border: 1px solid var(--line); border-radius: 6px; padding: 3px 6px; font-size: 12px; }
 
@@ -1382,8 +1446,8 @@ select.inp { cursor: pointer; }
 
 .live-diag {
   margin: 4px 0 14px; padding: 14px 16px; border-radius: var(--radius-sm);
-  background: #0b0a14; border: 1px solid var(--purple-dim);
-  color: #c9c2f0; font-family: 'Courier New', monospace; font-size: 12px;
+  background: var(--bg); border: 1px solid var(--purple-dim);
+  color: #e8dde1; font-family: 'Courier New', monospace; font-size: 12px;
   line-height: 1.55; white-space: pre-wrap; max-height: 340px; overflow: auto;
 }
 
@@ -1499,7 +1563,13 @@ select.inp { cursor: pointer; }
 .step-header.foldable:hover .step-chev { background: var(--panel3); color: #fff; border-color: var(--purple-dim); }
 
 /* ── Bot mode picker (FLOW / SNKRS) ─────────────────────────────── */
-.mode-card { border-color: rgba(124,58,237,.45); }
+/* The violet here is the one cool hue kept on purpose. FLOW and SNKRS drive
+   completely different checkout paths, and running the wrong one on drop day
+   is an expensive mistake — so the mode gets its own hue rather than sharing
+   crimson with everything else. Promoted from stray literals to tokens so the
+   distinction is legible as intent rather than as leftovers. */
+:root { --flow: #7c3aed; --flow2: #a855f7; --flow-dim: rgba(124, 58, 237, .45); }
+.mode-card { border-color: var(--flow-dim); }
 .modepick { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
 @media (max-width: 720px) { .modepick { grid-template-columns: 1fr; } }
 .modepick-opt { cursor: pointer; }
@@ -1519,5 +1589,162 @@ select.inp { cursor: pointer; }
   box-shadow: 0 0 14px var(--purple-glow);
 }
 /* FLOW re-tints the step numbers so the mode is obvious at a glance. */
-body.mode-flow .step-num { background: linear-gradient(135deg, #7c3aed, #a855f7); }
-body.mode-flow .subtab.step-chip .chip-n { background: linear-gradient(135deg, #7c3aed, #a855f7); }
+body.mode-flow .step-num { background: linear-gradient(135deg, var(--flow), var(--flow2)); }
+body.mode-flow .subtab.step-chip .chip-n { background: linear-gradient(135deg, var(--flow), var(--flow2)); }
+
+/* ══════════════════════════════════════════════════════════════
+   REVAMP — density, hit targets, icon alignment, layout repair
+   Appended last so it wins over the legacy rules above.
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Icons ───────────────────────────────────────────────────────
+   Spacing lives on the icon itself rather than on a flex `gap`, because most
+   icons here are followed by a bare text node inside a <strong>, a <label> or
+   a <div> — none of which are flex containers, and a gap cannot space what is
+   not a flex item. A margin works everywhere regardless of the parent. */
+.ico { margin-right: .4em; }
+
+/* Icon + label pairs share one flex baseline so the glyph never drags the
+   label off-centre the way the old emoji did. */
+.btn, .subtab, .card-head h2, .card-tag,
+.status-msg, .cy-stage, .home-drop-chip, .size-hint-chip, .pf-region {
+  display: inline-flex; align-items: center;
+}
+.btn { justify-content: center; }
+.card-head h2 { display: flex; }
+
+/* Containers whose children are all real elements keep their own gap, so the
+   icon margin would double up. */
+.side-item, .live-chip, .host-pill { display: flex; align-items: center; gap: 10px; }
+.side-item { gap: 13px; }
+.side-item .ico, .live-chip .ico, .host-pill .ico { margin-right: 0; }
+.side-item .si-ico { display: inline-flex; align-items: center; justify-content: center;
+                     width: 20px; font-size: 18px; opacity: 1; }
+
+/* Icon-only controls: no label to space away from. */
+.step-chev .ico, .f-remove .ico, .p-remove .ico, #clearOrdersBtn .ico { margin-right: 0; }
+.step-chev .ico { width: 1.1em; height: 1.1em; }
+
+/* An icon inside a button must never be the thing that wraps or takes the click. */
+.btn .ico { pointer-events: none; }
+
+/* ── Hit targets ─────────────────────────────────────────────────
+   This is a desktop-only extension page, so the 44px touch minimum is
+   relaxed for dense inline controls — but nothing is left at the 15–24px
+   the sheet had, which is a genuinely hard target for a trackpad and
+   impossible under time pressure. Primary actions keep a full 44px. */
+.btn { min-height: 44px; }
+.btn-mini, .btn-dark { min-height: 36px; }
+.step-chev { width: 36px; height: 36px; border-radius: 8px;
+             display: inline-flex; align-items: center; justify-content: center; }
+.alert-row .ar-col input,
+input[type="checkbox"] { width: 18px; height: 18px; }
+.alert-row { padding: 10px 12px; }
+/* Give small checkboxes a padded hit area without changing the visual box. */
+.alert-row .ar-col { padding: 6px 0; cursor: pointer; }
+.switch { width: 46px; height: 26px; }
+.track::after { width: 18px; height: 18px; }
+.switch input:checked + .track::after { transform: translateX(20px); }
+
+/* ── Stats row ───────────────────────────────────────────────────
+   Four cards at 22px padding and a 46px numeral took the full width of the
+   viewport to say four numbers. Tightened so the row reads as a status strip
+   and the actual working content starts above the fold. */
+.stats-row { gap: 12px; margin-bottom: 20px; }
+.stat-card { padding: 16px 18px; border-radius: var(--radius-sm); text-align: left; }
+.stat-value { font-size: 32px; }
+.stat-label { font-size: 10px; letter-spacing: .6px; margin-top: 4px; color: var(--grey); }
+
+/* ── Home grid ───────────────────────────────────────────────────
+   The columns were 1fr 1fr with align-items:start, so a single short card on
+   the left (LAST DROP) sat beside a two-card stack on the right and left a
+   ~230px hole below it. That hole reads as a broken layout rather than as
+   breathing room. Stretching the columns and letting the final card in each
+   absorb the slack squares the two sides off, so the composition is balanced
+   whether the drop history is empty or full. */
+.home-grid, .two-col { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; gap: 18px; }
+.home-grid > .col, .two-col > .col { gap: 18px; }
+.home-grid > .col > .card:last-child,
+.two-col  > .col > .card:last-child { flex: 1 1 auto; }
+
+/* ── Destructive actions ─────────────────────────────────────────
+   PANIC (stop submits — recoverable) and CLOSE ALL (kills every window and
+   any in-flight checkout — not recoverable) previously sat side by side at
+   identical weight. Under time pressure that is the kind of pairing that
+   gets the wrong one clicked. PANIC keeps the loud treatment because it is
+   the one you want to hit fast; CLOSE ALL is demoted to a quiet outline so
+   the irreversible action is never the easier target. */
+.side-close, #closeAllBtn {
+  background: transparent; color: var(--grey);
+  border: 1px solid var(--line);
+}
+.side-close:hover, #closeAllBtn:hover {
+  background: rgba(255, 84, 112, .1); color: var(--red);
+  border-color: rgba(255, 84, 112, .45);
+}
+
+/* ── Sidebar, collapsed ──────────────────────────────────────────
+   Below 900px the labels are hidden, so the buttons rely entirely on their
+   aria-label for a name. The old rule collapsed the labels with font-size:0,
+   which also zeroed the icons (they are sized in em) and left the footer as
+   three unreadable slivers — the launch, panic and close controls, i.e. the
+   three you least want to guess at. Sizes here are explicit px for that
+   reason, and the footer stacks rather than trying to fit two pills side by
+   side in a 62px rail. */
+@media (max-width: 900px) {
+  .side-item { width: 46px; height: 46px; padding: 0; margin: 0 auto; justify-content: center; }
+  .side-item .si-ico { width: auto; font-size: 20px; }
+
+  .side-launch::after { content: none; }
+  .side-foot-row { flex-direction: column; gap: 8px; }
+  .side-launch, .side-foot-row .btn {
+    font-size: 0; gap: 0; width: 46px; height: 46px;
+    min-height: 46px; padding: 0; margin: 0 auto; border-radius: 14px;
+  }
+  .side-launch .ico, .side-panic .ico, .side-close .ico {
+    margin: 0; width: 20px; height: 20px;
+  }
+  .host-pill { width: 46px; height: 32px; margin: 0 auto; padding: 0; justify-content: center; }
+}
+
+/* ── Motion ──────────────────────────────────────────────────────
+   One global stop for anything the individual rules missed. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Focus ring, final word ──────────────────────────────────────
+   The generic :where(...) rule near the top of this file has zero specificity
+   by design, which meant every component that declares its own box-shadow
+   (.btn-accent, .btn-purple, .stat-card, the pills) quietly won the cascade
+   and swallowed the ring. These selectors carry real specificity AND sit last
+   in the file, so the ring wins on both counts without needing !important.
+   A focus ring that loses to a decorative shadow is the same as no ring. */
+.btn:focus-visible,
+.side-item:focus-visible,
+.side-item.active:focus-visible,
+.subtab:focus-visible,
+.inp:focus-visible,
+.step-chev:focus-visible,
+.size-chip:focus-visible,
+.modepick-opt input:focus-visible + .modepick-pill,
+.switch input:focus-visible + .track,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  position: relative;
+  z-index: 3;
+  /* .btn transitions box-shadow over 250ms, which made the ring fade in behind
+     the caret as you tabbed. Feedback about where the keyboard is has to be
+     immediate or it is not feedback. */
+  transition-property: background, color, border-color, transform;
+}

@@ -1,3 +1,7 @@
+function icoHTML(name) {
+  return `<i class="ico ico-${name}" aria-hidden="true"></i>`;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const KEY = "snkrsBotSettings";
 
@@ -23,7 +27,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   function sendPreview(keyword, size, sizeType, statusEl) {
     if (!size) {
       if (statusEl) {
-        statusEl.style.color = "#fa5400";
+        statusEl.style.color = "var(--orange)";
         statusEl.textContent = "Pick a size first to preview.";
         setTimeout(() => (statusEl.textContent = ""), 2500);
       }
@@ -33,7 +37,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const tab = tabs && tabs[0];
       if (!tab || !/nike\.com\/.*\/launch/.test(tab.url || "")) {
         if (statusEl) {
-          statusEl.style.color = "#fa5400";
+          statusEl.style.color = "var(--orange)";
           statusEl.textContent = "Open a Nike launch page in this tab first.";
           setTimeout(() => (statusEl.textContent = ""), 3500);
         }
@@ -49,7 +53,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         (resp) => {
           if (chrome.runtime.lastError) {
             if (statusEl) {
-              statusEl.style.color = "#e03131";
+              statusEl.style.color = "var(--red)";
               statusEl.textContent = "Couldn't reach the page — reload the Nike tab and retry.";
             }
             return;
@@ -57,10 +61,10 @@ document.addEventListener("DOMContentLoaded", async () => {
           const r = resp && resp.result;
           if (!statusEl) return;
           if (r && r.ok) {
-            statusEl.style.color = "#1db954";
-            statusEl.textContent = r.message || "✓ Target highlighted on the page.";
+            statusEl.style.color = "var(--green)";
+            statusEl.textContent = r.message || "Target highlighted on the page.";
           } else {
-            statusEl.style.color = "#f08c00";
+            statusEl.style.color = "var(--orange)";
             statusEl.textContent = (r && r.message) || "Could not highlight target.";
           }
         }
@@ -156,7 +160,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     rnd.className = "size-btn";
     rnd.dataset.size = "RANDOM";
     rnd.dataset.type = "random";
-    rnd.textContent = "🎲 Random";
+    rnd.innerHTML = `${icoHTML("dice")} Random`;
     rnd.title = "Cop any available size when the drop goes live";
     rnd.addEventListener("click", () => selectSizeButton(rnd, "RANDOM", "random"));
     els.sizeGrid.appendChild(rnd);
@@ -241,11 +245,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     taggedBtnRow.style.cssText = "display:flex; gap:6px;";
     const copyBtn = document.createElement("button");
     copyBtn.className = "save-btn";
-    copyBtn.style.cssText = "flex:1; background:#222; font-size:11px; padding:6px;";
-    copyBtn.textContent = "📋 COPY";
+    copyBtn.style.cssText = "flex:1; background:var(--grey2); font-size:11px; padding:6px;";
+    copyBtn.innerHTML = `${icoHTML("clipboard")} COPY`;
     const openTabBtn = document.createElement("button");
     openTabBtn.className = "save-btn";
-    openTabBtn.style.cssText = "flex:1; background:#222; font-size:11px; padding:6px;";
+    openTabBtn.style.cssText = "flex:1; background:var(--grey2); font-size:11px; padding:6px;";
     openTabBtn.textContent = "↗ OPEN TAB";
     taggedBtnRow.appendChild(copyBtn);
     taggedBtnRow.appendChild(openTabBtn);
@@ -271,17 +275,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     copyBtn.addEventListener("click", () => {
       const u = buildTaggedUrl();
       if (!u) {
-        taggedMsg.style.color = "#fa5400";
+        taggedMsg.style.color = "var(--orange)";
         taggedMsg.textContent = "Enter a product URL first.";
         setTimeout(() => (taggedMsg.textContent = ""), 2500);
         return;
       }
       navigator.clipboard.writeText(u).then(() => {
-        taggedMsg.style.color = "#1db954";
-        taggedMsg.textContent = "✓ Copied — paste into a new tab.";
+        taggedMsg.style.color = "var(--green)";
+        taggedMsg.textContent = "Copied — paste into a new tab.";
         setTimeout(() => (taggedMsg.textContent = ""), 2500);
       }).catch(() => {
-        taggedMsg.style.color = "#e03131";
+        taggedMsg.style.color = "var(--red)";
         taggedMsg.textContent = "Copy failed — select the URL manually.";
         setTimeout(() => (taggedMsg.textContent = ""), 3000);
       });
@@ -289,7 +293,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     openTabBtn.addEventListener("click", () => {
       const u = buildTaggedUrl();
       if (!u) {
-        taggedMsg.style.color = "#fa5400";
+        taggedMsg.style.color = "var(--orange)";
         taggedMsg.textContent = "Enter a product URL first.";
         setTimeout(() => (taggedMsg.textContent = ""), 2500);
         return;
@@ -299,8 +303,8 @@ document.addEventListener("DOMContentLoaded", async () => {
         const merged = { ...(saved[KEY] || {}), slots: collectAllSlots() };
         chrome.storage.sync.set({ [KEY]: merged }, () => {
           chrome.tabs.create({ url: u, active: false });
-          taggedMsg.style.color = "#1db954";
-          taggedMsg.textContent = "✓ Opened in a background tab.";
+          taggedMsg.style.color = "var(--green)";
+          taggedMsg.textContent = "Opened in a background tab.";
           setTimeout(() => (taggedMsg.textContent = ""), 2500);
         });
       });
@@ -388,8 +392,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     // the active Nike tab before the drop.
     const previewBtn = document.createElement("button");
     previewBtn.className = "save-btn";
-    previewBtn.style.cssText = "margin-top:10px; background:#1db954;";
-    previewBtn.textContent = `🔍 PREVIEW PRODUCT ${index + 1} ON PAGE`;
+    previewBtn.style.cssText = "margin-top:10px; background:var(--accent);";
+    previewBtn.innerHTML = `${icoHTML("search")} PREVIEW PRODUCT ${index + 1} ON PAGE`;
     const previewMsg = document.createElement("div");
     previewMsg.className = "save-msg";
     previewBtn.addEventListener("click", () => {
@@ -543,28 +547,28 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (multiOn) {
       const active = collectActiveSlots();
       if (active.length < 1) {
-        els.saveMsg.style.color = "#fa5400";
+        els.saveMsg.style.color = "var(--orange)";
         els.saveMsg.textContent = "ADD AT LEAST ONE PRODUCT URL";
         setTimeout(() => els.saveMsg.textContent = "", 2500);
         return;
       }
       const missingSize = active.find(s => !s.size);
       if (missingSize) {
-        els.saveMsg.style.color = "#fa5400";
+        els.saveMsg.style.color = "var(--orange)";
         els.saveMsg.textContent = "PICK A SIZE FOR EACH PRODUCT";
         setTimeout(() => els.saveMsg.textContent = "", 2500);
         return;
       }
       // Drop time is required ONLY if the optional clock is enabled.
       if (schedulerOn && !dropTimeISO()) {
-        els.saveMsg.style.color = "#fa5400";
+        els.saveMsg.style.color = "var(--orange)";
         els.saveMsg.textContent = "SET A DROP TIME (or turn off the clock)";
         setTimeout(() => els.saveMsg.textContent = "", 3000);
         return;
       }
     } else {
       if (!selectedSize) {
-        els.saveMsg.style.color = "#fa5400";
+        els.saveMsg.style.color = "var(--orange)";
         els.saveMsg.textContent = "SELECT A SIZE FIRST";
         setTimeout(() => els.saveMsg.textContent = "", 2000);
         return;
@@ -574,7 +578,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Basic card validation (applies to both modes)
     const rawNumber = (els.cardNumber.value || "").replace(/\s/g, "");
     if (rawNumber && rawNumber.length < 13) {
-      els.saveMsg.style.color = "#e03131";
+      els.saveMsg.style.color = "var(--red)";
       els.saveMsg.textContent = "CHECK CARD NUMBER";
       setTimeout(() => els.saveMsg.textContent = "", 2000);
       return;
@@ -619,19 +623,19 @@ document.addEventListener("DOMContentLoaded", async () => {
       if (schedulerOn) {
         const t = new Date(settings.dropTimeISO);
         const when = t.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-        msg = `⚙️ SNKRS Bot saved — 2 products, auto-open scheduled for ${when}.`;
+        msg = `SNKRS Bot saved — 2 products, auto-open scheduled for ${when}.`;
       } else if (multiOn) {
-        msg = `⚙️ SNKRS Bot saved — 2 products configured (manual: open each tagged URL in a tab).`;
+        msg = `SNKRS Bot saved — 2 products configured (manual: open each tagged URL in a tab).`;
       } else {
-        msg = `⚙️ SNKRS Bot saved — size ${sizeDisplay}${settings.profileLabel ? ", " + settings.profileLabel : ""}.`;
+        msg = `SNKRS Bot saved — size ${sizeDisplay}${settings.profileLabel ? ", " + settings.profileLabel : ""}.`;
       }
       chrome.runtime.sendMessage({ type: "log", message: msg });
 
       updateStatusPill(settings.enabled);
-      els.saveMsg.style.color = "#1db954";
+      els.saveMsg.style.color = "var(--green)";
       els.saveMsg.textContent = multiOn
-        ? (schedulerOn ? `✓ SAVED — 2 products, auto-open set` : `✓ SAVED — 2 products (open tagged URLs)`)
-        : `✓ SAVED — ${sizeDisplay}`;
+        ? (schedulerOn ? `SAVED — 2 products, auto-open set` : `SAVED — 2 products (open tagged URLs)`)
+        : `SAVED — ${sizeDisplay}`;
       setTimeout(() => els.saveMsg.textContent = "", 3000);
     });
   });
@@ -640,14 +644,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   els.openNowBtn.addEventListener("click", () => {
     const active = collectActiveSlots();
     if (active.length < 1) {
-      els.dropStatusMsg.style.color = "#fa5400";
+      els.dropStatusMsg.style.color = "var(--orange)";
       els.dropStatusMsg.textContent = "ADD AT LEAST ONE PRODUCT URL FIRST";
       setTimeout(() => els.dropStatusMsg.textContent = "", 2500);
       return;
     }
     const missingSize = active.find(s => !s.size);
     if (missingSize) {
-      els.dropStatusMsg.style.color = "#fa5400";
+      els.dropStatusMsg.style.color = "var(--orange)";
       els.dropStatusMsg.textContent = "PICK A SIZE FOR EACH PRODUCT FIRST";
       setTimeout(() => els.dropStatusMsg.textContent = "", 2500);
       return;
@@ -657,7 +661,7 @@ document.addEventListener("DOMContentLoaded", async () => {
       const merged = { ...(saved[KEY] || {}), slots: active };
       chrome.storage.sync.set({ [KEY]: merged }, () => {
         chrome.runtime.sendMessage({ type: "open_drop_now" });
-        els.dropStatusMsg.style.color = "#1db954";
+        els.dropStatusMsg.style.color = "var(--green)";
         els.dropStatusMsg.textContent = `Opening ${active.length} tab(s)…`;
         setTimeout(() => els.dropStatusMsg.textContent = "", 3000);
       });
