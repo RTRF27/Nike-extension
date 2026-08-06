@@ -196,20 +196,35 @@ the same steps in short:
   stays idle) to refresh Kasada/cookies before a drop; the cookies check then
   shows how long ago each profile was warmed.
 
-## Drop type: DAN (raffle) vs LEO (FCFS) — v4.13 / v4.14
+## Drop type: DAN (raffle) vs LEO (FCFS) — v4.13 / v4.14 / v4.52
 
-Pick the drop type per drop on the **Drop setup → Actions** card. Default **DAN**.
+Pick the drop type on **Setup → step 4 "MODE & TIMING" → DROP TYPE** (SNKRS mode
+only). Default **DAN**. Since v4.52 the choice drives **both halves** of the run —
+the SNKRS entry *and* the gs.nike.com checkout.
 
 **🎟️ DAN — Raffle (relaxed).** Draw-based drops stay open ~20 min and aren't won
-on speed, so the bot fills carefully and adds a small **random human delay**
-before submitting — configurable ("submit within N sec after drop", default 6 s,
-0 = instant). This spreads the accounts out instead of firing every submit at
-the exact same millisecond, which is an easy bot tell. This is the original,
-careful checkout flow plus the jitter.
+on speed, so the bot optimises for entries that are *correct*:
 
-**⚡ LEO — FCFS (speed).** First-come-first-served drops are won on speed, so the
-state machine flips to a fast path:
+- **Entry paced like a human.** The 200–500 ms grace and 500–900 ms size→CTA
+  settle are kept as-is.
+- **Selection verified before committing.** After the size click the bot spends up
+  to 1.2 s confirming Nike actually marked that size selected (radio `checked`,
+  `aria-checked/selected/pressed`, or a `selected` class on the button/`<li>`),
+  and re-clicks once if it reads back unselected. This is **advisory** — hard
+  selection gating broke a live drop in the past, so an unreadable size grid logs
+  a note and enters anyway rather than skipping the draw.
+- **Random human delay before submit** — configurable ("submit within N sec after
+  drop", default 6 s, 0 = instant). This spreads the accounts out instead of
+  firing every submit at the exact same millisecond, which is an easy bot tell.
 
+**⚡ LEO — FCFS (speed).** First-come-first-served drops are won on speed, so both
+the entry flow and the checkout state machine flip to a fast path:
+
+- **Entry fires as fast as the page allows.** The pre-click grace drops to
+  20–60 ms, the fixed size→CTA settle drops to 40–90 ms, the CTA is polled every
+  **40 ms** instead of 200 ms, and the post-click outcome check drops from 2.5 s
+  to 900 ms so the one-shot CTA retry still lands inside the window. Size
+  verification is skipped — it costs time LEO doesn't have.
 - **Submits on the dot.** A tab parked on checkout waiting for the drop
   coarse-waits until ~40 ms out then **busy-spins** the final stretch, so the
   SUBMIT click lands within a few ms of the drop instead of the ~120 ms that

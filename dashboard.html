@@ -521,8 +521,8 @@
                   <span class="dropmode-pill"><strong><i class="ico ico-zap" aria-hidden="true"></i>LEO</strong> — FCFS (speed)</span>
                 </label>
               </div>
-              <p class="hint" id="dropModeHintDan" style="margin:8px 0 0;">Raffle drops stay open ~20 min and aren't won on speed — the bot fills carefully and adds a small random human delay before submitting (spreads accounts, looks less bot-like).</p>
-              <p class="hint" id="dropModeHintLeo" style="margin:8px 0 0; display:none;">First-come-first-served — the bot strips its settling delays and submits with millisecond precision: tabs waiting for the drop submit <strong>on the dot</strong>; a tab opened after drop time submits <strong>immediately</strong>.</p>
+              <p class="hint" id="dropModeHintDan" style="margin:8px 0 0;">Long entry window, not won on speed — so the bot optimises for <strong>correct</strong> entries. It paces the entry like a human, <strong>verifies the size actually selected</strong> before committing to the draw, fills checkout carefully, and adds a small random delay before submitting (spreads accounts, looks less bot-like).</p>
+              <p class="hint" id="dropModeHintLeo" style="margin:8px 0 0; display:none;">First-come-first-served — the bot optimises for <strong>speed</strong> end to end. Settling delays are stripped on both the entry and the checkout, the size → CTA path is polled every 40ms, and SUBMIT lands with millisecond precision: tabs waiting for the drop submit <strong>on the dot</strong>; a tab opened after drop time submits <strong>immediately</strong>.</p>
               <div id="danJitterRow" style="display:flex; align-items:center; gap:8px; margin-top:8px;">
                 <label class="lbl" for="danJitterSec" style="margin:0;">Human delay: submit within</label>
                 <input type="number" id="danJitterSec" class="inp" value="6" min="0" max="1200" step="1" style="width:70px;">

@@ -905,6 +905,63 @@ function humanClick(el, label) {
   log(`Clicked: ${label}`);
 }
 
+// ── Drop type: LEO (speed) vs DAN (accuracy) ──────────────────
+// LEO is first-come-first-served — the entry has to land the moment the size
+// appears, so every settling wait collapses and the CTA gets polled hard.
+// DAN stays open far longer and isn't won on speed, so the bot keeps its
+// human-looking pacing and spends the spare time proving the size actually
+// took before it commits the entry.
+function isLeoDrop() { return !!settings?.leoMode; }
+
+// Has Nike marked this size button as the chosen one? The size grid renders
+// several ways (radio inputs, aria-checked buttons, class-flagged <li>), so any
+// positive signal counts. Returns true / false / null when the markup gives us
+// nothing we understand — null is "unknown", NOT "failed".
+function sizeButtonSelected(btn) {
+  if (!btn) return false;
+  const input = btn.matches("input") ? btn : btn.querySelector("input[type=radio], input[type=checkbox]");
+  if (input) return !!input.checked;
+  for (const attr of ["aria-checked", "aria-selected", "aria-pressed"]) {
+    const v = btn.getAttribute(attr);
+    if (v === "true") return true;
+    if (v === "false") return false;
+  }
+  const li = btn.closest("li");
+  const cls = `${btn.className || ""} ${li ? (li.className || "") : ""}`;
+  if (/(^|[\s_-])(is-)?selected([\s_-]|$)|--selected/i.test(cls)) return true;
+  return null;
+}
+
+// DAN only: confirm the size we clicked really is the one selected before we
+// commit. Deliberately ADVISORY — hard selection gating broke a live drop once
+// (see the v1.0 note in executeEntry), so this never blocks the entry: it waits
+// a short budget, re-clicks at most once, then hands control back either way.
+async function verifySizeSelection(tag, sizeBtn, pickedLabel) {
+  const deadline = performance.now() + 1200;
+  let state = sizeButtonSelected(sizeBtn);
+  while (state !== true && performance.now() < deadline) {
+    await wait(120);
+    state = sizeButtonSelected(sizeBtn);
+  }
+  if (state === true) {
+    logBG(`🎟️${tag} Size ${pickedLabel} confirmed selected — entry verified.`);
+    return true;
+  }
+  if (state === false) {
+    logBG(`⚠️${tag} Size ${pickedLabel} never registered as selected — clicking it once more.`);
+    humanClick(sizeBtn, `Size ${pickedLabel} (re-click)`);
+    await wait(randInt(350, 600));
+    if (sizeButtonSelected(sizeBtn) === true) {
+      logBG(`🎟️${tag} Size ${pickedLabel} confirmed on the second click.`);
+      return true;
+    }
+  }
+  // Unknown markup, or still unconfirmed: enter anyway. Not being able to READ
+  // Nike's selection state is never a reason to skip the draw.
+  logBG(`ℹ️${tag} Couldn't confirm the selected state for ${pickedLabel} — entering anyway.`);
+  return false;
+}
+
 async function waitFor(fn, timeoutMs = 20000, intervalMs = 200) {
   const start = performance.now();
   while (performance.now() - start < timeoutMs) {
@@ -1015,8 +1072,13 @@ async function executeEntry(tag, preferred) {
   }
   entryAttempted = true;
 
-  // Wait for size button to be fully ready (brief grace period)
-  await wait(randInt(200, 500));
+  const leo = isLeoDrop();
+  logBG(`${leo ? "⚡" : "🎟️"}${tag} ${leo ? "LEO drop — speed path: settling waits stripped, CTA polled hard."
+                                          : "DAN drop — accuracy path: human pacing, size selection verified before entry."}`);
+
+  // Wait for the size button to be fully ready (brief grace period). LEO cuts
+  // it to the shortest wait that still lets Nike's React finish painting.
+  await wait(leo ? randInt(20, 60) : randInt(200, 500));
 
   const sizeBtn = findPreferredSizeButton();
   if (!sizeBtn) {
@@ -1038,9 +1100,18 @@ async function executeEntry(tag, preferred) {
   logBG(`✅${tag} Clicking size ${pickedLabel}…`);
   humanClick(sizeBtn, `Size ${pickedLabel}`);
 
-  await wait(randInt(500, 900));
+  if (leo) {
+    // Speed: no fixed settle. The CTA usually enables within ~100ms of the size
+    // click, and every 200ms poll skipped is 200ms shaved off the entry.
+    await wait(randInt(40, 90));
+  } else {
+    // Accuracy: the window is long, so pace it like a human and spend the spare
+    // time proving the size took before committing to the draw.
+    await wait(randInt(500, 900));
+    await verifySizeSelection(tag, sizeBtn, pickedLabel);
+  }
 
-  const ctaBtn = await waitFor(findCTAButton, 8000);
+  const ctaBtn = await waitFor(findCTAButton, 8000, leo ? 40 : 200);
 
   if (!ctaBtn) {
     logBG(`❌${tag} CTA button (Join Draw / Buy) did not activate after selecting size.`);
@@ -1064,7 +1135,9 @@ async function executeEntry(tag, preferred) {
   logBG(`🛒${tag} Clicking "${ctaText}" — entering draw…`);
   humanClick(ctaBtn, ctaText);
 
-  await wait(2500);
+  // LEO checks the outcome sooner so the one-shot retry below still lands
+  // inside the FCFS window; DAN keeps the original, more forgiving settle.
+  await wait(leo ? 900 : 2500);
 
   // Non-blocking success check: instant-buy drops confirm by adding to the bag
   // on the SAME url. If we see it, report it (and the "carted" notification
@@ -1085,10 +1158,10 @@ async function executeEntry(tag, preferred) {
       startStatusPoller();
     } else if (postStatus === STATUS.ENTER) {
       logBG(`⚠️${tag} CTA click may not have registered — retrying once…`);
-      await wait(500);
+      await wait(leo ? 250 : 500);
       const retryBtn = findCTAButton();
       if (retryBtn) humanClick(retryBtn, "CTA retry");
-      await wait(2000);
+      await wait(leo ? 900 : 2000);
       if (addedToBagConfirmed()) {
         logBG(`🛒✅${tag} ADDED TO BAG — ${sizeLabel(preferred)} is in the cart.`);
         renderStatusBar("checkout", { size: sizeLabel(preferred), label: "Added to bag — completing checkout" });

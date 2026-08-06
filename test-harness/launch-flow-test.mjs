@@ -26,15 +26,18 @@ const require = createRequire(import.meta.url);
 const ROOT = join(__dirname, "..");
 const { chromium } = require(join(execSync("npm root -g", { encoding: "utf8" }).trim(), "playwright"));
 
-const SETTINGS = {
+// leoMode flips the entry path: LEO strips the settling waits, DAN keeps them
+// and verifies the size actually selected before committing. Both must cart.
+const settingsFor = (leo) => ({
   enabled: true, testMode: false,
   preferredSize: "RANDOM", preferredSizeType: "random",
   profileLabel: "TESTER", profileDir: "Profile T", productKeyword: "",
-};
+  leoMode: leo,
+});
 
-const CHROME_STUB = `
+const chromeStub = (leo) => `
 (function(){
-  const sync = { snkrsBotSettings: ${JSON.stringify(SETTINGS)} };
+  const sync = { snkrsBotSettings: ${JSON.stringify(settingsFor(leo))} };
   const local = {}, session = {};
   window.__botLogs = [];
   const mkArea = (store) => ({
@@ -136,8 +139,8 @@ const check = (name, cond, detail) => {
   else { failed++; console.log(`  ✗ ${name}${detail ? " — " + detail : ""}`); }
 };
 
-async function main() {
-  const browser = await chromium.launch({ args: ["--no-sandbox"] });
+async function runMode(browser, leo) {
+  const mode = leo ? "LEO" : "DAN";
   const page = await browser.newContext({ viewport: { width: 1280, height: 900 } }).then(c => c.newPage());
 
   const errors = [];
@@ -153,15 +156,19 @@ async function main() {
     } catch (e) { route.fulfill({ status: 404, body: "nf" }); }
   });
 
-  await page.addInitScript(CHROME_STUB);
+  await page.addInitScript(chromeStub(leo));
+  const t0 = Date.now();
   await page.goto("https://www.nike.com/sg/launch/t/big-kids-air-jordan-4-shes-a-star-sweet-beet-and-off-noir", { waitUntil: "load" });
 
-  for (let i = 0; i < 80; i++) {
+  // 50ms granularity so the DAN-vs-LEO elapsed numbers mean something, over the
+  // same ~20s total budget the 250ms loop used to give.
+  for (let i = 0; i < 400; i++) {
     const done = await page.evaluate(() =>
       !!window.__cart && (window.__botLogs || []).some(l => /added to bag/i.test(l)));
     if (done) break;
-    await page.waitForTimeout(250);
+    await page.waitForTimeout(50);
   }
+  const elapsed = Date.now() - t0;
 
   const state = await page.evaluate(() => {
     const sel = document.querySelector("ul.size-layout li.size.selected");
@@ -180,27 +187,51 @@ async function main() {
     };
   });
 
-  console.log("");
-  check("page really has 3 products / 3 grids / 3 Buy buttons",
+  console.log(`\n  ── ${mode} entry path (carted in ${elapsed}ms) ──`);
+  check(`${mode}: page really has 3 products / 3 grids / 3 Buy buttons`,
     state.products === 3 && state.sizeGrids === 3 && state.buyButtons === 3,
     `products=${state.products} grids=${state.sizeGrids} buys=${state.buyButtons}`);
-  check("no uncaught errors in the content script", errors.length === 0, errors.slice(0, 3).join(" | "));
-  check("bot SELECTED a size", !!state.selectedSize, "none selected");
-  check("selected size is a HERO youth size (US …Y, not a toddler …C)",
+  check(`${mode}: no uncaught errors in the content script`, errors.length === 0, errors.slice(0, 3).join(" | "));
+  check(`${mode}: bot SELECTED a size`, !!state.selectedSize, "none selected");
+  check(`${mode}: selected size is a HERO youth size (US …Y, not a toddler …C)`,
     /^US\s+[\d.]+Y$/.test(state.selectedSize || ""), state.selectedSize || "");
-  check("ITEM ADDED TO BAG", state.addedText === true && !!state.cart);
-  check("carted the HERO product (Air Jordan 4 …), not another product",
+  check(`${mode}: ITEM ADDED TO BAG`, state.addedText === true && !!state.cart);
+  check(`${mode}: carted the HERO product (Air Jordan 4 …), not another product`,
     !!state.cart && /Air Jordan 4/.test(state.cart.name), state.cart && state.cart.name);
-  check("carted the S$215 item (right product's Buy button)",
+  check(`${mode}: carted the S$215 item (right product's Buy button)`,
     !!state.cart && /215/.test(state.cart.price), state.cart && state.cart.price);
-  check("exactly ONE item carted (no cross-product double add)", state.cartCount === 1 && state.badge === "1",
-    `count=${state.cartCount} badge=${state.badge}`);
-  check("bot's confirmed size matches the carted size",
+  check(`${mode}: exactly ONE item carted (no cross-product double add)`,
+    state.cartCount === 1 && state.badge === "1", `count=${state.cartCount} badge=${state.badge}`);
+  check(`${mode}: bot's confirmed size matches the carted size`,
     state.cart && state.selectedSize && state.selectedSize === ("US " + state.cart.size.replace(/^US\s+/, "")),
     `sel=${state.selectedSize} bag=${state.cart && state.cart.size}`);
-  check("bot logged 'ADDED TO BAG' success", state.logs.some(l => /added to bag/i.test(l)),
+  check(`${mode}: bot logged 'ADDED TO BAG' success`, state.logs.some(l => /added to bag/i.test(l)),
     state.logs.slice(-3).join(" | ") || "no logs");
 
+  // Drop-type routing: the entry flow must announce and take the right path.
+  const announced = state.logs.some(l => leo ? /LEO drop — speed path/.test(l)
+                                             : /DAN drop — accuracy path/.test(l));
+  check(`${mode}: announced the ${mode} entry path`, announced, state.logs.slice(0, 4).join(" | "));
+  const verified = state.logs.some(l => /confirmed selected — entry verified/.test(l));
+  if (leo) {
+    check("LEO: skipped size verification (costs time LEO doesn't have)", !verified,
+      "verification ran in LEO mode");
+  } else {
+    check("DAN: verified the size actually selected before entering", verified,
+      state.logs.filter(l => /size|select/i.test(l)).slice(-3).join(" | ") || "no verification log");
+  }
+
+  await page.context().close();
+  return elapsed;
+}
+
+async function main() {
+  const browser = await chromium.launch({ args: ["--no-sandbox"] });
+  const danMs = await runMode(browser, false);
+  const leoMs = await runMode(browser, true);
+  // Not a hard assertion — wall-clock across two browser contexts is noisy — but
+  // LEO stripping ~1.5s of fixed waits should show up plainly in the numbers.
+  console.log(`\n  DAN ${danMs}ms vs LEO ${leoMs}ms (LEO strips ~1.5s of fixed waits)`);
   await browser.close();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);
