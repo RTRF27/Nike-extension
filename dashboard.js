@@ -1786,7 +1786,79 @@ function refreshCardSelects() {
   });
 }
 
+// ── Bulk card assignment ──────────────────────────────────────
+// One card for the whole run, or an even random deal across every saved card.
+// The picker is the same list as a row's Card dropdown, minus "New card…".
+function fillBulkCardSelect() {
+  const sel = $("bulkCardSelect");
+  if (!sel) return;
+  // Remember what's chosen across re-renders; on the very first fill there's
+  // nothing to remember, so land on the first card rather than "no card".
+  const prev = sel.dataset.filled ? sel.value : null;
+  sel.innerHTML = "";
+  sel.appendChild(el("option", { value: "" }, "— no card (type at checkout) —"));
+  cardProfiles.forEach(cp => {
+    sel.appendChild(el("option", { value: cp.id }, `${cp.name || "Card"} · ${cardMask(cp.cardNumber)}`));
+  });
+  const keep = prev !== null && (prev === "" || cardProfiles.some(c => c.id === prev));
+  sel.value = keep ? prev : (cardProfiles[0] ? cardProfiles[0].id : "");
+  sel.dataset.filled = "1";
+  updateCardSpread();
+}
+
+// "Spread: Amex×3 · DBS×2" — eyeball the split before the drop.
+function cardSpreadSummary() {
+  if (!accounts.length) return "";
+  const counts = new Map();
+  accounts.forEach(a => counts.set(a.cardId || "", (counts.get(a.cardId || "") || 0) + 1));
+  const nameOf = (id) => {
+    if (!id) return "no card";
+    const cp = cardProfiles.find(c => c.id === id);
+    return cp ? (cp.name || "Card") : "deleted card";
+  };
+  return "Spread: " + Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([id, n]) => `${nameOf(id)}×${n}`)
+    .join(" · ");
+}
+function updateCardSpread() {
+  const node = $("cardSpread");
+  if (node) node.textContent = cardSpreadSummary();
+}
+
+// Every account on the same card — the usual case when one card funds the run.
+async function applyCardToAll() {
+  if (!accounts.length) { flashTemp($("statusMsg"), "No accounts yet.", "var(--orange)"); return; }
+  const id = $("bulkCardSelect").value;
+  const cp = cardProfiles.find(c => c.id === id);
+  accounts.forEach(a => { a.cardId = id; });
+  renderAccounts();
+  renderCardProfiles(); // refresh "used by N" counts
+  await saveAll(true);
+  flashTemp($("statusMsg"),
+    id ? `All ${accounts.length} account(s) → ${cp ? cp.name : "card"}.`
+       : `Cleared the card on all ${accounts.length} account(s).`,
+    "var(--green)", 4000);
+}
+
+// Deal the saved cards across the accounts at random but evenly: the pool is
+// reshuffled every full pass, so no two cards can end up more than one account
+// apart. 6 accounts over 2 cards is 3/3, 7 is 4/3 — never 6/1.
+async function splitCardsEvenly() {
+  if (!accounts.length) { flashTemp($("statusMsg"), "No accounts yet.", "var(--orange)"); return; }
+  if (!cardProfiles.length) { flashTemp($("statusMsg"), "No saved cards — add one on the Cards page first.", "var(--orange)", 5000); return; }
+  const dealt = dealFromPool(cardProfiles.map(c => c.id), accounts.length);
+  accounts.forEach((a, i) => { a.cardId = dealt[i]; });
+  renderAccounts();
+  renderCardProfiles();
+  await saveAll(true);
+  flashTemp($("statusMsg"),
+    `Dealt ${accounts.length} account(s) across ${cardProfiles.length} card(s). ${cardSpreadSummary()}`,
+    "var(--green)", 6000);
+}
+
 function renderCardProfiles() {
+  fillBulkCardSelect();
   const list = $("cardProfilesList");
   if (!list) return;
   list.innerHTML = "";
@@ -2935,6 +3007,7 @@ function renderAccounts() {
   refreshOrderCheckerProfiles();
   if (typeof renderProxyAssignments === "function") renderProxyAssignments();
   updateSelectedCount();
+  updateCardSpread();
 }
 
 // Reflect how many profiles are ticked, on both the Profiles and Drop pages.
@@ -3057,6 +3130,7 @@ function buildAccountRow(acct) {
     }
     acct.cardId = cardSel.value;
     renderCardProfiles(); // refresh "used by N" counts
+    updateCardSpread();
   });
 
   // ── Buttons ──
@@ -4598,6 +4672,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   if ($("selectAllBtn")) $("selectAllBtn").addEventListener("click", () => selectAllProfiles(true));
   if ($("selectNoneBtn")) $("selectNoneBtn").addEventListener("click", () => selectAllProfiles(false));
+
+  // ── Bulk card assignment ──
+  if ($("applyCardAllBtn")) $("applyCardAllBtn").addEventListener("click", applyCardToAll);
+  if ($("splitCardsBtn")) $("splitCardsBtn").addEventListener("click", splitCardsEvenly);
   if ($("openSelectedBtn")) $("openSelectedBtn").addEventListener("click", launchSelected);
   // Tile-layout preview: toggle on the button, live-update as the size changes.
   if ($("tilePreviewBtn")) $("tilePreviewBtn").addEventListener("click", async () => {

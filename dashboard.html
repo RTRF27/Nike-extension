@@ -336,6 +336,15 @@
           <span id="profileSourceNote"></span>
         </p>
 
+        <!-- Bulk card assignment — one card for everyone, or an even random deal -->
+        <div class="bulk-card-bar">
+          <label class="lbl" for="bulkCardSelect"><i class="ico ico-card" aria-hidden="true"></i>Card</label>
+          <select id="bulkCardSelect" class="inp"></select>
+          <button id="applyCardAllBtn" class="btn btn-mini btn-dark" title="Give every account the card picked on the left">APPLY TO ALL</button>
+          <button id="splitCardsBtn" class="btn btn-mini btn-purple" title="Deal every saved card across the accounts at random, evenly">SPLIT EVENLY</button>
+          <span id="cardSpread" class="bulk-card-spread"></span>
+        </div>
+
         <!-- Scheduler armed-state banner — visible when a time is set & ≥1 account has ⏰ on -->
         <div id="acctSchedBanner" class="sched-banner" style="display:none;"></div>
 
