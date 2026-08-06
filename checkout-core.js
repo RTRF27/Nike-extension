@@ -362,7 +362,17 @@
   // ── Native click ──────────────────────────────────────────────
   // Nike's checkout buttons are Angular components that often ignore a bare
   // el.click(). Dispatch the full pointer/mouse sequence, then fall back.
-  async function nativeClick(el, label, fast, dbg) {
+  //
+  // `fast`    → skip the pre-click settle (time-critical paths).
+  // `instant` → ALSO drop the 4–12 ms gaps between the events. Those gaps are
+  //   human-looking spacing, but they are 8 `setTimeout`s standing between the
+  //   caller's mark and `click` — the only event the page actually acts on.
+  //   Measured against the saved-card fixture: they push `click` to ~64 ms past
+  //   the mark on an idle box (p50; 50–77 ms over 30 runs) and ~77 ms under full
+  //   CPU load, because every `setTimeout` overshoots more as the box gets
+  //   busier. That is the entire FCFS margin LEO exists to win, so LEO spends
+  //   the realism instead and fires the sequence in one task.
+  async function nativeClick(el, label, fast, dbg, instant) {
     dbg = dbg || function () {};
     if (!el) { dbg(`nativeClick: null for "${label}"`); return; }
     el.scrollIntoView({ behavior: fast ? "auto" : "smooth", block: "center" });
@@ -379,10 +389,10 @@
     for (const type of ["pointerover", "mouseover", "pointerenter",
                         "pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
       try { el.dispatchEvent(new view.MouseEvent(type, opt)); } catch (e) {}
-      await wait(randInt(4, 12));
+      if (!instant) await wait(randInt(4, 12));
     }
     try { el.click(); } catch (e) {}
-    dbg(`nativeClick: "${label}" (sequence${minimized ? ", minimized" : ""})`);
+    dbg(`nativeClick: "${label}" (sequence${instant ? ", instant" : ""}${minimized ? ", minimized" : ""})`);
   }
 
   async function waitFor(fn, timeoutMs, intervalMs) {
@@ -834,7 +844,11 @@
           continue;
         }
         this._log(`🚀${tag} [3/3] SUBMIT ORDER click attempt ${attempt}…`);
-        await nativeClick(sb, "SUBMIT ORDER", true, (m) => this._dbg(m));
+        // LEO clicks instantly (see nativeClick): the inter-event spacing is
+        // ~65 ms of dead time before `click`, which is exactly what an FCFS drop
+        // is decided on. DAN keeps the human spacing — a raffle isn't won on
+        // speed, so there's nothing to buy with the realism.
+        await nativeClick(sb, "SUBMIT ORDER", true, (m) => this._dbg(m), this.leo);
         submitted = true;
         this._emit("submitted", { attempt, offsetMs: dropAt ? Date.now() - dropAt : null });
         if (await waitFor(advanced, 5000, 250)) {

@@ -226,9 +226,13 @@ the entry flow and the checkout state machine flip to a fast path:
   to 900 ms so the one-shot CTA retry still lands inside the window. Size
   verification is skipped — it costs time LEO doesn't have.
 - **Submits on the dot.** A tab parked on checkout waiting for the drop
-  coarse-waits until ~40 ms out then **busy-spins** the final stretch, so the
-  SUBMIT click lands within a few ms of the drop instead of the ~120 ms that
-  `setTimeout` granularity used to cost.
+  coarse-waits until ~40 ms out then **busy-spins** the final stretch, and the
+  click sequence itself fires in a single task (LEO drops the 4–12 ms human
+  spacing between the pointer/mouse events — 8 `setTimeout`s that otherwise sit
+  between the drop and the `click` the page actually acts on). Measured against
+  the saved-card fixture, the SUBMIT click lands **0–1 ms** past the drop on an
+  idle box and **1–10 ms** under full CPU load. The spin alone was always exact;
+  it was the event spacing that used to cost 50–95 ms.
 - **Submits immediately when late.** A tab opened *after* the drop skips the hold
   and clicks as soon as it's ready.
 - **Cuts the fill→submit lag.** The fixed multi-second settle/commit sleeps (2 s
@@ -238,8 +242,9 @@ the entry flow and the checkout state machine flip to a fast path:
 PANIC cancels a held (or jittered) submit, and Test Mode still stops before
 clicking, in both modes. Covered by `test-harness/test.mjs` against the **real
 captured gs.nike.com checkout DOM**: LEO is faster than DAN on the same page,
-never submits early, lands within ~120 ms of the drop, and adds no hold when
-late; DAN's human delay lands the submit after the drop and inside the window.
+never submits early, lands within 50 ms of the drop (a deliberately loose
+regression bound — see the measured numbers above), and adds no hold when late;
+DAN's human delay lands the submit after the drop and inside the window.
 (Live-drop testing isn't automated — it needs auth, a live product, and would
 place a real order.)
 

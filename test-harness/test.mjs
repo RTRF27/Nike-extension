@@ -241,7 +241,19 @@ async function main() {
     await pH.close();
     eq("LEO: held tab submitted", held.submitted, true);
     check("LEO: never submits before the drop", held.offset >= -15, `offset ${held.offset}ms`);
-    check("LEO: submits on the dot (<120ms late)", held.offset != null && held.offset <= 120, `offset ${held.offset}ms`);
+    // `offset` is measured entirely IN-PAGE (submit emit's Date.now() minus the
+    // drop mark), so no Playwright overhead is in it — the harness only observes
+    // the evaluate() return ~16s later, after the post-submit verify loop.
+    //
+    // Measured on the saved-card fixture, offset of the `submitted` emit:
+    //   busy-spin exit alone   0 ms on every run, idle and under full CPU load
+    //   before the LEO instant-click fix   50–88 ms idle, 78–95 ms loaded
+    //   after it                            0–1 ms idle,   1–10 ms loaded
+    // The old spread was the 8 `setTimeout` gaps inside nativeClick, which is
+    // why this used to flake at 120 ms on a busy box (observed up to 147 ms).
+    // 50 ms is ~5x the measured loaded worst case, and still far below the
+    // ~65 ms those gaps cost on their own — so it keeps catching their return.
+    check("LEO: submits on the dot (<50ms late)", held.offset != null && held.offset <= 50, `offset ${held.offset}ms`);
 
     // Late tab (opened after drop): submits, with no drop-hold added.
     const pLate = await openFixture(context, fixture("saved-card.html"));
