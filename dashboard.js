@@ -401,6 +401,11 @@ let editingCardId = null;      // card profile currently being edited (or null)
 let liveStatuses = {};         // {profileDir: {code,message,time}}
 const statusElMap = new Map(); // profileDir → {rowEl, badgeEl, textEl, timeEl}
 
+// Nike's entry-window close for the current drop (draws only, "" when unknown).
+// Set by the SKU lookup, persisted in the config, and read by the entry flow as
+// DAN's deadline.
+let dropEntryCloseISO = "";
+
 let singleSizePool = [];       // ["footwear:9", "footwear:9.5", ...] for single-product
 let singleRandomSize = false;  // single-product: roll a size per task from a range
 let randomKind = "footwear";   // roll from footwear (US) or apparel (XXS–XXL)
@@ -661,8 +666,47 @@ function renderProductPreview(box, meta, pageUrl) {
     info.appendChild(el("div", { className: "product-preview-date" },
       isDraw ? "DRAW (raffle) — enter, don't direct-checkout" : `${meta.method} (first-come buy)`));
   }
+  // Nike tells us when the entry window shuts. On a draw that's the only real
+  // deadline, and it's what DAN paces itself against.
+  if (meta && meta.entryCloseISO) {
+    info.appendChild(el("div", { className: "product-preview-date" },
+      "Entries close " + fmtUpcomingDate(meta.entryCloseISO)));
+  }
   if (url) info.appendChild(el("div", { className: "product-preview-open" }, "▶ click image to open product page"));
   box.appendChild(info);
+  renderDropTypeMatch(box, meta);
+}
+
+// Nike's feed already says whether a launch is a DRAW or a LEO. The DROP TYPE
+// toggle is set by hand and can silently disagree with it — which is the one
+// mistake that costs a whole drop (patient DAN timings on an FCFS launch, or a
+// bot-obvious speed run on a raffle). Show the disagreement here, next to the
+// product, with a one-click fix.
+function renderDropTypeMatch(box, meta) {
+  const method = meta && meta.method;
+  if (!method) return;
+  const nikeIsLeo = !/draw/i.test(method);
+  const weAreLeo = isLeoModeSelected();
+  const row = el("div", { className: "droptype-match" + (nikeIsLeo === weAreLeo ? " ok" : " warn") });
+  if (nikeIsLeo === weAreLeo) {
+    row.textContent = `✓ Drop type matches Nike — ${weAreLeo ? "LEO" : "DAN"}`;
+  } else {
+    row.appendChild(el("span", {},
+      `Nike says this is ${nikeIsLeo ? "a first-come LEO" : "a DRAW"}, but DROP TYPE is set to ${weAreLeo ? "LEO" : "DAN"}.`));
+    const fix = el("button", { className: "btn btn-mini btn-purple" }, `SWITCH TO ${nikeIsLeo ? "LEO" : "DAN"}`);
+    fix.addEventListener("click", async () => {
+      const target = $(nikeIsLeo ? "dropModeLeo" : "dropModeDan");
+      if (target) target.checked = true;
+      syncDropModeUI();
+      await saveAll(true);
+      renderDropTypeMatch(box, meta); // re-render into the now-matching state
+      flashTemp($("statusMsg"), `Drop type set to ${nikeIsLeo ? "LEO" : "DAN"} to match Nike.`, "var(--green)", 4000);
+    });
+    row.appendChild(fix);
+  }
+  const old = box.querySelector(".droptype-match");
+  if (old) old.remove();
+  box.appendChild(row);
 }
 
 function previewLoading(box, sku) {
@@ -3494,6 +3538,8 @@ function buildConfig() {
       keyword: $("dropKeyword").value.trim(),
       // Submit-gate time — always the field value (persists even with auto-open off).
       dropTimeISO: dropTimeFieldISO(),
+      // When Nike shuts the entry window (draws only, "" when unknown).
+      entryCloseISO: dropEntryCloseISO || "",
       // Whether to ALSO auto-open accounts before the drop (the ⏰ toggle).
       autoOpen: scheduleIsEnabled(),
       scheduleEnabled: scheduleIsEnabled(),
@@ -3701,8 +3747,11 @@ async function fetchDropTimeFromNike() {
   try { d = await resolveLaunch(sku); } catch (e) { d = { ok: false, error: String(e && e.message || e) }; }
   if (!d || !d.ok) { if (msg) { msg.style.color = "var(--orange)"; msg.textContent = `Couldn't fetch: ${(d && d.error) || "unknown"}`; } return; }
   if (!d.dropTimeISO) { if (msg) { msg.style.color = "var(--orange)"; msg.textContent = "Nike didn't return a drop time for this SKU."; } return; }
+  // Remember when the entry window shuts too — DAN paces itself against it.
+  dropEntryCloseISO = d.entryCloseISO || "";
   if (setDropTimeField(d.dropTimeISO)) {
-    if (msg) { msg.style.color = "var(--green)"; msg.textContent = `Drop time set: ${new Date(d.dropTimeISO).toLocaleString()}`; }
+    const closes = dropEntryCloseISO ? `, entries close ${new Date(dropEntryCloseISO).toLocaleTimeString()}` : "";
+    if (msg) { msg.style.color = "var(--green)"; msg.textContent = `Drop time set: ${new Date(d.dropTimeISO).toLocaleString()}${closes}`; }
     saveAll(true);
   }
 }
@@ -4343,6 +4392,7 @@ function applyConfigToUI(cfg) {
   $("dropKeyword").value = drop.keyword || "";
   // Auto-open toggle (schedulePanel is now the toggle row itself — always visible).
   $("scheduleEnabled").checked = !!(drop.autoOpen ?? drop.scheduleEnabled);
+  dropEntryCloseISO = drop.entryCloseISO || "";
   if (drop.dropTimeISO) {
     const d = new Date(drop.dropTimeISO);
     if (!isNaN(d.getTime())) {

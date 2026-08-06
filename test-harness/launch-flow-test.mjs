@@ -28,16 +28,19 @@ const { chromium } = require(join(execSync("npm root -g", { encoding: "utf8" }).
 
 // leoMode flips the entry path: LEO strips the settling waits, DAN keeps them
 // and verifies the size actually selected before committing. Both must cart.
-const settingsFor = (leo) => ({
+// entryCloseMs is Nike's entry-window close — a DAN drop inside the last 90s
+// must abandon its careful pacing and enter like LEO, or it misses the window.
+const settingsFor = (leo, entryCloseMs) => ({
   enabled: true, testMode: false,
   preferredSize: "RANDOM", preferredSizeType: "random",
   profileLabel: "TESTER", profileDir: "Profile T", productKeyword: "",
   leoMode: leo,
+  entryCloseMs: entryCloseMs || 0,
 });
 
-const chromeStub = (leo) => `
+const chromeStub = (leo, entryCloseMs) => `
 (function(){
-  const sync = { snkrsBotSettings: ${JSON.stringify(settingsFor(leo))} };
+  const sync = { snkrsBotSettings: ${JSON.stringify(settingsFor(leo, entryCloseMs))} };
   const local = {}, session = {};
   window.__botLogs = [];
   const mkArea = (store) => ({
@@ -139,8 +142,8 @@ const check = (name, cond, detail) => {
   else { failed++; console.log(`  ✗ ${name}${detail ? " — " + detail : ""}`); }
 };
 
-async function runMode(browser, leo) {
-  const mode = leo ? "LEO" : "DAN";
+async function runMode(browser, leo, opts = {}) {
+  const mode = opts.label || (leo ? "LEO" : "DAN");
   const page = await browser.newContext({ viewport: { width: 1280, height: 900 } }).then(c => c.newPage());
 
   const errors = [];
@@ -156,7 +159,7 @@ async function runMode(browser, leo) {
     } catch (e) { route.fulfill({ status: 404, body: "nf" }); }
   });
 
-  await page.addInitScript(chromeStub(leo));
+  await page.addInitScript(chromeStub(leo, opts.entryCloseMs));
   const t0 = Date.now();
   await page.goto("https://www.nike.com/sg/launch/t/big-kids-air-jordan-4-shes-a-star-sweet-beet-and-off-noir", { waitUntil: "load" });
 
@@ -208,17 +211,29 @@ async function runMode(browser, leo) {
   check(`${mode}: bot logged 'ADDED TO BAG' success`, state.logs.some(l => /added to bag/i.test(l)),
     state.logs.slice(-3).join(" | ") || "no logs");
 
-  // Drop-type routing: the entry flow must announce and take the right path.
-  const announced = state.logs.some(l => leo ? /LEO drop — speed path/.test(l)
-                                             : /DAN drop — accuracy path/.test(l));
-  check(`${mode}: announced the ${mode} entry path`, announced, state.logs.slice(0, 4).join(" | "));
+  // Drop-type routing: the entry flow must announce and take the right path. A
+  // DAN drop with the window about to shut is expected to take the SPEED path.
+  const deadlinePressed = !leo && !!opts.entryCloseMs;
+  const speedPath = leo || deadlinePressed;
   const verified = state.logs.some(l => /confirmed selected — entry verified/.test(l));
-  if (leo) {
-    check("LEO: skipped size verification (costs time LEO doesn't have)", !verified,
-      "verification ran in LEO mode");
+
+  if (deadlinePressed) {
+    check(`${mode}: announced the deadline override`,
+      state.logs.some(l => /entries close in \d+s — switching to the speed path/.test(l)),
+      state.logs.slice(0, 4).join(" | "));
+    check(`${mode}: dropped verification to make the window`, !verified,
+      "still verified with the window closing");
   } else {
-    check("DAN: verified the size actually selected before entering", verified,
-      state.logs.filter(l => /size|select/i.test(l)).slice(-3).join(" | ") || "no verification log");
+    check(`${mode}: announced the ${mode} entry path`,
+      state.logs.some(l => leo ? /LEO drop — speed path/.test(l) : /DAN drop — accuracy path/.test(l)),
+      state.logs.slice(0, 4).join(" | "));
+    if (speedPath) {
+      check("LEO: skipped size verification (costs time LEO doesn't have)", !verified,
+        "verification ran in LEO mode");
+    } else {
+      check("DAN: verified the size actually selected before entering", verified,
+        state.logs.filter(l => /size|select/i.test(l)).slice(-3).join(" | ") || "no verification log");
+    }
   }
 
   await page.context().close();
@@ -229,9 +244,15 @@ async function main() {
   const browser = await chromium.launch({ args: ["--no-sandbox"] });
   const danMs = await runMode(browser, false);
   const leoMs = await runMode(browser, true);
-  // Not a hard assertion — wall-clock across two browser contexts is noisy — but
-  // LEO stripping ~1.5s of fixed waits should show up plainly in the numbers.
-  console.log(`\n  DAN ${danMs}ms vs LEO ${leoMs}ms (LEO strips ~1.5s of fixed waits)`);
+  // DAN with Nike's entry window shutting in 30s: careful pacing must give way.
+  const urgentMs = await runMode(browser, false, {
+    label: "DAN-CLOSING", entryCloseMs: Date.now() + 30_000,
+  });
+  // Not hard assertions — wall-clock across browser contexts is noisy — but LEO
+  // stripping ~1.5s of fixed waits should show up plainly in the numbers.
+  console.log(`\n  DAN ${danMs}ms · LEO ${leoMs}ms · DAN-CLOSING ${urgentMs}ms`);
+  check("DAN-CLOSING carted faster than patient DAN", urgentMs < danMs,
+    `urgent=${urgentMs}ms patient=${danMs}ms`);
   await browser.close();
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed ? 1 : 0);

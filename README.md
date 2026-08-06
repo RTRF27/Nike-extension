@@ -217,6 +217,22 @@ on speed, so the bot optimises for entries that are *correct*:
   drop", default 6 s, 0 = instant). This spreads the accounts out instead of
   firing every submit at the exact same millisecond, which is an easy bot tell.
 
+**⏰ DAN's deadline.** Being careful is only free while there's time to be careful.
+Nike's feed carries `launchView.stopEntryDate` — when the entry window actually
+shuts — which the SKU lookup now stores and passes to the entry flow as
+`entryCloseMs`. Inside the last **90 seconds** a DAN drop abandons its pacing and
+enters on the LEO path, because a verified entry that arrives after the door
+closes loses to a sloppy one that lands. The override announces itself in the log
+("entries close in 42s — switching to the speed path"). Unknown close time (0) =
+no override, so nothing changes for drops Nike doesn't date.
+
+**✅ Drop type vs Nike's feed.** Nike says whether a launch is a `DRAW` or a `LEO`
+(`launchView.method`), and the product preview has always displayed it — but the
+DROP TYPE toggle is set by hand and could silently disagree, which is the one
+mistake that costs a whole drop. Resolve a SKU on the Drop page and the preview
+now compares the two: a green "matches Nike" line, or an amber warning with a
+one-click **SWITCH TO LEO/DAN** button. It never changes the setting on its own.
+
 **⚡ LEO — FCFS (speed).** First-come-first-served drops are won on speed, so both
 the entry flow and the checkout state machine flip to a fast path:
 

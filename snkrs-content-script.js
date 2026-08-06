@@ -913,6 +913,17 @@ function humanClick(el, label) {
 // took before it commits the entry.
 function isLeoDrop() { return !!settings?.leoMode; }
 
+// DAN's one hard deadline: Nike's entry-window close (launchView.stopEntryDate,
+// 0 when unknown). Being careful is only free while there's time to be careful —
+// inside this margin DAN stops pacing itself and enters like LEO, because a
+// verified entry that misses the window loses to a sloppy one that lands.
+const DAN_URGENT_MS = 90 * 1000;
+function entryCloseMs() { return Number(settings?.entryCloseMs) || 0; }
+function danDeadlineUrgent() {
+  const close = entryCloseMs();
+  return !!close && (close - Date.now()) < DAN_URGENT_MS;
+}
+
 // Has Nike marked this size button as the chosen one? The size grid renders
 // several ways (radio inputs, aria-checked buttons, class-flagged <li>), so any
 // positive signal counts. Returns true / false / null when the markup gives us
@@ -1072,9 +1083,17 @@ async function executeEntry(tag, preferred) {
   }
   entryAttempted = true;
 
-  const leo = isLeoDrop();
-  logBG(`${leo ? "⚡" : "🎟️"}${tag} ${leo ? "LEO drop — speed path: settling waits stripped, CTA polled hard."
-                                          : "DAN drop — accuracy path: human pacing, size selection verified before entry."}`);
+  // A DAN drop whose entry window is about to shut takes the speed path anyway —
+  // there's no point verifying an entry that arrives after the door closes.
+  const urgent = !isLeoDrop() && danDeadlineUrgent();
+  const leo = isLeoDrop() || urgent;
+  if (urgent) {
+    const left = Math.max(0, Math.round((entryCloseMs() - Date.now()) / 1000));
+    logBG(`⏰${tag} DAN drop but entries close in ${left}s — switching to the speed path to make the window.`);
+  } else {
+    logBG(`${leo ? "⚡" : "🎟️"}${tag} ${leo ? "LEO drop — speed path: settling waits stripped, CTA polled hard."
+                                            : "DAN drop — accuracy path: human pacing, size selection verified before entry."}`);
+  }
 
   // Wait for the size button to be fully ready (brief grace period). LEO cuts
   // it to the shortest wait that still lets Nike's React finish painting.

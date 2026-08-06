@@ -552,13 +552,17 @@ async function resolveLaunchData(sku, country) {
     const dropTimeISO = lv.startEntryDate ||
                         (pi.merchProduct && pi.merchProduct.commerceStartDate) ||
                         lv.stopEntryDate || "";
+    // When the entry window SHUTS. On a DAN/draw this is hours after the open,
+    // and it's the only hard deadline that exists — the bot can afford to be
+    // careful right up until it's close, then must stop being careful.
+    const entryCloseISO = lv.stopEntryDate || "";
     // Squarish product image + a real /launch/t/ page URL, so the dashboard can
     // show a thumbnail preview that confirms the exact product being targeted.
     const imageUrl = _threadImage(obj);
     // Launch method (DRAW = raffle, LEO/inline = first-come buy). Direct
     // checkout links only apply to buy-type launches; DRAWs must be entered.
     const method = (pi.launchView && pi.launchView.method) || "";
-    return { launchId, slug, skus, name, dropTimeISO, imageUrl, method };
+    return { launchId, slug, skus, name, dropTimeISO, entryCloseISO, imageUrl, method };
   }
 
   let lastStatus = 0, netErr = "", partial = null;
@@ -579,6 +583,7 @@ async function resolveLaunchData(sku, country) {
       return {
         ok: true, sku, country, language, launchId: ex.launchId, slug: ex.slug,
         skus: ex.skus, name: ex.name, dropTimeISO: ex.dropTimeISO,
+        entryCloseISO: ex.entryCloseISO || "",
         imageUrl: ex.imageUrl || "", method: ex.method || "",
         url: ex.slug ? `https://www.nike.com/${country.toLowerCase()}/launch/t/${ex.slug}` : "",
       };
@@ -1138,6 +1143,11 @@ function buildSettingsForProfile(config, profileDir) {
     // missing.
     dropAtMs:            account.dropAtMs ||
                          (drop.dropTimeISO ? Date.parse(drop.dropTimeISO) : 0) || 0,
+    // When Nike shuts the entry window (draws only — 0 when unknown). DAN spends
+    // its spare time on accuracy right up until this gets close, then stops
+    // being careful so the entry still lands. See snkrs-content-script.
+    entryCloseMs:        account.entryCloseMs ||
+                         (drop.entryCloseISO ? Date.parse(drop.entryCloseISO) : 0) || 0,
   };
 }
 

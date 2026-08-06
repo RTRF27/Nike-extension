@@ -1138,6 +1138,25 @@ select.inp { cursor: pointer; }
 .steps { margin: 0 0 4px 18px; line-height: 2; font-size: 13px; }
 .steps ul { margin: 4px 0 4px 18px; }
 
+/* ── DROP TYPE vs NIKE'S FEED (product preview) ── */
+.droptype-match {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px; padding: 9px 12px; border-radius: 8px;
+  font-size: 12px; line-height: 1.5;
+}
+/* Channels match --green #45d68f and --orange #fbaf5c. */
+.droptype-match.ok {
+  background: rgba(69, 214, 143, .08);
+  border: 1px solid rgba(69, 214, 143, .3);
+  color: var(--green);
+}
+.droptype-match.warn {
+  background: rgba(251, 175, 92, .08);
+  border: 1px solid rgba(251, 175, 92, .35);
+  color: var(--orange);
+}
+.droptype-match .btn { flex: none; margin-left: auto; }
+
 /* ── BULK CARD ASSIGNMENT (Accounts) ── */
 .bulk-card-bar {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
