@@ -293,14 +293,22 @@ function watchForConfirmation(tag) {
   const startUrl = location.href;
   const startTs = Date.now();
   const iv = setInterval(() => {
-    const text = (document.body.innerText || "").toUpperCase();
+    // Fold typographic apostrophes: Nike ships "You’re in" / "Got ’em", and a
+    // straight-quote includes() misses both.
+    const text = String(document.body.innerText || "")
+      .replace(/[‘’ʼ＇´`]/g, "'")
+      .replace(/\s+/g, " ")
+      .toUpperCase();
     if (text.includes("PROCESSING YOUR ENTRY") || text.includes("JUST A MINUTE")) return;
     if (!location.hostname.includes("gs.nike.com")) {
       clearInterval(iv); renderStatusBar("done", { time: nowClock(), label: "Order complete", tone: "win" });
       logBG(`🎉${tag} Entry complete → ${location.href}`); return;
     }
     if (text.includes("ORDER CONFIRMED") || text.includes("THANK YOU") ||
-        text.includes("YOU'RE IN") || location.href !== startUrl) {
+        text.includes("YOU'RE IN") || text.includes("GOT 'EM") ||
+        text.includes("IS YOURS") ||
+        text.includes("ORDER CONFIRMATION WILL BE ARRIVING") ||
+        location.href !== startUrl) {
       clearInterval(iv); renderStatusBar("done", { time: nowClock(), label: "Order submitted", tone: "win" });
       logBG(`🎉${tag} ORDER SUBMITTED! ${location.href}`); return;
     }
@@ -371,20 +379,30 @@ async function runCheckoutFlow() {
   // (and so it never fights the drop-time hold, which keeps the flow running).
   let flowRunning = false;
   let redrives = 0;
+  let lastFlowSubmitted = false;   // read by the watchdog's stuck check below
   window.__snkrsFlowRunning = () => flowRunning;
   async function _drive() {
     if (flowRunning) return;
     flowRunning = true;
-    try { await runCheckoutFlow(); }
-    catch (err) { try { logBG(`❌${profileTag()} flow error: ${err}`); } catch (_) {} }
+    try { const r = await runCheckoutFlow(); lastFlowSubmitted = !!(r && r.submitted); }
+    catch (err) { lastFlowSubmitted = false; try { logBG(`❌${profileTag()} flow error: ${err}`); } catch (_) {} }
     finally { flowRunning = false; }
   }
   window.__snkrsDrive = _drive;
 
   const isConfirmed = () => Core ? Core.isConfirmed(document) : !location.hostname.includes("gs.nike.com");
+  // A checkout that died at "SUBMIT ORDER not found" has already committed
+  // payment, so NONE of the CONTINUE/accordion elements are on screen any more.
+  // Keying the watchdog off those alone meant the one failure mode that
+  // actually strands a tab was the one it could never see. Re-drive whenever we
+  // are still on an unconfirmed checkout and the last flow did not submit.
+  const onCheckout = () => Core && location.hostname.includes("gs.nike.com") && !isConfirmed();
   const stuckPreSubmit = () =>
-    Core && location.hostname.includes("gs.nike.com") && !isConfirmed() &&
-    !!(Core.findDeliveryContinueOnly(document) || Core.findPaymentContinueOnly(document) || Core.findPaymentAccordionRow(document));
+    onCheckout() &&
+    (!!(Core.findDeliveryContinueOnly(document) || Core.findPaymentContinueOnly(document) ||
+        Core.findPaymentAccordionRow(document)) ||
+     !!Core.findSubmitOrderButton(document) ||   // primed but never clicked
+     !lastFlowSubmitted);                        // errored out before submitting
 
   await _drive(); // initial run
 

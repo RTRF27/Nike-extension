@@ -290,6 +290,80 @@ async function main() {
     await page.close();
   }
 
+  // ── 4e. Hidden-tab timer throttling + outcome text + double-order guard ─
+  // A backgrounded checkout tab has its timers clamped by Chrome (>=1s hidden,
+  // ~1 wake/min once hidden 5 min). Every deadline in the machine is
+  // wall-clock, so a clamped tab used to fall out of its poll loops after a
+  // SINGLE look and strand itself on "SUBMIT ORDER not found".
+  console.log("[machine] throttled tab, outcome text, no double-submit");
+  {
+    const page = await openFixture(context, fixture("saved-card.html"));
+
+    // waitFor must still poll a floor of times when one wait() eats the whole
+    // budget. Predicate goes true on the 3rd call; the budget expires on the 1st.
+    const throttled = await page.evaluate(async () => {
+      const C = window.CheckoutCore;
+      let calls = 0;
+      const got = await C.waitFor(() => (++calls >= 3) ? "found" : null, 50, 2000);
+      return { got, calls };
+    });
+    eq("throttle: waitFor still finds it after the deadline", throttled.got, "found");
+    check("throttle: polled a floor of times, not once", throttled.calls >= 3,
+      `calls ${throttled.calls}`);
+
+    // The win wording Nike actually ships, with TYPOGRAPHIC apostrophes.
+    const texts = await page.evaluate(() => {
+      const C = window.CheckoutCore;
+      const probe = (html) => {
+        const d = document.implementation.createHTMLDocument("t");
+        d.body.innerHTML = html;
+        Object.defineProperty(d, "defaultView", { value: { location: location }, configurable: true });
+        return C.isConfirmed(d);
+      };
+      return {
+        curlyGotEm: probe("<p>Got ’em</p>"),
+        straightGotEm: probe("<p>Got 'em</p>"),
+        isYours: probe("<p>Kobe 5 ‘Hyper Royal’ is yours.</p>"),
+        confirmationLine: probe("<p>Your order confirmation will be arriving soon.</p>"),
+        curlyYoureIn: probe("<p>You’re in</p>"),
+        nothing: probe("<p>Checkout</p>"),
+      };
+    });
+    eq("outcome: curly-apostrophe \"Got ’em\" is a win", texts.curlyGotEm, true);
+    eq("outcome: straight-apostrophe \"Got 'em\" is a win", texts.straightGotEm, true);
+    eq("outcome: \"... is yours\" is a win", texts.isYours, true);
+    eq("outcome: order-confirmation line is a win", texts.confirmationLine, true);
+    eq("outcome: curly \"You’re in\" still matches", texts.curlyYoureIn, true);
+    eq("outcome: a plain checkout page is NOT confirmed", texts.nothing, false);
+    await page.close();
+  }
+
+  // Re-clicking SUBMIT places a SECOND REAL ORDER. If the button is gone after
+  // a click, the machine must treat it as sent rather than retry.
+  console.log("[machine] never re-clicks a SUBMIT that already went");
+  {
+    const page = await openFixture(context, fixture("saved-card.html"));
+    const out = await page.evaluate(async () => {
+      const C = window.CheckoutCore;
+      let clicks = 0;
+      const btn = C.findSubmitOrderButton(document);
+      // Behave like a real submit: the button detaches, but the page shows no
+      // confirmation text yet (the slow drop-day case that caused re-clicks).
+      btn.addEventListener("click", () => { clicks++; btn.remove(); }, true);
+      const machine = new C.CheckoutMachine({
+        doc: document, log: () => {}, dbg: () => {}, emit: () => {},
+        tag: () => "", getCardFill: () => Promise.resolve(false),
+        cancelCardFill: () => {}, isTestMode: () => false,
+        isLeoMode: () => true, getDropAt: () => 0,
+      });
+      const r = await machine.run();
+      return { clicks, submitted: r.submitted };
+    });
+    eq("double-order: reported submitted", out.submitted, true);
+    check("double-order: SUBMIT clicked exactly once", out.clicks === 1, `clicks ${out.clicks}`);
+    await page.close();
+  }
+
   // ── 4d. LAUNCH DAY: random size means checkout is only reached AFTER the
   //        drop opens, so LEO must add NO submit timer at all; and DAN must
   //        spread profiles apart so they never submit in unison. ─────────────

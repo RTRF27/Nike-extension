@@ -627,9 +627,19 @@ async function openDropTabs(reason) {
   for (let i = 0; i < active.length; i++) {
     const url = buildSlotUrl(active[i], i);
     if (!url) continue;
-    chrome.tabs.create({ url, active: i === 0 }, (tab) => {
+    // One WINDOW per slot, not N tabs in one window. A background TAB is
+    // hidden, and Chrome clamps its timers to >=1s (and to ~1 wake per minute
+    // once it has been hidden 5 minutes). Every deadline in the checkout state
+    // machine is wall-clock, so a hidden tab would fall out of its poll loops
+    // after a single look and strand itself on "SUBMIT ORDER not found" - and
+    // LEO's on-the-dot submit would drift by up to a minute.
+    //
+    // The sole tab of an unfocused (but not minimized) window is still
+    // VISIBLE, so it is never throttled. tileWindowFromUrl() already lays these
+    // out from the url marker via the onCreated/onUpdated listeners.
+    chrome.windows.create({ url, focused: i === 0, state: "normal" }, (win) => {
       if (chrome.runtime.lastError) {
-        console.warn("[SNKRSBot BG] tab open error:", chrome.runtime.lastError.message);
+        console.warn("[SNKRSBot BG] window open error:", chrome.runtime.lastError.message);
       }
     });
   }

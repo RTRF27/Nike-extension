@@ -247,6 +247,18 @@ const STATUS = {
   UNKNOWN:   "unknown",
 };
 
+// Nike renders TYPOGRAPHIC apostrophes — "Got ’em", "You’re in line",
+// "We’ll email you" — but the phrase lists below are written with straight
+// ones, so a raw includes() silently misses every one of them. Fold all the
+// apostrophe variants to ' before matching, and collapse whitespace runs so a
+// line break inside a sentence can't hide a phrase either.
+function normText(s) {
+  return String(s || "")
+    .replace(/[‘’ʼ՚＇´`]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function detectPageStatus() {
   // FIX: Check URL for ENTRY_LIMIT_EXCEEDED — means already entered, stop everything
   if (location.search.includes("ENTRY_LIMIT_EXCEEDED")) {
@@ -257,18 +269,22 @@ function detectPageStatus() {
   // Check modal text first — "Got 'em" or "Your entry is in"
   const modal = document.querySelector(".modal, [role='dialog'], [class*='Modal'], [class*='modal']");
   if (modal) {
-    const t = (modal.innerText || "").toLowerCase();
-    if (t.includes("got 'em") || t.includes("got em") || t.includes("is yours"))
+    const t = normText(modal.innerText).toLowerCase();
+    if (t.includes("got 'em") || t.includes("got em") || t.includes("is yours") ||
+        t.includes("order confirmation will be arriving"))
       return STATUS.PURCHASED;
     if (t.includes("your entry is in") || t.includes("entry received"))
       return STATUS.ENTRY_IN;
   }
 
-  const bodyText = (document.body.innerText || "").toUpperCase();
+  const bodyText = normText(document.body.innerText).toUpperCase();
 
   if (
     bodyText.includes("GOT 'EM") || bodyText.includes("GOT EM") ||
     bodyText.includes("IS YOURS") ||
+    // The live win page pairs "Got 'em" with this line; either alone is enough.
+    bodyText.includes("ORDER CONFIRMATION WILL BE ARRIVING") ||
+    bodyText.includes("YOUR ORDER CONFIRMATION") ||
     bodyText.includes("PURCHASED") || bodyText.includes("YOU WON") ||
     bodyText.includes("CONGRATULATIONS")
   ) return STATUS.PURCHASED;
@@ -408,6 +424,61 @@ const POLLER_ACTIVE_KEY  = "snkrsBotPollerActive";
 const POLLER_COUNT_KEY   = "snkrsBotPollCount";
 const POLLER_PRODUCT_KEY = "snkrsBotProduct";
 
+// PENDING ("You're in line - Nike processing") is NOT an outcome, it is Nike
+// still deciding. It used to stop the bot dead, which is why a win could sit on
+// screen reading "Got 'em" while the status bar still said "In line" and no
+// win notification ever fired. Watch the page in place until it resolves: Nike
+// re-renders the SAME url, so no reload is needed and this still works when the
+// reload poller is switched off.
+let _pendingWatchActive = false;
+function watchPendingOutcome(tag, maxMs) {
+  if (_pendingWatchActive) return;
+  _pendingWatchActive = true;
+  const budget = maxMs || 20 * 60 * 1000;
+  const deadline = Date.now() + budget;
+  let settled = false;
+
+  const finish = (status) => {
+    if (settled) return true;
+    if (status === STATUS.PURCHASED) {
+      settled = true;
+      logBG(`🎉🔥👟${tag} **GOT 'EM!!** You won the draw! Check your email NOW. 🏆🏆🏆 ${location.href}`);
+      renderStatusBar("done", { time: nowClock(), label: "GOT 'EM 🎉", tone: "win" });
+      try { launchConfetti(); } catch (e) {}
+      return true;
+    }
+    if (status === STATUS.NOT_WON) {
+      settled = true;
+      logBG(`😔${tag} Result: **Better Luck Next Time** - entry not selected.`);
+      renderStatusBar("done", { time: nowClock(), label: "Not selected", tone: "pending" });
+      return true;
+    }
+    return false;
+  };
+
+  const stop = () => { obs.disconnect(); clearInterval(iv); _pendingWatchActive = false; };
+  const tick = () => {
+    if (finish(detectPageStatus())) { stop(); return; }
+    if (Date.now() > deadline) {
+      stop();
+      logBG(`⏳${tag} Still in line after ${Math.round(budget / 60000)} min - stopped watching, check the app.`);
+    }
+  };
+  const obs = new MutationObserver(tick);
+  try { obs.observe(document.body, { childList: true, subtree: true, characterData: true }); } catch (e) {}
+  const iv = setInterval(tick, 1000);
+  tick(); // the page may already have resolved before we armed the watcher
+}
+
+// Enter the "in line" holding state: show it, keep watching the page for the
+// real result, and (if enabled) keep the reload poller going as a backstop.
+function enterPendingState(tag, note) {
+  renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
+  logBG(`⏳${tag} ${note || "In line - Nike is processing"} - watching for the result.`);
+  watchPendingOutcome(tag);
+  startStatusPoller();
+}
+
 function startStatusPoller() {
   if (!settings?.statusPollerEnabled) {
     log("Poller disabled in settings.");
@@ -456,10 +527,9 @@ function checkStatusAfterReload() {
       return true;
 
     case STATUS.PENDING:
-      sessionStorage.removeItem(POLLER_ACTIVE_KEY);
-      sessionStorage.removeItem(POLLER_COUNT_KEY);
-      logBG(`⏳${tag} Entry is PENDING / You\'re in line — stopping bot. Nike is processing.`);
-      renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
+      // Not an outcome - Nike is still processing. Keep watching this page and
+      // keep the reload poller running so a win can never be missed.
+      enterPendingState(tag, `Check #${count}: still in line`);
       return true;
 
     case STATUS.ENTRY_IN:
@@ -1011,10 +1081,7 @@ function startDropWatcher(tag, preferred) {
     // Already entered or pending — stop watching
     if (status === STATUS.ENTRY_IN || status === STATUS.PURCHASED || status === STATUS.PENDING) {
       observer.disconnect();
-      if (status === STATUS.PENDING) {
-        renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
-        logBG(`⏳${tag} Pending detected — bot stopped watching.`);
-      }
+      if (status === STATUS.PENDING) enterPendingState(tag, "Pending detected");
     }
   });
 
@@ -1053,10 +1120,7 @@ function startDropWatcher(tag, preferred) {
     if (status === STATUS.ENTRY_IN || status === STATUS.PURCHASED || status === STATUS.CLOSED || status === STATUS.PENDING) {
       clearInterval(pollId);
       observer.disconnect();
-      if (status === STATUS.PENDING) {
-        renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
-        logBG(`⏳${tag} Pending detected in poll — bot stopped.`);
-      }
+      if (status === STATUS.PENDING) enterPendingState(tag, "Pending detected in poll");
     }
   }, 500);
 }
@@ -1207,8 +1271,7 @@ async function runSNKRSFlow() {
     return;
   }
   if (currentStatus === STATUS.PENDING) {
-    logBG(`⏳${tag} Entry is PENDING / You\'re in line — bot stopped. Nike is processing.`);
-    renderStatusBar("done", { time: nowClock(), label: "In line — Nike processing", tone: "pending" });
+    enterPendingState(tag, "Entry is in line on page load");
     return;
   }
   if (currentStatus === STATUS.PURCHASED) {

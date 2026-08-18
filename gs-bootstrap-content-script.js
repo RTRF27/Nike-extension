@@ -136,11 +136,13 @@
     try { sessionStorage.setItem("snkrsBootUrl", location.href); } catch (e) {}
   }
 
-  // gs-content-script runs ONCE at document_idle and bails if its run-guard
-  // dataset is set. We set it here (document_start) to hold it back until ready.
-  function hold()    { try { document.documentElement.dataset.snkrsBotRan = String(Date.now()); } catch (e) {} }
-  function release() { try { delete document.documentElement.dataset.snkrsBotRan; } catch (e) {} }
-
+  // NOTE: there used to be hold()/release() helpers here that claimed to gate
+  // gs-content-script's run-guard until settings were written. Neither was ever
+  // called, so the gate did not exist and the comment was describing a safety
+  // property the code did not have. Removed rather than wired up: the per-tab
+  // drop time is written to sessionStorage synchronously above (before
+  // document_idle), which is what gs-content-script's resolveDropAt() reads
+  // first, so the settings write below is not on the critical path.
   // Fetch this profile's central settings and write them so the checkout works.
   // We also stamp in dropAtMs so gs-content-script knows when it's allowed to
   // click SUBMIT — the actual drop time, never before.

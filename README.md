@@ -248,6 +248,67 @@ DAN's human delay lands the submit after the drop and inside the window.
 (Live-drop testing isn't automated — it needs auth, a live product, and would
 place a real order.)
 
+## Stuck tabs, double orders & win detection (v4.54)
+
+Five bugs found while chasing "some tabs get stuck at checkout", plus the win
+the bot could see but never reported.
+
+**Background tabs were being throttled.** Chrome clamps `setTimeout` to >=1s in a
+HIDDEN tab and to roughly **one wake per minute** once it has been hidden 5
+minutes. Every deadline in the checkout state machine is wall-clock, so a hidden
+tab fell out of its poll loops after a *single* look and stranded itself on
+`SUBMIT ORDER not found - STUCK HERE`. Measured against the real fixtures: a
+flow that takes 6.4s visible took **41s** at a 1s clamp and **did not finish**
+inside 10 minutes at a 1-minute clamp; LEO's on-the-dot submit drifted from 1ms
+to 86ms. The cause was `openDropTabs` creating N tabs in ONE window
+(`active: i === 0`), so every slot after the first was hidden. It now opens **one
+window per slot** - the sole tab of an unfocused window is still *visible* and is
+never throttled, and the existing tiler already lays those out. `waitFor` and the
+SUBMIT poll also keep a floor of real attempts, so a throttled tab degrades to
+slow instead of stranding.
+
+**Submit could double-order.** The retry loop re-clicked SUBMIT if the page had
+not visibly advanced within 5s - routine at a drop - and `nativeClick` fired both
+a synthetic `click` and `el.click()`, so three attempts meant up to six clicks.
+The window is now 15s, a retry is skipped entirely if the SUBMIT button is gone
+(treated as sent), and the native fallback is suppressed once the button
+detaches or disables.
+
+**The watchdog was blind to the failure that mattered.** `stuckPreSubmit()` only
+fired when a CONTINUE or accordion was on screen - but the `no_submit_button`
+failure happens *after* payment commits, when none of those exist. It now also
+re-drives when a SUBMIT is primed-but-unclicked or the last flow never submitted.
+
+**A leaked heartbeat.** The 3s "waiting for SUBMIT" interval had no `finally`, so
+a throw left a dead tab logging forever and pinned the live board on a state the
+flow had already left.
+
+**A run-guard that never ran.** `hold()`/`release()` in the bootstrap were never
+called despite a comment promising they gated the content script. Removed.
+
+### Win detection
+
+Nike ships **typographic** apostrophes - `Got ’em`, `You’re in line` - while every
+phrase list here was written with straight ones, so `includes("got 'em")` missed
+the win outright. All outcome text now folds `’ ‘ ʼ ＇ ´` to `'` and collapses
+whitespace before matching, and `Got 'em` / `... is yours` / `Your order
+confirmation will be arriving soon` are recognised everywhere (`isConfirmed`, the
+post-submit `advanced()` check, the gs.nike.com confirmation watcher and the
+SNKRS page status).
+
+The bigger miss: **`PENDING` was treated as an outcome.** "In line - Nike
+processing" is Nike still *deciding*, but all four call sites disconnected the
+observers and stopped the bot, so a page that then resolved to **Got 'em** was
+never seen - the status bar sat on "In line" and no win notification fired.
+PENDING now enters a holding state that keeps a MutationObserver + 1s poll on the
+page (Nike re-renders the same URL, so no reload is needed and it works with the
+reload poller switched off), resolves to WON or NOT WON, fires the notification
+and confetti, and gives up only after 20 minutes.
+
+Covered by 10 new assertions in `test-harness/test.mjs`: curly- and
+straight-apostrophe wins, the order-confirmation line, `waitFor` surviving a
+clamped timer, and SUBMIT being clicked exactly once when the button detaches.
+
 ## Region tagging (SG vs MY) + address readout (v4.10)
 
 Nike runs **SNKRS SG** and **SNKRS MY** as separate storefronts, and which one an

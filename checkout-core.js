@@ -319,13 +319,25 @@
     return true;
   }
 
+  // Nike renders typographic apostrophes ("Got ’em", "You’re in"), so fold
+  // every apostrophe variant to ' and collapse whitespace before matching -
+  // otherwise a straight-quote phrase list silently misses the win.
+  function outcomeText(doc) {
+    return String((doc.body && doc.body.innerText) || "")
+      .replace(/[‘’ʼ＇´`]/g, "'")
+      .replace(/\s+/g, " ")
+      .toUpperCase();
+  }
+  // Text that means the order/entry is through (or being processed by Nike).
+  const CONFIRMED_RE =
+    /PROCESSING|JUST A MINUTE|ORDER CONFIRMED|THANK YOU|YOU'RE IN|ENTRY CONFIRMED|GOT 'EM|GOT EM|IS YOURS|ORDER CONFIRMATION WILL BE ARRIVING/;
+
   // Has the page reached a confirmation / processing state?
   function isConfirmed(doc) {
     doc = doc || document;
     const loc = (doc.defaultView && doc.defaultView.location) || location;
     if (!loc.hostname.includes("gs.nike.com")) return true;
-    const t = (doc.body.innerText || "").toUpperCase();
-    return /PROCESSING|JUST A MINUTE|ORDER CONFIRMED|THANK YOU|YOU'RE IN|ENTRY CONFIRMED/.test(t);
+    return CONFIRMED_RE.test(outcomeText(doc));
   }
 
   // Structured snapshot of the page (replaces the ad-hoc dumpPageState). Pure —
@@ -391,15 +403,29 @@
       try { el.dispatchEvent(new view.MouseEvent(type, opt)); } catch (e) {}
       if (!instant) await wait(randInt(4, 12));
     }
-    try { el.click(); } catch (e) {}
+    // The sequence above already dispatched a `click`. The native fallback is
+    // here because Angular components sometimes ignore synthetic events - but
+    // if the component DID act (it detached or disabled the button) firing it
+    // again is a second real click on SUBMIT ORDER.
+    try { if (el.isConnected && !el.disabled) el.click(); } catch (e) {}
     dbg(`nativeClick: "${label}" (sequence${instant ? ", instant" : ""}${minimized ? ", minimized" : ""})`);
   }
 
-  async function waitFor(fn, timeoutMs, intervalMs) {
+  // Chrome clamps setTimeout to >=1s in a HIDDEN tab, and to roughly one wake
+  // per minute once the tab has been hidden 5 minutes. A pure wall-clock
+  // deadline can therefore expire after a SINGLE poll and report "not found"
+  // for something that was one tick away - which is how backgrounded checkout
+  // tabs ended up stuck. Guarantee a floor of real attempts so a throttled tab
+  // still actually looks before giving up.
+  const THROTTLE_MIN_TRIES = 5;
+  async function waitFor(fn, timeoutMs, intervalMs, minTries) {
     timeoutMs = timeoutMs || 15000; intervalMs = intervalMs || 100;
+    const floor = minTries == null ? THROTTLE_MIN_TRIES : minTries;
     const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
+    let tries = 0;
+    while (Date.now() - start < timeoutMs || tries < floor) {
       const r = fn();
+      tries++;
       if (r) return r;
       await wait(intervalMs);
     }
@@ -703,11 +729,16 @@
       // still on screen the commit didn't take, so keep committing while we wait
       // instead of timing out against a step that never opened.
       let submitBtn = null;
-      {
+      try {
         const deadline = Date.now() + 12000;
         const poll = this.leo ? 25 : 100;
         let lastCommit = 0;
-        while (Date.now() < deadline) {
+        // Tries floor for the same hidden-tab timer clamping waitFor guards
+        // against: a throttled tab used to fall out of this loop after one
+        // look and report "SUBMIT ORDER not found - STUCK HERE".
+        let tries = 0;
+        while (Date.now() < deadline || tries < 8) {
+          tries++;
           submitBtn = this.finder("submit");
           if (submitBtn) break;
           const pc = this.finder("paymentContinue");
@@ -718,8 +749,12 @@
           }
           await wait(poll);
         }
+      } finally {
+        // Must be a finally: a throw in the loop used to leak this interval,
+        // leaving a dead tab logging "waiting for SUBMIT" every 3s forever and
+        // holding the live-status board on a state the flow had already left.
+        if (heartbeat) clearInterval(heartbeat);
       }
-      if (heartbeat) clearInterval(heartbeat);
 
       if (!submitBtn) {
         this._log(`❌${tag} [3/3] SUBMIT ORDER not found — STUCK HERE. Full page state:`);
@@ -823,10 +858,11 @@
       const loc = (doc.defaultView && doc.defaultView.location) || location;
       const startUrl = loc.href;
       const advanced = () => {
-        const t = (doc.body.innerText || "").toUpperCase();
         if (!loc.hostname.includes("gs.nike.com")) return true;
         if (loc.href !== startUrl) return true;
-        return /PROCESSING|JUST A MINUTE|ORDER CONFIRMED|THANK YOU|YOU'RE IN|ENTRY CONFIRMED/.test(t);
+        // Same apostrophe-safe matcher as isConfirmed - this decides whether a
+        // retry click is safe, so it must not miss a confirmation.
+        return CONFIRMED_RE.test(outcomeText(doc));
       };
 
       let submitted = false;
@@ -851,11 +887,19 @@
         await nativeClick(sb, "SUBMIT ORDER", true, (m) => this._dbg(m), this.leo);
         submitted = true;
         this._emit("submitted", { attempt, offsetMs: dropAt ? Date.now() - dropAt : null });
-        if (await waitFor(advanced, 5000, 250)) {
-          this._log(`✅${tag} [3/3] Submit registered — order is processing.`);
+        // A drop-day checkout regularly takes well over 5s to acknowledge, and
+        // re-clicking SUBMIT places a SECOND REAL ORDER. Give the page a long
+        // window, then only retry if the form is demonstrably still sitting
+        // there unsubmitted.
+        if (await waitFor(advanced, 15000, 250)) {
+          this._log(`✅${tag} [3/3] Submit registered - order is processing.`);
           break;
         }
-        this._log(`🔁${tag} [3/3] Submit didn't advance yet (attempt ${attempt}) — retrying…`);
+        if (!this.finder("submit")) {
+          this._log(`✅${tag} [3/3] SUBMIT is gone and the page hasn't advanced yet - treating as SENT, NOT re-clicking (a retry here would double-order).`);
+          break;
+        }
+        this._log(`🔁${tag} [3/3] SUBMIT still on screen after 15s (attempt ${attempt}) - retrying...`);
       }
 
       if (!submitted) {
