@@ -955,20 +955,36 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // ── Chrome Profile Creator ────────────────────────────────────
 // Chrome auto-creates a profile directory the first time it's launched with
-// --profile-directory="<name>". So "creating" a profile is just launching a
-// fresh directory name straight onto the Nike SG login page.
+// --profile-directory="<name>". The launcher's "createProfile" command does
+// that AND confirms Chrome really created it (it silently ignores names it
+// doesn't accept), names it the same in Chrome's own profile menu, and refuses
+// to reuse an existing folder — so a row is only added for a profile that
+// actually exists.
 const NIKE_LOGIN_URL = "https://www.nike.com/sg/login";
 
+// New profiles are named "Nike N", NOT "Profile N": "Profile N" is the folder
+// naming Chrome uses for profiles added from its own menu, so the two could
+// end up sharing a folder. N continues after the highest number in use.
 function nextProfileName() {
   const nums = [];
   const grab = (dir) => {
-    const m = /^Profile (\d+)$/.exec((dir || "").trim());
+    const m = /^(?:Profile|Nike) (\d+)$/i.exec((dir || "").trim());
     if (m) nums.push(parseInt(m[1], 10));
   };
   discoveredProfiles.forEach(p => grab(p.dir));
   accounts.forEach(a => grab(a.profileDir));
   const max = nums.length ? Math.max(...nums) : 0;
-  return `Profile ${max + 1}`;
+  return `Nike ${max + 1}`;
+}
+
+// Mirrors the launcher's rules, for instant feedback before the round-trip.
+function profileNameProblem(name) {
+  if (!name) return "Enter a profile name.";
+  if (name.length > 40) return "Profile name is too long (max 40 characters).";
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(name)) return "Use only letters, numbers, spaces, - and _ (it becomes a folder name).";
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return `"${name}" is a reserved name on Windows — pick another.`;
+  if (/^(default|system profile|guest profile|profile \d+)$/i.test(name)) return `"${name}" is a folder name Chrome uses for its own profiles — pick another (e.g. "${nextProfileName()}").`;
+  return "";
 }
 
 function suggestProfileName() {
@@ -976,32 +992,63 @@ function suggestProfileName() {
   if (inp && !inp.value.trim()) inp.value = nextProfileName();
 }
 
+let _creatingProfile = false; // a double-click must not create two profiles
 async function createProfile() {
+  if (_creatingProfile) return;
   const msg = $("profileCreatorMsg");
   const inp = $("newProfileName");
+  const btn = $("createProfileBtn");
   const name = (inp && inp.value.trim()) || nextProfileName();
 
-  if (accounts.some(a => a.profileDir === name) || discoveredProfiles.some(p => p.dir === name)) {
+  const problem = profileNameProblem(name);
+  if (problem) { flashTemp(msg, problem, "#fa5400", 7000); return; }
+  const same = (d) => (d || "").toLowerCase() === name.toLowerCase();
+  if (accounts.some(a => same(a.profileDir)) || discoveredProfiles.some(p => same(p.dir))) {
     flashTemp(msg, `"${name}" already exists — pick another name.`, "#fa5400", 4000);
     return;
   }
 
-  flash(msg, `Creating "${name}" and opening Nike login…`, "#888");
-  const resp = await hostSend({ cmd: "launch", profileDir: name, url: NIKE_LOGIN_URL });
+  _creatingProfile = true;
+  if (btn) btn.disabled = true;
+  try {
+    flash(msg, `Creating "${name}" and opening Nike login…`, "#888");
+    let resp = await hostSend({ cmd: "createProfile", name, url: NIKE_LOGIN_URL });
+    // A launcher from before v1.3 doesn't know createProfile — fall back to the
+    // plain launch it does understand (no verification).
+    let unverified = false;
+    if (!resp.ok && /Unknown cmd/i.test(resp.error || "")) {
+      resp = await hostSend({ cmd: "launch", profileDir: name, url: NIKE_LOGIN_URL });
+      unverified = true;
+    }
 
-  if (resp.ok) {
-    // Add it to the accounts list straight away so it's ready to configure.
-    accounts.push({ id: uid(), label: name, profileDir: name, size: "", sizeType: "footwear", cardId: "" });
-    renderAccounts();
-    await saveAll(true);
-    if (inp) inp.value = nextProfileName();
-    flashTemp(msg, `✓ Created "${name}" — sign into your Nike account in the new window, then fill its size & card below.`, "#1db954", 9000);
-    document.getElementById("accountsList").lastElementChild
-      ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  } else if (resp.hostMissing) {
-    flashTemp(msg, "Launcher offline — install the native host first (see the guide / setup below).", "#fa5400", 6000);
-  } else {
-    flashTemp(msg, "Couldn't create profile: " + resp.error, "#e03131", 6000);
+    if (resp.ok) {
+      // Chrome only writes its profile list to disk every few seconds, so add
+      // the new one to the known list ourselves — the row then shows it as a
+      // normal profile right away instead of a hand-typed directory.
+      if (!discoveredProfiles.some(p => p.dir === name)) discoveredProfiles.unshift({ dir: name, name: resp.name || name });
+      // Add it to the accounts list straight away so it's ready to configure
+      // (replacing the untouched blank starter row, if that's all there is).
+      accounts = accounts.filter(a => a.label || a.profileDir || a.size || a.cardId);
+      accounts.push({ id: uid(), label: name, profileDir: name, size: "", sizeType: "footwear", cardId: "" });
+      renderAccounts();
+      await saveAll(true);
+      if (inp) inp.value = nextProfileName();
+      if (unverified) {
+        flashTemp(msg, `Opened "${name}", but this launcher is too old to confirm Chrome created it — update the native-host folder, then check a new Chrome window really opened.`, "#f0c070", 12000);
+      } else {
+        flashTemp(msg, `✓ Created "${name}" — sign into your Nike account in the new window, then fill its size & card below. It is named "${name}" in Chrome's profile menu too.`, "#1db954", 9000);
+      }
+      document.getElementById("accountsList").lastElementChild
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } else if (resp.hostMissing) {
+      flashTemp(msg, "Launcher offline — install the native host first (see the guide / setup below).", "#fa5400", 6000);
+    } else {
+      // Nothing was added: no account row for a profile that doesn't exist.
+      flashTemp(msg, "Couldn't create profile: " + resp.error, "#e03131", 10000);
+    }
+  } finally {
+    _creatingProfile = false;
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -1934,7 +1981,11 @@ function fillProfileSelect(sel, manualInput, current) {
   sel.innerHTML = "";
   sel.appendChild(el("option", { value: "" }, discoveredProfiles.length ? "— pick profile —" : "— no profiles found —"));
   discoveredProfiles.forEach(p => {
-    sel.appendChild(el("option", { value: p.dir }, `${p.name}  ·  ${p.dir}`));
+    // unlisted = the folder exists but Chrome's own profile list doesn't show
+    // it (just created, or Chrome closed before saving its list). Launching it
+    // makes Chrome list it again, data intact.
+    const label = p.unlisted ? `${p.dir}  ·  not in Chrome's list — launch to restore` : `${p.name}  ·  ${p.dir}`;
+    sel.appendChild(el("option", { value: p.dir }, label));
   });
   sel.appendChild(el("option", { value: "__manual__" }, "Type directory manually…"));
 
@@ -2160,6 +2211,9 @@ function buildConfig() {
 // ── Persist: local mirror + shared config file via host ───────
 async function saveAll(silent) {
   const config = buildConfig();
+  // Stamp every save so a dashboard opened later (in ANY Chrome profile) can
+  // tell which copy is newer — see the load order in the init below.
+  config.savedAt = Date.now();
   await chrome.storage.local.set({ [DASH_KEY]: config });
 
   // Arm (or disarm) the background auto-launch alarm
@@ -2542,7 +2596,7 @@ async function pingHost() {
 async function loadProfiles() {
   const resp = await hostSend({ cmd: "listProfiles" });
   if (resp.ok && Array.isArray(resp.profiles)) {
-    discoveredProfiles = resp.profiles.map(p => ({ dir: p.dir, name: p.name }));
+    discoveredProfiles = resp.profiles.map(p => ({ dir: p.dir, name: p.name, unlisted: !!p.unlisted }));
   } else {
     discoveredProfiles = [];
   }
@@ -2705,14 +2759,18 @@ document.addEventListener("DOMContentLoaded", async () => {
   const local = await chrome.storage.local.get(DASH_KEY);
   if (local[DASH_KEY]) applyConfigToUI(local[DASH_KEY]);
 
-  // 3) Probe the launcher; if connected, pull profiles and (if we had no
-  //    local state) import the shared config file.
+  // 3) Probe the launcher; if connected, pull profiles and import the shared
+  //    config file when we have no local state OR the shared file is NEWER.
+  //    The local mirror is per Chrome profile, so a dashboard that was last
+  //    used a while ago holds an old accounts list; it used to win here and
+  //    then overwrite the shared file on the next save — dropping any account
+  //    created since from another profile's dashboard.
   const ok = await pingHost();
   if (ok) {
-    if (!local[DASH_KEY]) {
-      const cfgResp = await hostSend({ cmd: "getConfig" });
-      if (cfgResp.ok && cfgResp.config) applyConfigToUI(cfgResp.config);
-    }
+    const cfgResp = await hostSend({ cmd: "getConfig" });
+    const shared = cfgResp.ok ? cfgResp.config : null;
+    const mine = local[DASH_KEY];
+    if (shared && (!mine || (shared.savedAt || 0) > (mine.savedAt || 0))) applyConfigToUI(shared);
     await loadProfiles();
   }
 

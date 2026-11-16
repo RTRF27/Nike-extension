@@ -5,6 +5,7 @@
   "description": "Nike SNKRS SG multi-account drop dashboard + checkout bot (Chrome MV3 extension). Dev/test tooling only — the extension itself has no build step.",
   "scripts": {
     "test": "node test-harness/test.mjs",
+    "test:host": "node native-host/test.mjs",
     "runner": "node test-harness/serve.mjs",
     "pack": "node update-server/pack.js",
     "update-server": "node update-server/server.js"
