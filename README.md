@@ -122,6 +122,23 @@ the same steps in short:
 1. **Create Chrome profiles** — use **Create Chrome Profile** (one per Nike
    account). Each click opens a fresh profile on the Nike SG login page; sign
    in there. The profile is added to your accounts list automatically.
+   - The name you type becomes the profile's folder **and** its name in
+     Chrome's own profile menu, so it is the same everywhere. Letters,
+     numbers, spaces, `-` and `_` only. New profiles are suggested as
+     `Nike N` — `Profile N` is reserved for profiles you add from Chrome's
+     own menu, so the two never share a folder.
+   - The dashboard only reports **✓ Created** once Chrome has really written
+     the profile to disk. If Chrome doesn't create it, you get an error and no
+     account row is added.
+   - A new profile has the extension only if you installed it with the
+     auto-update installer (step 2). With manual *Load unpacked*, load it in
+     the new profile too — **Preflight** flags any profile that lacks it.
+   - **A profile looks like it disappeared?** Click **Reload profiles**. A
+     profile folder that exists on disk but is missing from Chrome's list
+     shows as *not in Chrome's list — launch to restore*; pick it and launch
+     it, and Chrome lists it again with its login intact. Profiles created
+     before v3.6 appear in Chrome's menu as `Person N`, not the dashboard
+     name.
 2. **Card profiles** — create each card once in **Card Profiles** (give it a
    nickname). Chrome profiles hold no saved cards, so the bot fills the card for
    every entry — define them here once and reuse.
@@ -172,6 +189,9 @@ the same steps in short:
   timeouts/retries and structured logging. The battle-tested DOM detection and
   the exact log phrasings are preserved; only the control flow is formalised,
   and it lives in `checkout-core.js` with no `chrome.*` dependency.
+- **Native host tests** — `node native-host/test.mjs` covers profile creation
+  (name rules, never reusing a folder, verification, clean-up) and listing,
+  over the real Native Messaging framing with a stand-in Chrome.
 - **Offline checkout test harness** (`test-harness/`) — iterate the
   fill/confirm/submit flow against **saved fixture HTML** in a real browser,
   no live drop required. `node test-harness/test.mjs` (26 assertions) or the

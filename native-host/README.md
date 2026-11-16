@@ -29,10 +29,11 @@ dashboard.
 | `cmd` | Does |
 |-------|------|
 | `ping` | Health check; returns version, platform, detected Chrome + user-data dir. |
-| `listProfiles` | Reads Chrome’s `Local State` and returns profiles + display names. |
+| `listProfiles` | Reads Chrome’s `Local State` and returns profiles + display names. Profile folders that exist on disk but are missing from Chrome’s list (just created, or Chrome closed before saving its list) are included with `unlisted: true`. |
 | `getConfig` | Returns the parsed `~/.snkrs-bot/config.json` (or `null`). |
 | `setConfig` | Writes `~/.snkrs-bot/config.json` (mode `600`). |
 | `launch` | Spawns `chrome --profile-directory=<dir> <url>`. |
+| `createProfile` | Creates a **new** profile named `name`: validates the name, refuses a folder that already exists, seeds the display name, launches it at `url`, and replies `ok` only once Chrome has written the profile to disk (otherwise an error, and nothing is left behind). |
 
 ## Environment overrides
 

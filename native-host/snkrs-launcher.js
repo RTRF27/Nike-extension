@@ -9,6 +9,8 @@
 // can do:
 //
 //   • launch  Chrome at a URL using --profile-directory=<dir>
+//   • createProfile  make a NEW Chrome profile, and confirm Chrome really
+//                    created it before reporting success
 //   • listProfiles  read the installed Chrome profiles + their names
 //   • getConfig / setConfig  read & write ONE shared config file
 //                            (~/.snkrs-bot/config.json) — the "generic
@@ -28,7 +30,7 @@ const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
-const HOST_VERSION = "1.2.0";
+const HOST_VERSION = "1.3.0";
 
 // ── Shared config file ("the generic file") ───────────────────
 const CONFIG_DIR = path.join(os.homedir(), ".snkrs-bot");
@@ -255,21 +257,54 @@ function userDataDir() {
   return path.join(os.homedir(), ".config", "google-chrome");
 }
 
-// Read Chrome's "Local State" to enumerate profiles + their display names.
-function listProfiles() {
-  const localState = path.join(userDataDir(), "Local State");
-  let info = {};
+// Chrome's own registry of profiles: "Local State" → profile.info_cache.
+// Returns null when the file can't be read (Chrome not installed here, or a
+// non-standard user-data dir).
+function readInfoCache() {
   try {
-    const raw = fs.readFileSync(localState, "utf8");
-    info = (JSON.parse(raw).profile || {}).info_cache || {};
+    const raw = fs.readFileSync(path.join(userDataDir(), "Local State"), "utf8");
+    return (JSON.parse(raw).profile || {}).info_cache || {};
   } catch (e) {
-    return []; // can't read — caller will show a manual-entry hint
+    return null;
   }
-  return Object.keys(info).map((dir) => ({
+}
+
+// Folders in the user-data dir that hold a profile (they contain a
+// "Preferences" file) — whether or not Chrome currently lists them.
+const NOT_USER_PROFILES = new Set(["system profile", "guest profile"]);
+function profileDirsOnDisk() {
+  const out = [];
+  try {
+    const root = userDataDir();
+    for (const e of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!e.isDirectory() || NOT_USER_PROFILES.has(e.name.toLowerCase())) continue;
+      if (fs.existsSync(path.join(root, e.name, "Preferences"))) out.push(e.name);
+    }
+  } catch (e) { /* user-data dir unreadable */ }
+  return out;
+}
+
+// Enumerate profiles + their display names.
+//
+// Chrome only flushes "Local State" to disk every several seconds, so a
+// profile that was JUST created — or one whose Chrome was killed before the
+// flush — exists on disk but is missing from info_cache. Those used to be
+// invisible here ("my profile is gone"). We now also scan the folder and
+// report them with unlisted:true; launching one by its directory makes Chrome
+// register it again with its data intact.
+function listProfiles() {
+  const info = readInfoCache() || {};
+  const listed = Object.keys(info).map((dir) => ({
     dir,
     name: info[dir].name || dir,
     active: info[dir].active_time || 0,
   })).sort((a, b) => (b.active || 0) - (a.active || 0));
+  const known = new Set(Object.keys(info).map((d) => d.toLowerCase()));
+  const unlisted = profileDirsOnDisk()
+    .filter((dir) => !known.has(dir.toLowerCase()))
+    .sort()
+    .map((dir) => ({ dir, name: dir, active: 0, unlisted: true }));
+  return listed.concat(unlisted);
 }
 
 // Extension folder is the parent of this native-host directory. We expose it
@@ -307,6 +342,115 @@ function launchProfile(profileDir, urlOrUrls, extensionDir) {
   }
 }
 
+// ── Create a brand-new Chrome profile ─────────────────────────
+// Chrome creates a profile the first time it is started with
+// --profile-directory=<new name>. The old flow just fired that command and
+// reported "created" — with no checks. Three things went wrong in practice:
+//
+//   1. Chrome silently IGNORES a directory name it doesn't accept (path
+//      separators, "..", and on Windows  : * ? " < > |  or a trailing dot).
+//      No window opens, no profile exists — but we said "✓ Created".
+//   2. Chrome names the new profile "Person N" in its own profile menu, not
+//      the name typed in the dashboard, so the profile looked like it vanished.
+//   3. "Profile N" is the folder naming Chrome itself uses for profiles added
+//      from its own menu, and its counter does not know about folders created
+//      here — so the two can end up pointing at the same folder.
+//
+// So: validate the name, refuse anything that already exists, pre-seed the
+// display name, launch, and only report success once Chrome has actually
+// written the profile to disk.
+const WIN_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+
+function validateProfileName(raw) {
+  const name = String(raw == null ? "" : raw).trim();
+  if (!name) return { ok: false, error: "Enter a profile name." };
+  if (name.length > 40) return { ok: false, error: "Profile name is too long (max 40 characters)." };
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _-]*$/.test(name)) {
+    return { ok: false, error: "Use only letters, numbers, spaces, - and _ in the profile name (it becomes a folder name)." };
+  }
+  if (WIN_RESERVED_NAME.test(name)) return { ok: false, error: `"${name}" is a reserved name on Windows — pick another.` };
+  if (/^(default|system profile|guest profile)$/i.test(name) || /^profile \d+$/i.test(name)) {
+    return { ok: false, error: `"${name}" is a folder name Chrome uses for its own profiles — pick another (e.g. "Nike 5").` };
+  }
+  return { ok: true, name };
+}
+
+// Chrome has taken over the folder once it holds anything besides the
+// Preferences file we seeded.
+function chromePopulated(profilePath) {
+  try { return fs.readdirSync(profilePath).some((f) => f !== "Preferences"); } catch (e) { return false; }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function createProfile(rawName, url) {
+  const v = validateProfileName(rawName);
+  if (!v.ok) return v;
+  const dir = v.name;
+
+  if (!findChrome()) return { ok: false, error: "Chrome executable not found. Set SNKRS_CHROME_PATH." };
+  const root = userDataDir();
+  if (!fs.existsSync(path.join(root, "Local State"))) {
+    return { ok: false, error: `Chrome's profile folder was not found at ${root}. Set SNKRS_CHROME_USER_DATA_DIR.` };
+  }
+
+  // Never reuse a name: launching an EXISTING directory would open that
+  // profile, and the new Nike account would be signed into it instead.
+  // Case-insensitive, because Windows and macOS file systems are.
+  const taken = new Set(Object.keys(readInfoCache() || {}).map((d) => d.toLowerCase()));
+  try { for (const f of fs.readdirSync(root)) taken.add(f.toLowerCase()); } catch (e) {}
+  if (taken.has(dir.toLowerCase())) {
+    return { ok: false, exists: true, error: `A Chrome profile folder named "${dir}" already exists — pick another name.` };
+  }
+
+  // Seed the display name so Chrome's profile menu shows the SAME name as the
+  // dashboard instead of "Person N". Chrome reads this on first load.
+  const profilePath = path.join(root, dir);
+  let seeded = false;
+  try {
+    fs.mkdirSync(profilePath);
+    fs.writeFileSync(path.join(profilePath, "Preferences"), JSON.stringify({ profile: { name: dir } }));
+    seeded = true;
+  } catch (e) {
+    if (e && e.code === "EEXIST") {
+      return { ok: false, exists: true, error: `A Chrome profile folder named "${dir}" already exists — pick another name.` };
+    }
+    // Not fatal: Chrome can still create the folder itself (named "Person N").
+  }
+
+  const launched = launchProfile(dir, url);
+  if (!launched.ok) {
+    if (seeded) removeSeed(profilePath);
+    return launched;
+  }
+
+  // Confirm Chrome really created it before we say so.
+  const timeoutMs = parseInt(process.env.SNKRS_CREATE_TIMEOUT_MS, 10) || 15000;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (chromePopulated(profilePath)) {
+      return { ok: true, dir, name: seeded ? dir : "", path: profilePath, verified: true };
+    }
+    await sleep(250);
+  }
+  if (seeded) removeSeed(profilePath);
+  return {
+    ok: false,
+    error: `Chrome did not create "${dir}" (nothing was written to ${profilePath}). No profile was added — try again, or try a different name.`,
+  };
+}
+
+// Undo our own seed, and nothing else: only removes the folder if it still
+// holds just the Preferences file we wrote.
+function removeSeed(profilePath) {
+  try {
+    const files = fs.readdirSync(profilePath);
+    if (files.length > 1 || (files.length === 1 && files[0] !== "Preferences")) return;
+    if (files.length) fs.unlinkSync(path.join(profilePath, "Preferences"));
+    fs.rmdirSync(profilePath);
+  } catch (e) {}
+}
+
 // ── Command dispatch ──────────────────────────────────────────
 function handle(msg) {
   const cmd = msg && msg.cmd;
@@ -335,6 +479,8 @@ function handle(msg) {
       }
     case "launch":
       return launchProfile(msg.profileDir, msg.urls || msg.url, msg.extensionDir);
+    case "createProfile":
+      return createProfile(msg.name, msg.url); // async — resolves once verified
     case "getOrders":
       return { ok: true, orders: readOrders() };
     case "setOrders":
@@ -434,6 +580,9 @@ function sendMessage(obj) {
 }
 
 let buffer = Buffer.alloc(0);
+// Commands run one at a time, in arrival order — some (createProfile) are
+// async, and replies must go back in the order the requests came in.
+let queue = Promise.resolve();
 process.stdin.on("data", (chunk) => {
   buffer = Buffer.concat([buffer, chunk]);
   // Drain as many complete messages as we have.
@@ -442,16 +591,19 @@ process.stdin.on("data", (chunk) => {
     if (buffer.length < 4 + len) break;
     const body = buffer.slice(4, 4 + len);
     buffer = buffer.slice(4 + len);
-    let response;
-    try {
-      response = handle(JSON.parse(body.toString("utf8")));
-    } catch (e) {
-      response = { ok: false, error: "Bad request: " + String(e && e.message || e) };
-    }
-    sendMessage(response);
+    queue = queue.then(async () => {
+      let response;
+      try {
+        response = await handle(JSON.parse(body.toString("utf8")));
+      } catch (e) {
+        response = { ok: false, error: "Bad request: " + String(e && e.message || e) };
+      }
+      sendMessage(response);
+    });
   }
 });
 
-// When Chrome closes the port, stdin ends — exit cleanly.
-process.stdin.on("end", () => process.exit(0));
+// When Chrome closes the port, stdin ends — finish any in-flight command,
+// then exit cleanly.
+process.stdin.on("end", () => queue.finally(() => process.exit(0)));
 process.stdin.on("error", () => process.exit(0));
